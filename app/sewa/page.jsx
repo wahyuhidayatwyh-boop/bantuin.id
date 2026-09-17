@@ -239,7 +239,7 @@ export default function SewaPage() {
             {userCoordinates && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>GPS Nyata Aktif</span>
+                <span>GPS Aktif</span>
               </span>
             )}
           </div>
@@ -318,7 +318,7 @@ export default function SewaPage() {
                 {userCoordinates && (
                   <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#1683FF] animate-ping"></span>
-                    <span>Posisi GPS Nyata Terpantau</span>
+                    <span>Posisi GPS Terpantau</span>
                   </span>
                 )}
                 <span>

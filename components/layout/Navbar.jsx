@@ -99,9 +99,9 @@ export default function Navbar() {
   ];
 
   return (
-    <header className="sticky top-0 z-50 w-full px-3 sm:px-6 lg:px-8 pt-3 pb-2 transition-all">
-      {/* Floating Frosted Glass Canvas */}
-      <div className="max-w-[1360px] mx-auto rounded-full bg-white/75 backdrop-blur-2xl border border-white/90 shadow-[0_12px_32px_rgba(180,205,235,0.35),0_2px_6px_rgba(180,205,235,0.2),inset_0_1px_2px_rgba(255,255,255,1)] px-3.5 sm:px-5 h-14 sm:h-16 flex items-center justify-between gap-3 sm:gap-4">
+    <header className="sticky top-0 z-50 w-full bg-white/85 backdrop-blur-xl border-b border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.03)] transition-all">
+      {/* Full Width Container */}
+      <div className="w-full px-4 sm:px-6 lg:px-8 xl:px-10 h-16 flex items-center justify-between gap-3 sm:gap-4">
         
         {/* Left: Official Logo & Realtime 38-Provinces Location Pill */}
         <div className="flex items-center gap-2.5 sm:gap-4">
@@ -121,7 +121,7 @@ export default function Navbar() {
               type="button"
               onClick={handleDetectGPS}
               disabled={isDetectingGPS || isDetectingLocation}
-              className="flex items-center gap-2 text-xs font-semibold px-4 py-1.5 rounded-full bg-white/85 hover:bg-white text-slate-700 border border-white/90 shadow-[0_2px_8px_rgba(180,205,235,0.25),inset_0_1px_1px_rgba(255,255,255,1)] hover:shadow-md transition active:scale-95 group cursor-pointer"
+              className="flex items-center gap-2 text-xs font-semibold px-4 py-1.5 rounded-full bg-slate-100/80 hover:bg-slate-100 text-slate-700 border border-slate-200/60 shadow-2xs hover:shadow-xs transition active:scale-95 group cursor-pointer"
               title={userRealLocation?.fullAddress || "Klik untuk deteksi & sinkronisasi lokasi GPS perangkat"}
             >
               <Navigation className={`w-3.5 h-3.5 shrink-0 transition-transform ${
@@ -135,10 +135,7 @@ export default function Navbar() {
                 {isDetectingGPS || isDetectingLocation ? "Mendeteksi GPS..." : currentLocation}
               </span>
               {userCoordinates ? (
-                <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 font-extrabold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200/80 shrink-0">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span>GPS Nyata</span>
-                </span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" title="GPS Aktif" />
               ) : (
                 <span className="inline-flex items-center gap-1 text-[10px] text-[#1683FF] font-bold bg-blue-50 hover:bg-blue-100 px-2.5 py-0.5 rounded-full border border-blue-200/70 shrink-0">
                   <Compass className={`w-3 h-3 ${isDetectingGPS || isDetectingLocation ? "animate-spin" : ""}`} />
@@ -152,7 +149,7 @@ export default function Navbar() {
               type="button"
               onClick={() => setIsGpsModalOpen(true)}
               title="Atur izin lokasi atau pilih wilayah simulasi"
-              className="p-2 rounded-full text-slate-400 hover:text-[#1683FF] hover:bg-white/80 transition cursor-pointer"
+              className="p-2 rounded-full text-slate-400 hover:text-[#1683FF] hover:bg-slate-100 transition cursor-pointer"
             >
               <MapPin className="w-3.5 h-3.5" />
             </button>
@@ -160,7 +157,7 @@ export default function Navbar() {
         </div>
 
         {/* Center: Clean Dedicated Nav Links (Bantuan · Sewa · Jasa) */}
-        <nav className="hidden md:flex items-center gap-1 bg-slate-100/50 backdrop-blur-md p-1 rounded-full border border-white/60">
+        <nav className="hidden md:flex items-center gap-1 bg-slate-100/80 backdrop-blur-md p-1 rounded-full border border-slate-200/60">
           {navLinks.map((link) => {
             const isActive = pathname === link.href || (link.href === "/bantuan" && pathname.startsWith("/bantuan"));
             return (
@@ -336,7 +333,7 @@ export default function Navbar() {
           {/* Mobile Menu Toggle */}
           <button
             onClick={() => setIsMobileOpen(!isMobileOpen)}
-            className="md:hidden p-2 text-slate-700 hover:bg-white/80 rounded-full transition"
+            className="md:hidden p-2 text-slate-700 hover:bg-slate-100 rounded-full transition"
           >
             {isMobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
@@ -346,8 +343,8 @@ export default function Navbar() {
 
       {/* Mobile Glass Dropdown Menu */}
       {isMobileOpen && (
-        <div className="md:hidden mt-2 max-w-[1360px] mx-auto bg-white/90 backdrop-blur-2xl border border-white/90 rounded-3xl p-4 shadow-xl space-y-1.5 animate-in fade-in duration-200">
-          <div className="pb-2.5 mb-2 border-b border-slate-100 flex items-center justify-between text-xs px-2">
+        <div className="md:hidden w-full bg-white/95 backdrop-blur-2xl border-b border-slate-200/80 px-4 sm:px-6 py-4 shadow-xl space-y-2 animate-in fade-in duration-200">
+          <div className="pb-2.5 mb-2 border-b border-slate-100 flex items-center justify-between text-xs px-1">
             <div className="flex items-center gap-2 min-w-0">
               <Navigation className={`w-3.5 h-3.5 shrink-0 ${userCoordinates ? "text-emerald-600 fill-emerald-100" : "text-[#1683FF]"}`} />
               <span className="font-bold text-slate-900 truncate max-w-[200px]">
@@ -355,10 +352,7 @@ export default function Navbar() {
               </span>
             </div>
             {userCoordinates ? (
-              <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 font-extrabold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>GPS Nyata</span>
-              </span>
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" title="GPS Aktif" />
             ) : (
               <button
                 type="button"

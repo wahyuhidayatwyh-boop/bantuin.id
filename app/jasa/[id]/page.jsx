@@ -170,7 +170,7 @@ export default function JasaDetailPage() {
                       <span>Jarak: {distanceInfo.text} dari posisi GPS Anda</span>
                       {distanceInfo?.isRealtime && (
                         <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200">
-                          GPS Nyata
+                          GPS Aktif
                         </span>
                       )}
                     </div>

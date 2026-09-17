@@ -37,7 +37,7 @@ export default function LocationPermissionModal({
                 Izin Akses Lokasi Terblokir
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Panduan mengaktifkan izin GPS nyata di peramban Anda
+                Panduan mengaktifkan izin GPS di peramban Anda
               </p>
             </div>
           </div>
