@@ -8,7 +8,6 @@ import SewaSection from "@/components/landing/SewaSection";
 import JasaSection from "@/components/landing/JasaSection";
 import HelperSection from "@/components/landing/HelperSection";
 import MitraSection from "@/components/landing/MitraSection";
-import ProcessTimeline from "@/components/landing/ProcessTimeline";
 import CtaBanner from "@/components/landing/CtaBanner";
 
 export default function HomePage() {
@@ -39,9 +38,6 @@ export default function HomePage() {
 
         {/* 8. Mitra Terpercaya */}
         <MitraSection />
-
-        {/* 8. Sesimpel itu. (Cara Kerja) */}
-        <ProcessTimeline />
 
         {/* 9. CTA Banner Penutup */}
         <CtaBanner />

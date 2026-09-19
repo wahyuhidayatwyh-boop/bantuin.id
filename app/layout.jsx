@@ -24,9 +24,9 @@ export const viewport = {
 };
 
 export const metadata = {
-  title: "Bantuin — Platform Bantuan, Jasa, & Sewa Komunitas Kampus",
-  description: "Temukan orang, jasa, dan barang yang kamu butuhkan di sekitarmu. Platform hyper-local aman dengan escrow Xendit dan safe meet-up Bantuin Point.",
-  keywords: ["bantuin", "errand kampus", "sewa kamera", "jasa mahasiswa", "print tugas", "escrow xendit", "universitas indonesia"],
+  title: "Bantuin — Platform Jasa, Bantuan, & Sewa Komunitas Terpercaya",
+  description: "Temukan penyedia jasa, bantuan harian, dan sewa barang terpercaya di sekitarmu. Sistem pembayaran aman bergaransi escrow dan verifikasi identitas resmi.",
+  keywords: ["bantuin", "marketplace jasa", "bantuan harian", "sewa barang", "rental kamera", "escrow indonesia", "freelancer"],
   authors: [{ name: "Bantuin Team" }],
 };
 

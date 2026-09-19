@@ -38,7 +38,14 @@ import {
 } from "lucide-react";
 
 export default function ProfilePage() {
-  const { currentUser, walletBalance, withdrawals, withdrawFunds, topUpFunds } = useApp();
+  const { 
+    currentUser, 
+    mitraAvailableBalance, 
+    mitraPendingBalance, 
+    withdrawals, 
+    withdrawFunds, 
+    customerDeposits 
+  } = useApp();
   const [activeTab, setActiveTab] = useState("profile"); // profile, wallet, kyc, service_settings, bank, security
   const [isSaved, setIsSaved] = useState(false);
   
@@ -50,15 +57,6 @@ export default function ProfilePage() {
     accountNumber: "8820192841",
     accountHolder: currentUser?.fullName || "Sarah Kusuma",
   });
-
-  // Top Up Modal State
-  const [isTopUpModalOpen, setIsTopUpModalOpen] = useState(false);
-  const [topUpForm, setTopUpForm] = useState({
-    amount: "50000",
-    paymentMethod: "qris",
-  });
-  const [isProcessingTopUp, setIsProcessingTopUp] = useState(false);
-  const [isTopUpSuccess, setIsTopUpSuccess] = useState(false);
 
   // Profile Form State
   const [profileData, setProfileData] = useState({
@@ -188,18 +186,47 @@ export default function ProfilePage() {
           </div>
         </div>
 
+        {/* Mobile Horizontal Scrollable Tabs (< lg) */}
+        <div className="lg:hidden flex items-center gap-1.5 pb-2 mb-4 overflow-x-auto no-scrollbar">
+          {[
+            { id: "profile", label: "Profil & Kontak", icon: User },
+            { id: "wallet", label: "Dompet & Payout", icon: CreditCard },
+            { id: "kyc", label: "Verifikasi KYC", icon: ShieldCheck },
+            { id: "service_settings", label: "Pengaturan Jasa", icon: Briefcase },
+            { id: "bank", label: "Rekening Bank", icon: Building2 },
+            { id: "security", label: "Keamanan", icon: Lock },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold shrink-0 transition cursor-pointer ${
+                  isActive
+                    ? "bg-[#1683FF] text-white shadow-xs"
+                    : "bg-white text-slate-600 border border-slate-200"
+                }`}
+              >
+                <Icon className={`w-3.5 h-3.5 ${isActive ? "text-white" : "text-slate-500"}`} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
         {/* Unified Profile & Portal Jasa Settings Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           
-          {/* Left Sidebar Menu */}
-          <div className="bg-white border border-slate-200/90 rounded-2xl p-3 shadow-2xs space-y-1 self-start">
+          {/* Left Sidebar Menu (Desktop Only) */}
+          <div className="hidden lg:block bg-white border border-slate-200/90 rounded-2xl p-3 shadow-2xs space-y-1 self-start">
             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 py-2">
               Pengaturan Akun & Jasa
             </div>
 
             <button
               onClick={() => setActiveTab("profile")}
-              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition text-left ${
+              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition text-left cursor-pointer ${
                 activeTab === "profile"
                   ? "bg-[#1683FF] text-white shadow-2xs"
                   : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
@@ -211,7 +238,7 @@ export default function ProfilePage() {
 
             <button
               onClick={() => setActiveTab("wallet")}
-              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition text-left ${
+              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition text-left cursor-pointer ${
                 activeTab === "wallet"
                   ? "bg-[#1683FF] text-white shadow-2xs"
                   : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
@@ -223,7 +250,7 @@ export default function ProfilePage() {
 
             <button
               onClick={() => setActiveTab("kyc")}
-              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition text-left ${
+              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition text-left cursor-pointer ${
                 activeTab === "kyc"
                   ? "bg-[#1683FF] text-white shadow-2xs"
                   : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
@@ -235,7 +262,7 @@ export default function ProfilePage() {
 
             <button
               onClick={() => setActiveTab("service_settings")}
-              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition text-left ${
+              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition text-left cursor-pointer ${
                 activeTab === "service_settings"
                   ? "bg-indigo-600 text-white shadow-2xs"
                   : "text-indigo-800 bg-indigo-50/70 hover:bg-indigo-100 font-bold"
@@ -247,19 +274,19 @@ export default function ProfilePage() {
 
             <button
               onClick={() => setActiveTab("bank")}
-              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition text-left ${
+              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition text-left cursor-pointer ${
                 activeTab === "bank"
                   ? "bg-[#1683FF] text-white shadow-2xs"
                   : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
               }`}
             >
-              <CreditCard className="w-4 h-4" />
+              <Building2 className="w-4 h-4" />
               <span>Rekening Bank & E-Wallet</span>
             </button>
 
             <button
               onClick={() => setActiveTab("security")}
-              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition text-left ${
+              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition text-left cursor-pointer ${
                 activeTab === "security"
                   ? "bg-[#1683FF] text-white shadow-2xs"
                   : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
@@ -281,7 +308,7 @@ export default function ProfilePage() {
           </div>
 
           {/* Right Content Area */}
-          <div className="lg:col-span-3 bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-2xs">
+          <div className="lg:col-span-3 bg-white border border-slate-200/90 rounded-3xl p-5 sm:p-8 shadow-2xs">
             
             {/* TAB 1: PROFIL & BIODATA */}
             {activeTab === "profile" && (
@@ -362,86 +389,192 @@ export default function ProfilePage() {
               </form>
             )}
 
-            {/* TAB: DOMPET & SALDO (SINKRON DENGAN SISTEM ESCROW & JASA) */}
+            {/* TAB: HAK PEMBAYARAN & DEPOSIT SEWA (NON E-MONEY) */}
             {activeTab === "wallet" && (
               <div className="space-y-6 animate-in fade-in duration-150">
                 <div className="border-b border-slate-100 pb-3">
-                  <h3 className="text-base font-black text-slate-900">Dompet & Pencairan Saldo</h3>
-                  <p className="text-xs text-slate-500">Hasil pendapatan dari membantu tugas dan pesanan jasa freelancer Anda</p>
+                  <h3 className="text-base font-black text-slate-900">Hak Pembayaran & Deposit Sewa</h3>
+                  <p className="text-xs text-slate-500">Pencatatan hak pembayaran atas tugas/layanan dan pelacakan deposit pengaman sewa</p>
                 </div>
 
-                {/* Wallet Balance Card */}
-                <div className="bg-gradient-to-br from-[#102A43] to-[#0B1E32] text-white rounded-2xl p-6 shadow-md relative overflow-hidden">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                {/* 1. KARTU FINANSIAL MITRA / PENYEDIA */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Saldo Dapat Dicairkan */}
+                  <div className="bg-gradient-to-br from-[#102A43] to-[#0B1E32] text-white rounded-2xl p-5 shadow-md flex flex-col justify-between">
                     <div>
-                      <span className="text-xs font-bold text-blue-300 uppercase tracking-wider block mb-1">
-                        Saldo Dompet Tersedia
-                      </span>
-                      <div className="text-3xl sm:text-4xl font-black tracking-tight text-white mb-1">
-                        {formatIDR(walletBalance)}
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[11px] font-bold text-blue-300 uppercase tracking-wider">
+                          Saldo Dapat Dicairkan
+                        </span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                          Status: AVAILABLE
+                        </span>
                       </div>
-                      <div className="flex items-center gap-1.5 text-xs text-emerald-400">
-                        <ShieldCheck className="w-4 h-4" />
-                        <span>Aman di Rekening Escrow Xendit & Siap Ditarik 24 Jam</span>
+                      <div className="text-2xl sm:text-3xl font-black tracking-tight text-white mb-1">
+                        {formatIDR(mitraAvailableBalance)}
                       </div>
+                      <p className="text-[11px] text-slate-300">
+                        Hak bersih dari tugas/layanan yang telah dikonfirmasi selesai oleh customer.
+                      </p>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
-                      <button
-                        onClick={() => {
-                          setIsTopUpModalOpen(true);
-                          setIsProcessingTopUp(false);
-                          setIsTopUpSuccess(false);
-                        }}
-                        className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-xs shadow-md transition flex items-center justify-center gap-1.5 active:scale-95"
-                      >
-                        <Plus className="w-4 h-4 stroke-[3]" />
-                        <span>Isi Saldo (Top Up)</span>
-                      </button>
-
+                    <div className="pt-4 mt-2 border-t border-white/10 flex items-center justify-between">
+                      <span className="text-[11px] text-emerald-400 font-medium">
+                        ✓ Fee transfer ditanggung platform
+                      </span>
                       <button
                         onClick={() => setIsWithdrawModalOpen(true)}
-                        className="px-5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-white font-bold text-xs shadow-sm transition flex items-center justify-center gap-1.5 active:scale-95"
+                        className="px-4 py-2 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs shadow-xs transition active:scale-95 flex items-center gap-1.5"
                       >
                         <ArrowUpRight className="w-4 h-4" />
-                        <span>Tarik Saldo</span>
+                        <span>Tarik Dana</span>
                       </button>
+                    </div>
+                  </div>
+
+                  {/* Dana Sedang Diproses / Tertahan */}
+                  <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-2xs flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                          Dana Sedang Diproses / Tertahan
+                        </span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200">
+                          Status: PENDING
+                        </span>
+                      </div>
+                      <div className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 mb-1">
+                        {formatIDR(mitraPendingBalance)}
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        Dana dari customer yang masih dalam proses pengerjaan atau masa sewa aktif. Otomatis beralih ke <strong>AVAILABLE</strong> setelah selesai.
+                      </p>
+                    </div>
+
+                    <div className="pt-4 mt-2 border-t border-slate-100 text-[11px] text-slate-400">
+                      🔒 Terkunci aman hingga verifikasi serah terima selesai
                     </div>
                   </div>
                 </div>
 
-                {/* Withdrawals History */}
-                <div>
+                {/* Banner Informasi Non E-Money */}
+                <div className="p-4 rounded-2xl bg-blue-50/70 border border-blue-200/80 flex items-start gap-3">
+                  <ShieldCheck className="w-5 h-5 text-[#1683FF] shrink-0 mt-0.5" />
+                  <div className="text-xs text-blue-950 space-y-0.5">
+                    <p className="font-bold">Ketentuan Hak Pembayaran & Penarikan:</p>
+                    <p className="text-[11px] text-blue-800 leading-relaxed">
+                      Saldo di dashboard ini adalah buku catatan hak pembayaran (ledger entitlement), bukan saldo uang elektronik (e-money). Biaya transfer bank admin sebesar Rp2.500 ditanggung penuh oleh platform Bantuin.id, sehingga Anda menerima nominal penarikan 100% utuh tanpa potongan.
+                    </p>
+                  </div>
+                </div>
+
+                {/* 2. DAFTAR DEPOSIT SEWA BARANG CUSTOMER (TITIPAN JAMINAN 0% KOMISI) */}
+                <div className="pt-2">
                   <div className="flex items-center justify-between mb-3">
-                    <h4 className="font-bold text-sm text-slate-900">Riwayat Penarikan Dana</h4>
-                    <span className="text-xs text-slate-400">Otomatis via Xendit API</span>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-900">Deposit Jaminan Sewa Barang (Customer)</h4>
+                      <p className="text-[11px] text-slate-500">Dana pengaman sewa (0% komisi) yang dikembalikan ke rekening bank Anda setelah alat selesai diperiksa</p>
+                    </div>
+                    <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
+                      {customerDeposits.length} Data
+                    </span>
                   </div>
 
-                  <div className="border border-slate-100 rounded-2xl divide-y divide-slate-100">
-                    {withdrawals.map((wd) => (
-                      <div key={wd.id} className="p-3.5 flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold text-xs shrink-0">
-                            <Check className="w-3.5 h-3.5" />
-                          </div>
-                          <div>
-                            <div className="text-xs font-bold text-slate-900">
-                              Transfer ke {wd.bankName} ({wd.accountNumber})
-                            </div>
-                            <div className="text-[10px] text-slate-400">
-                              {formatDateIndo(wd.createdAt)} · Ref: {wd.xenditDisbursementId}
-                            </div>
-                          </div>
-                        </div>
+                  <div className="space-y-3">
+                    {customerDeposits.map((dep) => {
+                      const isRefunded = dep.status === "REFUNDED";
+                      const isPendingRefund = dep.status === "REFUND_PENDING";
+                      const isWaitingReturn = dep.status === "WAITING_RETURN";
+                      const isDispute = dep.status === "DISPUTE";
 
-                        <div className="text-right">
-                          <div className="text-xs font-black text-slate-900">-{formatIDR(wd.amount)}</div>
-                          <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
-                            Berhasil Cair
-                          </span>
+                      return (
+                        <div key={dep.id} className="p-4 rounded-2xl border border-slate-200/80 bg-white shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-black text-slate-900">{dep.rentalTitle}</span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                isRefunded
+                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                  : isPendingRefund
+                                  ? "bg-amber-50 text-amber-800 border border-amber-200"
+                                  : isDispute
+                                  ? "bg-rose-50 text-rose-700 border border-rose-200"
+                                  : "bg-blue-50 text-[#1683FF] border border-blue-200"
+                              }`}>
+                                {isRefunded && "✓ Deposit Telah Dikembalikan"}
+                                {isPendingRefund && "⏳ Menunggu Transfer Manual Admin"}
+                                {isWaitingReturn && "📦 Masa Sewa Berjalan"}
+                                {isDispute && "⚠️ Ada Klaim Kerusakan"}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-500">
+                              Rekening Tujuan: {dep.customerBank} ({dep.customerAccountNumber}) an {dep.customerAccountHolder}
+                            </div>
+                            {dep.deductionAmount > 0 && (
+                              <div className="text-[11px] text-rose-600 font-medium">
+                                Potongan ganti rugi: -{formatIDR(dep.deductionAmount)} ({dep.deductionReason})
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <div className="text-xs text-slate-400">Nominal Deposit:</div>
+                            <div className="text-base font-black text-slate-900">{formatIDR(dep.depositAmount)}</div>
+                            {isRefunded && (
+                              <div className="text-[10px] text-emerald-600 font-bold mt-0.5">
+                                Dana Cair: {formatIDR(dep.refundAmount)}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 3. RIWAYAT PENARIKAN DANA MITRA */}
+                <div className="pt-2">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-bold text-sm text-slate-900">Riwayat Penarikan Dana Mitra</h4>
+                    <span className="text-xs text-slate-400">Diproses transfer manual oleh admin</span>
+                  </div>
+
+                  <div className="border border-slate-100 rounded-2xl divide-y divide-slate-100 bg-white">
+                    {withdrawals.map((wd) => {
+                      const isSuccess = wd.status === "SUCCESS";
+                      const isPending = wd.status === "PENDING";
+
+                      return (
+                        <div key={wd.id} className="p-3.5 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
+                              isSuccess ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"
+                            }`}>
+                              {isSuccess ? <Check className="w-3.5 h-3.5" /> : <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                            </div>
+                            <div>
+                              <div className="text-xs font-bold text-slate-900">
+                                Transfer ke {wd.bankName} ({wd.accountNumber})
+                              </div>
+                              <div className="text-[10px] text-slate-400">
+                                {formatDateIndo(wd.requestedAt)} · Atas Nama: {wd.accountHolder}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="text-right">
+                            <div className="text-xs font-black text-slate-900">-{formatIDR(wd.amount)}</div>
+                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                              isSuccess
+                                ? "bg-emerald-50 text-emerald-700"
+                                : "bg-amber-50 text-amber-700"
+                            }`}>
+                              {isSuccess ? "Berhasil Ditransfer" : "Menunggu Transfer Admin"}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -668,8 +801,8 @@ export default function ProfilePage() {
 
       {/* MODAL: TARIK SALDO DARI PROFIL */}
       {isWithdrawModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-5 sm:p-6 max-w-md w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
               <div>
                 <h3 className="text-sm font-extrabold text-slate-900">Tarik Saldo ke Rekening / E-Wallet</h3>
@@ -765,15 +898,15 @@ export default function ProfilePage() {
                 />
               </div>
 
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 text-[11px] text-slate-600 space-y-1">
+              <div className="p-3 rounded-xl bg-emerald-50/70 border border-emerald-200/80 text-[11px] text-slate-600 space-y-1">
                 <div className="flex justify-between">
-                  <span>Biaya Admin Transfer:</span>
-                  <span className="font-semibold text-slate-900">Rp2.500</span>
+                  <span>Biaya Transfer Admin (Rp2.500):</span>
+                  <span className="font-bold text-emerald-700">GRATIS (Ditanggung Bantuin.id)</span>
                 </div>
-                <div className="flex justify-between font-bold text-slate-900 pt-1 border-t border-slate-200">
-                  <span>Total yang Diterima:</span>
-                  <span className="text-emerald-600">
-                    {formatIDR(Math.max(0, (Number(withdrawForm.amount) || 0) - 2500))}
+                <div className="flex justify-between font-bold text-slate-900 pt-1 border-t border-emerald-200">
+                  <span>Total Ditransfer ke Rekening Anda:</span>
+                  <span className="text-emerald-700 font-black text-sm">
+                    {formatIDR(Number(withdrawForm.amount) || 0)}
                   </span>
                 </div>
               </div>
@@ -790,160 +923,10 @@ export default function ProfilePage() {
                   type="submit"
                   className="px-5 py-2 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold shadow-2xs transition"
                 >
-                  Konfirmasi & Tarik Sekarang
+                  Konfirmasi Pengajuan Penarikan
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 2: ISI ULANG SALDO (TOP UP) DARI PROFIL */}
-      {isTopUpModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-3.5 border-b border-slate-100 mb-4">
-              <div>
-                <h3 className="text-sm font-black text-slate-900">Isi Ulang Saldo Dompet Bantuin</h3>
-                <p className="text-[11px] text-slate-500">Top-up saldo untuk bayar bantuan & order jasa lebih cepat 1-klik</p>
-              </div>
-              {!isProcessingTopUp && (
-                <button onClick={() => setIsTopUpModalOpen(false)} className="text-slate-400 hover:text-slate-700">
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-
-            {isProcessingTopUp ? (
-              <div className="py-10 text-center space-y-3">
-                <Loader2 className="w-10 h-10 text-[#1683FF] animate-spin mx-auto" />
-                <h4 className="font-bold text-sm text-slate-900">Memproses Top Up Saldo...</h4>
-                <p className="text-xs text-slate-500">Menghubungkan ke gateway pembayaran Xendit...</p>
-              </div>
-            ) : isTopUpSuccess ? (
-              <div className="py-8 text-center space-y-3">
-                <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-inner">
-                  <Check className="w-7 h-7 stroke-[3]" />
-                </div>
-                <h4 className="font-black text-base text-slate-900">Top Up Saldo Berhasil!</h4>
-                <p className="text-xs text-slate-600">
-                  Saldo Anda bertambah sebesar <strong>{formatIDR(Number(topUpForm.amount))}</strong>.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setIsTopUpModalOpen(false)}
-                  className="mt-3 px-6 py-2 rounded-xl bg-[#1683FF] text-white text-xs font-bold shadow-xs"
-                >
-                  Selesai
-                </button>
-              </div>
-            ) : (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  setIsProcessingTopUp(true);
-                  setTimeout(() => {
-                    topUpFunds({
-                      amount: topUpForm.amount,
-                      paymentMethod: topUpForm.paymentMethod,
-                    });
-                    setIsProcessingTopUp(false);
-                    setIsTopUpSuccess(true);
-                  }, 1200);
-                }}
-                className="space-y-4"
-              >
-                {/* Nominal Selection Presets */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-2">Pilih Nominal Isi Ulang:</label>
-                  <div className="grid grid-cols-3 gap-2 text-xs">
-                    {["25000", "50000", "100000", "200000", "500000", "1000000"].map((preset) => (
-                      <button
-                        key={preset}
-                        type="button"
-                        onClick={() => setTopUpForm({ ...topUpForm, amount: preset })}
-                        className={`p-2 rounded-xl border text-center font-bold transition ${
-                          topUpForm.amount === preset
-                            ? "bg-blue-50 border-[#1683FF] text-[#1683FF] shadow-2xs"
-                            : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
-                        }`}
-                      >
-                        {formatIDR(Number(preset))}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Atau Masukkan Nominal Lain (Rp):</label>
-                  <input
-                    type="number"
-                    required
-                    min={10000}
-                    value={topUpForm.amount}
-                    onChange={(e) => setTopUpForm({ ...topUpForm, amount: e.target.value })}
-                    className="w-full p-2.5 rounded-xl border border-slate-200 text-xs font-bold focus:outline-none focus:border-[#1683FF]"
-                  />
-                  <span className="text-[10px] text-slate-400 mt-1 block">Minimal top up Rp10.000 (Bebas biaya admin)</span>
-                </div>
-
-                {/* Payment Method Selector */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-2">Metode Pembayaran:</label>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setTopUpForm({ ...topUpForm, paymentMethod: "qris" })}
-                      className={`p-2.5 rounded-xl border text-left font-semibold transition flex items-center gap-2 ${
-                        topUpForm.paymentMethod === "qris"
-                          ? "bg-blue-50 border-[#1683FF] text-[#1683FF]"
-                          : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
-                      }`}
-                    >
-                      <QrCode className="w-4 h-4 text-[#1683FF]" />
-                      <span>QRIS (Semua E-Wallet)</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setTopUpForm({ ...topUpForm, paymentMethod: "bca_va" })}
-                      className={`p-2.5 rounded-xl border text-left font-semibold transition flex items-center gap-2 ${
-                        topUpForm.paymentMethod === "bca_va"
-                          ? "bg-blue-50 border-[#1683FF] text-[#1683FF]"
-                          : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
-                      }`}
-                    >
-                      <Building2 className="w-4 h-4 text-indigo-600" />
-                      <span>BCA VA</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Total Summary */}
-                <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between text-xs">
-                  <span className="text-emerald-900 font-medium">Total Pembayaran:</span>
-                  <span className="text-sm font-black text-emerald-800">{formatIDR(Number(topUpForm.amount) || 0)}</span>
-                </div>
-
-                {/* Action Buttons */}
-                <div className="pt-2 flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsTopUpModalOpen(false)}
-                    className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"
-                  >
-                    Batal
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-black text-xs shadow-sm transition active:scale-95 flex items-center gap-1.5"
-                  >
-                    <Plus className="w-4 h-4 stroke-[3]" />
-                    <span>Bayar & Tambah Saldo</span>
-                  </button>
-                </div>
-              </form>
-            )}
           </div>
         </div>
       )}

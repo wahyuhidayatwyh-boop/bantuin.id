@@ -21,6 +21,7 @@ import {
   isItemInKabupaten,
   GPS_FALLBACK_PRESETS
 } from "@/lib/services/gpsService";
+import { formatIDR } from "@/lib/utils";
 import LocationPermissionModal from "@/components/modals/LocationPermissionModal";
 import { X } from "lucide-react";
 
@@ -113,7 +114,72 @@ export function AppProvider({ children }) {
   
   // Datasets
   const [requests, setRequests] = useState(INITIAL_REQUESTS);
-  const [rentals, setRentals] = useState(INITIAL_RENTALS);
+
+  // Helper to initialize initial rental reviews and stats
+  const getInitialRentals = () => {
+    return INITIAL_RENTALS.map((r) => ({
+      ...r,
+      totalRentedCount: r.totalRentedCount ?? r.owner?.completedOrders ?? 86,
+      ratingAvg: r.ratingAvg ?? 4.95,
+      ratingCount: r.ratingCount ?? 38,
+      stock: typeof r.stock === "number" ? r.stock : 3,
+      reviews: r.reviews && r.reviews.length > 0 ? r.reviews : [
+        {
+          id: `rev-init-${r.id}-1`,
+          userName: "Dimas Anggoro",
+          avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80",
+          rating: 5,
+          date: "2 hari yang lalu",
+          item: r.title,
+          comment: "Unit bersih banget, sensor kinclong no debu. Baterai dikasih 2 buah awet seharian buat hunting wisuda. Pelayanan ramah dan tempatnya gampang dicari!",
+        },
+        {
+          id: `rev-init-${r.id}-2`,
+          userName: "Natasha Caroline",
+          avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=120&q=80",
+          rating: 5,
+          date: "1 minggu yang lalu",
+          item: r.title,
+          comment: "Sangat terbantu buat sewa perlengkapan tugas dan wisuda kampus. Rekber Bantuin bikin tenang gak takut uang hilang. Tokonya amanah dan tepat waktu!",
+        },
+        {
+          id: `rev-init-${r.id}-3`,
+          userName: "Rifky Fauzi",
+          avatar: "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=120&q=80",
+          rating: 5,
+          date: "2 minggu yang lalu",
+          item: r.title,
+          comment: "Unit dalam kondisi sangat prima. Dipandu cara penggunaan dan pengecekan fisik bersama mas-mas tokonya. Top rekomen buat vendor sewa di sini.",
+        }
+      ]
+    }));
+  };
+
+  const [rentals, setRentals] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("bantuin_rentals_state");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch (e) {}
+    }
+    return getInitialRentals();
+  });
+
+  // Sync rentals to localStorage whenever changed
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (rentals && rentals.length > 0) {
+        localStorage.setItem("bantuin_rentals_state", JSON.stringify(rentals));
+      }
+    } catch (e) {
+      console.warn("Could not sync rentals state:", e);
+    }
+  }, [rentals]);
+
   const [services, setServices] = useState(INITIAL_SERVICES);
   const [helpers, setHelpers] = useState(INITIAL_HELPERS);
   const [partners] = useState(INITIAL_PARTNERS);
@@ -121,35 +187,156 @@ export function AppProvider({ children }) {
   const [activeOrderRoomId, setActiveOrderRoomId] = useState("order-room-dedi");
   const [bantuinPoints] = useState(BANTUIN_POINTS);
 
-  // Wallet, Escrow & Withdrawals
-  const [walletBalance, setWalletBalance] = useState(3850000);
-  const [pendingEscrowBalance, setPendingEscrowBalance] = useState(285000);
+  // -------------------------------------------------------------
+  // LEDGER & HAK PEMBAYARAN MITRA (NON E-MONEY)
+  // -------------------------------------------------------------
+  const [mitraAvailableBalance, setMitraAvailableBalance] = useState(3850000); // Saldo dapat dicairkan (Hak status AVAILABLE)
+  const [mitraPendingBalance, setMitraPendingBalance] = useState(285000);     // Dana tertahan (Hak status PENDING)
+  const [mitraTotalEarned, setMitraTotalEarned] = useState(6450000);        // Total akumulasi pendapatan bersih
+
+  // Backward compatibility alias
+  const walletBalance = mitraAvailableBalance;
+  const pendingEscrowBalance = mitraPendingBalance;
+  const setWalletBalance = setMitraAvailableBalance;
+
+  // Tracking Deposit Jaminan Sewa Customer (Terpisah mutlak dari pendapatan platform, 0% komisi)
+  const [customerDeposits, setCustomerDeposits] = useState([
+    {
+      id: "DEP-2026-101",
+      rentalOrderId: "order-room-rental-kamera",
+      rentalTitle: "Sony Alpha A7 III + Lensa 24-70mm GM",
+      depositAmount: 500000,
+      refundAmount: 500000,
+      deductionAmount: 0,
+      deductionReason: "",
+      status: "WAITING_RETURN", // 'WAITING_RETURN' | 'INSPECTION' | 'READY_FOR_REFUND' | 'REFUND_PENDING' | 'REFUNDED' | 'DISPUTE'
+      paymentMethod: "QRIS",
+      customerBank: "BCA",
+      customerAccountNumber: "8820192841",
+      customerAccountHolder: "Rian Prasetya",
+      createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      refundedAt: null,
+    },
+    {
+      id: "DEP-2026-098",
+      rentalOrderId: "order-room-098",
+      rentalTitle: "DJI Ronin SC Gimbal Stabilizer",
+      depositAmount: 200000,
+      refundAmount: 200000,
+      deductionAmount: 0,
+      deductionReason: "",
+      status: "REFUNDED",
+      paymentMethod: "BCA Virtual Account",
+      customerBank: "BCA",
+      customerAccountNumber: "8820192841",
+      customerAccountHolder: "Rian Prasetya",
+      createdAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
+      refundedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
+    }
+  ]);
+
+  // Riwayat Pengajuan Penarikan Dana (Withdrawal) Mitra - Transfer Manual Admin (MVP)
   const [withdrawals, setWithdrawals] = useState([
     {
+      id: "WD-2026-902",
+      mitraId: "mitra-bayu",
+      mitraName: "Bayu Pratama",
+      amount: 92000,
+      adminFee: 2500,
+      feePaidBy: "BANTUIN_OPERATIONAL", // Ditanggung platform Bantuin.id!
+      netAmount: 92000, // Mitra terima 100% penuh tanpa potongan
+      bankName: "Mandiri",
+      accountNumber: "157000982312",
+      accountHolder: "Bayu Pratama",
+      status: "PENDING", // PENDING -> SUCCESS (setelah admin transfer manual)
+      requestedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+      processedAt: null,
+      notes: "Menunggu transfer manual oleh admin via m-Banking",
+    },
+    {
       id: "WD-2026-901",
+      mitraId: "user-current-01",
+      mitraName: "Rian Prasetya",
       amount: 500000,
       adminFee: 2500,
-      netAmount: 497500,
+      feePaidBy: "BANTUIN_OPERATIONAL",
+      netAmount: 500000,
       bankName: "BCA",
       accountNumber: "8820192841",
       accountHolder: "Rian Prasetya",
-      status: "completed", // 'processing', 'completed', 'failed'
-      xenditDisbursementId: "DISB-XND-883192",
-      createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-      completedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000 + 45000).toISOString(),
+      status: "SUCCESS",
+      requestedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
+      processedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000 + 45000).toISOString(),
+      notes: "Transfer manual admin berhasil via BCA",
+    }
+  ]);
+
+  // General Ledger Entitlement & Financial Entries
+  const [ledgerEntries, setLedgerEntries] = useState([
+    {
+      id: "LEDGER-001",
+      orderId: "order-room-101",
+      type: "CUSTOMER_RENTAL_PAYMENT",
+      grossAmount: 352000,
+      gatewayFee: 2000,
+      rentalFee: 150000,
+      depositAmount: 200000,
+      platformFee: 12000,
+      mitraEntitlement: 138000,
+      description: "Pembayaran customer via QRIS untuk Rental Sony Alpha A7 III + Deposit",
+      timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
     },
     {
-      id: "WD-2026-842",
-      amount: 250000,
-      adminFee: 2500,
-      netAmount: 247500,
-      bankName: "DANA",
-      accountNumber: "081298765432",
-      accountHolder: "Rian Prasetya",
-      status: "completed",
-      xenditDisbursementId: "DISB-XND-772184",
-      createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-      completedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000 + 30000).toISOString(),
+      id: "LEDGER-002",
+      orderId: "order-room-101",
+      type: "CUSTOMER_DEPOSIT",
+      grossAmount: 200000,
+      gatewayFee: 0,
+      rentalFee: 0,
+      depositAmount: 200000,
+      platformFee: 0,
+      mitraEntitlement: 0,
+      description: "Deposit jaminan perlindungan kamera (titipan refundable 0% komisi)",
+      timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+    {
+      id: "LEDGER-003",
+      orderId: "order-room-101",
+      type: "PLATFORM_COMMISSION",
+      grossAmount: 0,
+      gatewayFee: 0,
+      rentalFee: 150000,
+      depositAmount: 0,
+      platformFee: 12000,
+      mitraEntitlement: 0,
+      description: "Komisi platform Bantuin.id 8% dari sewa Rp150.000",
+      timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+    {
+      id: "LEDGER-004",
+      orderId: "order-room-101",
+      type: "MITRA_ENTITLEMENT",
+      grossAmount: 0,
+      gatewayFee: 0,
+      rentalFee: 150000,
+      depositAmount: 0,
+      platformFee: 0,
+      mitraEntitlement: 138000,
+      description: "Hak pemilik rental (status PENDING saat barang sedang disewa)",
+      timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+    {
+      id: "LEDGER-005",
+      orderId: "WD-2026-901",
+      type: "MITRA_WITHDRAWAL",
+      grossAmount: 0,
+      gatewayFee: 0,
+      rentalFee: 0,
+      depositAmount: 0,
+      platformFee: 0,
+      mitraEntitlement: -500000,
+      description: "Pencairan transfer manual admin ke BCA Rian Prasetya (Fee admin Rp2.500 ditanggung platform)",
+      timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
     }
   ]);
 
@@ -172,7 +359,7 @@ export function AppProvider({ children }) {
   });
   
   // Rental Bookings
-  const [rentalBookings, setRentalBookings] = useState([
+  const INITIAL_BOOKINGS = [
     {
       id: "booking-1",
       rentalId: "rent-1",
@@ -187,13 +374,37 @@ export function AppProvider({ children }) {
       rentalFee: 150000,
       depositFee: 150000,
       totalAmount: 300000,
-      status: "confirmed_by_owner", // 'temp_locked', 'confirmed_by_owner', 'handed_over', 'returned', 'settled'
+      status: "confirmed_by_owner", // 'temp_locked', 'confirmed_by_owner', 'handed_over', 'returned', 'completed'
       initialPhotos: ["https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=800&q=80"],
       initialNotes: "Body bersih, lensa tanpa jamur, baterai full 2 unit.",
       returnPhotos: [],
       returnNotes: "",
     },
-  ]);
+  ];
+
+  const [rentalBookings, setRentalBookings] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("bantuin_rental_bookings_state");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch (e) {}
+    }
+    return INITIAL_BOOKINGS;
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (rentalBookings && rentalBookings.length > 0) {
+        localStorage.setItem("bantuin_rental_bookings_state", JSON.stringify(rentalBookings));
+      }
+    } catch (e) {
+      console.warn("Could not sync rental bookings state:", e);
+    }
+  }, [rentalBookings]);
 
   // Admin and Trust & Safety
   const [auditLogs, setAuditLogs] = useState([
@@ -361,8 +572,9 @@ export function AppProvider({ children }) {
     }
   };
 
-  // Active Kabupaten name derived from real location or selected location
-  const activeKabupaten = extractKabupatenName(selectedLocation, userRealLocation);
+  // Active Kabupaten name derived from real location or selected location (exact sync with Navbar)
+  const activeLocationStr = userRealLocation?.shortLocation || selectedLocation || userRealLocation?.city || "";
+  const activeKabupaten = extractKabupatenName(activeLocationStr, userRealLocation);
 
   // Filter helper: checks if item is located in user's active kabupaten
   const isItemInCurrentKabupaten = (item) => {
@@ -499,7 +711,7 @@ export function AppProvider({ children }) {
     if (!selectedReq) return;
 
     const baseAmount = Number(offer?.proposedPrice) || Number(selectedReq.rewardAmount) || 35000;
-    const platformFee = Math.round(baseAmount * 0.14);
+    const platformFee = Math.round(baseAmount * 0.08);
     const helperPayoutAmount = baseAmount - platformFee;
 
     const newOrderRoomId = existingRoomId || `order-room-${Date.now()}`;
@@ -690,7 +902,9 @@ export function AppProvider({ children }) {
                 id: `msg-${Date.now()}`,
                 senderId: "system",
                 senderName: "Bantuin Escrow Bot",
-                message: `Tugas telah dikonfirmasi selesai! Imbalan Rp${releasedAmount.toLocaleString('id-ID')} telah dicairkan ke dompet ${helperName}. Penilaian diberikan: ⭐ ${numericRating}/5. Profil helper berhasil diperbarui!`,
+                message: room.orderType === "service"
+                  ? `Layanan jasa "${room.requestTitle}" telah dikonfirmasi selesai! Dana imbalan sebesar Rp${releasedAmount.toLocaleString('id-ID')} telah dicairkan ke saldo mitra ${helperName}. Penilaian diberikan: ⭐ ${numericRating}/5. Transaksi selesai!`
+                  : `Tugas telah dikonfirmasi selesai! Imbalan Rp${releasedAmount.toLocaleString('id-ID')} telah dicairkan ke dompet ${helperName}. Penilaian diberikan: ⭐ ${numericRating}/5. Profil helper berhasil diperbarui!`,
                 timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
                 isSystem: true,
               },
@@ -701,9 +915,28 @@ export function AppProvider({ children }) {
       })
     );
 
-    // Credit to Helper Wallet Balance
-    setWalletBalance((prev) => prev + releasedAmount);
-    setPendingEscrowBalance((prev) => Math.max(0, prev - releasedAmount));
+    // Shift Mitra Entitlement status from PENDING to AVAILABLE
+    setMitraPendingBalance((prev) => Math.max(0, prev - releasedAmount));
+    setMitraAvailableBalance((prev) => prev + releasedAmount);
+    setMitraTotalEarned((prev) => prev + releasedAmount);
+
+    // Record ledger entry: MITRA_ENTITLEMENT turning AVAILABLE
+    setLedgerEntries((prev) => [
+      {
+        id: `LEDGER-${Date.now()}`,
+        orderId: orderRoomId,
+        type: "MITRA_ENTITLEMENT",
+        grossAmount: 0,
+        gatewayFee: 0,
+        rentalFee: 0,
+        depositAmount: 0,
+        platformFee: 0,
+        mitraEntitlement: releasedAmount,
+        description: `Hak mitra beralih ke status AVAILABLE (dapat dicairkan) setelah pesanan dikonfirmasi selesai.`,
+        timestamp: new Date().toISOString(),
+      },
+      ...prev,
+    ]);
 
     // Update currentUser profile (ratingAvg, ratingCount, completedHelpsCount)
     setCurrentUser((prev) => {
@@ -767,83 +1000,227 @@ export function AppProvider({ children }) {
     );
   };
 
-  // 6b. Withdraw Wallet Balance (Xendit Disbursement)
+  // 6b. Request Withdrawal (Mitra Entitlement Payout Request)
   const withdrawFunds = ({ amount, bankName, accountNumber, accountHolder }) => {
     const numAmount = Number(amount);
     if (isNaN(numAmount) || numAmount < 20000) {
-      addToast("Gagal Tarik Dana", "Minimal penarikan saldo adalah Rp20.000", "error");
+      addToast("Gagal Pengajuan", "Minimal penarikan saldo adalah Rp20.000", "error");
       return false;
     }
-    if (numAmount > walletBalance) {
-      addToast("Saldo Tidak Cukup", "Jumlah penarikan melebihi saldo tersedia Anda.", "error");
+    if (numAmount > mitraAvailableBalance) {
+      addToast("Saldo Tidak Cukup", "Jumlah penarikan melebihi saldo dapat dicairkan Anda.", "error");
       return false;
     }
 
     const adminFee = 2500;
-    const netAmount = numAmount - adminFee;
+    // Fee transfer admin Rp2.500 ditanggung Bantuin.id! Mitra menerima 100% utuh tanpa potongan
     const newWithdrawal = {
       id: `WD-${Date.now()}`,
+      mitraId: currentUser.id || "user-current-01",
+      mitraName: currentUser.fullName || "Rian Prasetya",
       amount: numAmount,
       adminFee,
-      netAmount,
+      feePaidBy: "BANTUIN_OPERATIONAL",
+      netAmount: numAmount, // Mitra menerima 100% utuh!
       bankName: bankName || "BCA",
       accountNumber: accountNumber || "8820192841",
       accountHolder: accountHolder || currentUser.fullName,
-      status: "completed",
-      xenditDisbursementId: `DISB-XND-${Math.floor(100000 + Math.random() * 900000)}`,
-      createdAt: new Date().toISOString(),
-      completedAt: new Date(Date.now() + 15000).toISOString(),
+      status: "PENDING", // WITHDRAWAL_PENDING
+      requestedAt: new Date().toISOString(),
+      processedAt: null,
+      transferReference: null,
+      notes: "Menunggu transfer manual oleh admin via m-Banking",
     };
 
-    setWalletBalance((prev) => prev - numAmount);
+    setMitraAvailableBalance((prev) => prev - numAmount);
     setWithdrawals((prev) => [newWithdrawal, ...prev]);
 
     setAuditLogs((prev) => [
       {
         id: `log-${Date.now()}`,
         actor: currentUser.email,
-        action: "WITHDRAWAL_PROCESSED",
+        action: "WITHDRAWAL_REQUESTED",
         target: `WITHDRAW #${newWithdrawal.id}`,
-        details: `Penarikan dana Rp${numAmount.toLocaleString('id-ID')} ke ${newWithdrawal.bankName} (${newWithdrawal.accountNumber}) sukses via Xendit.`,
+        details: `Mitra mengajukan penarikan Rp${numAmount.toLocaleString('id-ID')} ke ${newWithdrawal.bankName} (${newWithdrawal.accountNumber}). Status: WITHDRAWAL_PENDING. Biaya transfer ditanggung platform.`,
         timestamp: new Date().toISOString(),
       },
       ...prev,
     ]);
 
     addToast(
-      "Penarikan Berhasil Diproses!",
-      `Dana Rp${netAmount.toLocaleString('id-ID')} sedang ditransfer ke ${newWithdrawal.bankName} (${newWithdrawal.accountNumber}).`
+      "Pengajuan Penarikan Terkirim!",
+      `Permintaan pencairan Rp${numAmount.toLocaleString('id-ID')} sedang menunggu transfer manual admin. Dana akan ditransfer penuh tanpa potongan fee.`
     );
     return true;
   };
 
-  // 6c. Top Up Wallet Balance (Xendit Pay-In)
-  const topUpFunds = ({ amount, paymentMethod }) => {
-    const numAmount = Number(amount);
-    if (isNaN(numAmount) || numAmount < 10000) {
-      addToast("Gagal Isi Saldo", "Minimal isi ulang saldo adalah Rp10.000", "error");
-      return false;
-    }
-
-    setWalletBalance((prev) => prev + numAmount);
-
-    setAuditLogs((prev) => [
-      {
-        id: `log-${Date.now()}`,
-        actor: currentUser.email,
-        action: "WALLET_TOPUP",
-        target: `TOPUP #TOP-${Date.now()}`,
-        details: `Isi ulang saldo dompet Bantuin sebesar Rp${numAmount.toLocaleString('id-ID')} via ${paymentMethod || "QRIS"} berhasil.`,
-        timestamp: new Date().toISOString(),
-      },
-      ...prev,
-    ]);
-
-    addToast(
-      "Isi Saldo Berhasil!",
-      `Saldo Rp${numAmount.toLocaleString('id-ID')} telah berhasil ditambahkan ke Dompet Bantuin Anda.`
+  // 6c. Admin: Tandai Transfer Manual Berhasil (WITHDRAWAL_SUCCESS)
+  const adminMarkWithdrawalSuccess = (withdrawalId, transferReference = "") => {
+    let targetWd = null;
+    setWithdrawals((prev) =>
+      prev.map((wd) => {
+        if (wd.id === withdrawalId) {
+          targetWd = {
+            ...wd,
+            status: "SUCCESS",
+            processedAt: new Date().toISOString(),
+            transferReference: transferReference || `TRF-MANUAL-${Date.now()}`,
+          };
+          return targetWd;
+        }
+        return wd;
+      })
     );
-    return true;
+
+    if (targetWd) {
+      setLedgerEntries((prev) => [
+        {
+          id: `LEDGER-${Date.now()}`,
+          orderId: targetWd.id,
+          type: "MITRA_WITHDRAWAL",
+          grossAmount: 0,
+          gatewayFee: 0,
+          rentalFee: 0,
+          depositAmount: 0,
+          platformFee: 0,
+          mitraEntitlement: -targetWd.amount,
+          description: `Transfer manual admin berhasil ke ${targetWd.bankName} ${targetWd.accountNumber} an ${targetWd.accountHolder} (Ref: ${transferReference || targetWd.id}). Fee admin Rp2.500 ditanggung Bantuin.id.`,
+          timestamp: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
+
+      setAuditLogs((prev) => [
+        {
+          id: `log-${Date.now()}`,
+          actor: "admin@bantuin.id",
+          action: "WITHDRAWAL_SUCCESS",
+          target: `WITHDRAW #${withdrawalId}`,
+          details: `Admin menandai transfer manual penarikan Rp${targetWd.amount.toLocaleString('id-ID')} ke ${targetWd.bankName} (${targetWd.accountNumber}) sukses.`,
+          timestamp: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
+
+      addToast("Transfer Berhasil Ditandai!", `Penarikan #${withdrawalId} telah tercatat sukses dicairkan ke rekening mitra.`);
+      return true;
+    }
+    return false;
+  };
+
+  // 6d. Admin: Tolak Penarikan & Kembalikan Saldo Mitra
+  const adminRejectWithdrawal = (withdrawalId, reason = "Rekening tidak valid") => {
+    let refundAmount = 0;
+    setWithdrawals((prev) =>
+      prev.map((wd) => {
+        if (wd.id === withdrawalId) {
+          refundAmount = wd.amount;
+          return {
+            ...wd,
+            status: "REJECTED",
+            processedAt: new Date().toISOString(),
+            notes: `Ditolak: ${reason}`,
+          };
+        }
+        return wd;
+      })
+    );
+
+    if (refundAmount > 0) {
+      setMitraAvailableBalance((prev) => prev + refundAmount);
+      addToast("Penarikan Ditolak", `Dana Rp${refundAmount.toLocaleString('id-ID')} telah dikembalikan ke saldo dapat dicairkan mitra.`, "error");
+      return true;
+    }
+    return false;
+  };
+
+  // 6e. Admin / Mitra: Tandai Barang Sewa Kembali & Masuk Inspeksi
+  const adminMarkItemReturned = (rentalOrderId) => {
+    setOrderRooms((prev) =>
+      prev.map((r) => (r.id === rentalOrderId ? { ...r, orderStatus: "returned" } : r))
+    );
+    setCustomerDeposits((prev) =>
+      prev.map((dep) =>
+        dep.rentalOrderId === rentalOrderId
+          ? { ...dep, status: "REFUND_PENDING" }
+          : dep
+      )
+    );
+    addToast("Barang Diinspeksi", "Barang telah kembali. Deposit jaminan customer berstatus REFUND_PENDING.");
+  };
+
+  // 6f. Admin: Tandai Pengembalian Deposit Manual ke Customer Berhasil
+  const adminMarkDepositRefunded = (depositId, transferReference = "", options = {}) => {
+    const deductionAmount = Number(options.deductionAmount) || 0;
+    const deductionReason = options.deductionReason || "";
+    let targetDep = null;
+
+    setCustomerDeposits((prev) =>
+      prev.map((dep) => {
+        if (dep.id === depositId || dep.rentalOrderId === depositId) {
+          const finalRefund = Math.max(0, dep.depositAmount - deductionAmount);
+          targetDep = {
+            ...dep,
+            status: deductionAmount > 0 ? "DISPUTE" : "REFUNDED",
+            refundAmount: finalRefund,
+            deductionAmount,
+            deductionReason,
+            refundedAt: new Date().toISOString(),
+            transferReference: transferReference || `REFUND-${Date.now()}`,
+          };
+          return targetDep;
+        }
+        return dep;
+      })
+    );
+
+    if (targetDep) {
+      setLedgerEntries((prev) => [
+        {
+          id: `LEDGER-${Date.now()}-1`,
+          orderId: targetDep.rentalOrderId || depositId,
+          type: "DEPOSIT_REFUND",
+          grossAmount: 0,
+          gatewayFee: 0,
+          rentalFee: 0,
+          depositAmount: -targetDep.refundAmount,
+          platformFee: 0,
+          mitraEntitlement: 0,
+          description: `Pengembalian deposit manual admin Rp${targetDep.refundAmount.toLocaleString('id-ID')} ke customer via ${targetDep.customerBank} ${targetDep.customerAccountNumber}.`,
+          timestamp: new Date().toISOString(),
+        },
+        ...(deductionAmount > 0 ? [
+          {
+            id: `LEDGER-${Date.now()}-2`,
+            orderId: targetDep.rentalOrderId || depositId,
+            type: "DEPOSIT_CLAIM_DAMAGE",
+            grossAmount: 0,
+            gatewayFee: 0,
+            rentalFee: 0,
+            depositAmount: -deductionAmount,
+            platformFee: 0,
+            mitraEntitlement: deductionAmount,
+            description: `Potongan deposit kerusakan/denda Rp${deductionAmount.toLocaleString('id-ID')} untuk ganti rugi pemilik unit: ${deductionReason}`,
+            timestamp: new Date().toISOString(),
+          }
+        ] : []),
+        ...prev,
+      ]);
+
+      addToast("Deposit Berhasil Dikembalikan!", `Transfer refund deposit Rp${targetDep.refundAmount.toLocaleString('id-ID')} telah sukses dicatat.`);
+      return true;
+    }
+    return false;
+  };
+
+  // 6g. Top Up Wallet Balance (Disabled in Non E-Money Model)
+  const topUpFunds = () => {
+    addToast(
+      "Fitur Top-Up Dinonaktifkan",
+      "Bantuin.id bukan dompet elektronik (e-money). Seluruh transaksi customer langsung dibayarkan melalui Payment Gateway (QRIS/VA) saat memesan.",
+      "error"
+    );
+    return false;
   };
 
   // 6d. Services CRUD for Provider Portal
@@ -884,7 +1261,7 @@ export function AppProvider({ children }) {
   };
 
   // 7. Send Chat Message with Anti-Disintermediation check
-  const sendChatMessage = (orderRoomId, messageText) => {
+  const sendChatMessage = (orderRoomId, messageText, extraData = {}) => {
     const check = detectDisintermediation(messageText);
     
     const newMsg = {
@@ -895,6 +1272,7 @@ export function AppProvider({ children }) {
       hasWarning: check.flagged,
       warningReason: check.reason,
       timestamp: new Date().toISOString(),
+      ...extraData,
     };
 
     setOrderRooms((prev) =>
@@ -1018,6 +1396,907 @@ export function AppProvider({ children }) {
     return newBooking;
   };
 
+  // 8b. Create Full Rental Order Room & Initiate Escrow
+  const createRentalOrder = ({
+    rentalId,
+    rentalTitle,
+    photoUrl,
+    storeId,
+    storeName,
+    storeAvatar,
+    storePhone,
+    startDate,
+    endDate,
+    totalDays,
+    dailyPrice,
+    rentalFee,
+    depositFee,
+    totalAmount,
+    conditionNotes,
+    pickupLocation,
+    paymentMethod = "qris",
+    isPaid = true
+  }) => {
+    const roomId = `order-room-rental-${Date.now()}`;
+    const dur = totalDays || 1;
+    const rentFee = rentalFee || (dailyPrice * dur);
+    const depFee = depositFee || 200000;
+    const tot = rentFee + depFee; // Gross customer pays: rental + deposit (gateway_fee is NOT added to customer bill)
+    const platformFee = Math.round(rentFee * 0.08); // 8% komisi hanya dari rentalFee!
+    const ownerPayoutAmount = rentFee - platformFee;
+
+    // Hak pemilik rental berstatus PENDING selama barang sedang disewa
+    setMitraPendingBalance((prev) => prev + ownerPayoutAmount);
+
+    // Catat deposit jaminan customer secara terpisah (0% komisi platform)
+    const newDeposit = {
+      id: `DEP-${Date.now()}`,
+      rentalOrderId: roomId,
+      rentalTitle: rentalTitle,
+      depositAmount: depFee,
+      refundAmount: depFee,
+      deductionAmount: 0,
+      deductionReason: "",
+      status: "WAITING_RETURN", // WAITING_RETURN -> INSPECTION -> REFUND_PENDING -> REFUNDED
+      paymentMethod: paymentMethod || "QRIS",
+      customerBank: "BCA",
+      customerAccountNumber: "8820192841",
+      customerAccountHolder: currentUser.fullName || "Rian Prasetya",
+      createdAt: new Date().toISOString(),
+      refundedAt: null,
+    };
+    setCustomerDeposits((prev) => [newDeposit, ...prev]);
+
+    // Catat ke ledger akuntansi
+    setLedgerEntries((prev) => [
+      {
+        id: `LEDGER-${Date.now()}-1`,
+        orderId: roomId,
+        type: "CUSTOMER_RENTAL_PAYMENT",
+        grossAmount: tot,
+        gatewayFee: 2000,
+        rentalFee: rentFee,
+        depositAmount: depFee,
+        platformFee: platformFee,
+        mitraEntitlement: ownerPayoutAmount,
+        description: `Pembayaran customer untuk sewa ${rentalTitle} via ${paymentMethod || "QRIS"}`,
+        timestamp: new Date().toISOString(),
+      },
+      {
+        id: `LEDGER-${Date.now()}-2`,
+        orderId: roomId,
+        type: "CUSTOMER_DEPOSIT",
+        grossAmount: depFee,
+        gatewayFee: 0,
+        rentalFee: 0,
+        depositAmount: depFee,
+        platformFee: 0,
+        mitraEntitlement: 0,
+        description: `Deposit jaminan perlindungan unit ${rentalTitle} (0% komisi, titipan aman)`,
+        timestamp: new Date().toISOString(),
+      },
+      ...prev,
+    ]);
+
+    // Dynamic update: Decrement available stock and increment totalRentedCount in rentals
+    if (isPaid && rentalId) {
+      setRentals((prevRentals) =>
+        prevRentals.map((r) => {
+          if (r.id === rentalId) {
+            const curStock = typeof r.stock === "number" ? r.stock : 3;
+            const curRented = Number(r.totalRentedCount) || Number(r.owner?.completedOrders) || 86;
+            return {
+              ...r,
+              stock: Math.max(0, curStock - 1),
+              totalRentedCount: curRented + 1,
+              owner: {
+                ...(r.owner || {}),
+                completedOrders: (Number(r.owner?.completedOrders) || 86) + 1,
+              },
+            };
+          }
+          return r;
+        })
+      );
+    }
+
+    // Also add to rentalBookings for activity history
+    const newBooking = {
+      id: roomId,
+      rentalId: rentalId || "rent-1",
+      rentalTitle: rentalTitle,
+      photoUrl: photoUrl,
+      renterId: currentUser.id || "user-current-01",
+      renterName: currentUser.fullName || "Rian Prasetya",
+      ownerName: storeName || "Mitra Rental Resmi",
+      startDate: startDate || new Date().toISOString().split("T")[0],
+      endDate: endDate || new Date(Date.now() + 86400000).toISOString().split("T")[0],
+      totalDays: dur,
+      rentalFee: rentFee,
+      depositFee: depFee,
+      totalAmount: tot,
+      status: isPaid ? "paid_escrow" : "temp_locked",
+      paymentMethod: paymentMethod,
+      createdAt: new Date().toISOString(),
+    };
+    setRentalBookings((prev) => [newBooking, ...prev]);
+
+    const newRoom = {
+      id: roomId,
+      categoryType: "sewa",
+      orderType: "rental",
+      stage: isPaid ? "active" : "inquiry",
+      orderStatus: isPaid ? "paid_escrow" : "inquiry",
+      requestId: rentalId || `rental-${Date.now()}`,
+      requestTitle: `Sewa ${rentalTitle}`,
+      category: "Sewa Alat & Kendaraan",
+      mode: "offline",
+      requester: {
+        id: currentUser.id || "user-current-01",
+        name: currentUser.fullName || "Rian Prasetya",
+        avatar: currentUser.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80",
+        phone: currentUser.phone || "081298765432",
+        rating: 4.95,
+      },
+      helper: {
+        id: storeId || "mitra-rental",
+        name: storeName || "Mitra Sewa Resmi",
+        avatar: storeAvatar || photoUrl || "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=400&q=80",
+        phone: storePhone || "081234567890",
+        rating: 4.9,
+        isStore: true,
+        storeId: storeId,
+        address: pickupLocation || "Toko Mitra Sewa",
+      },
+      rentalDetails: {
+        unitName: rentalTitle,
+        photoUrl: photoUrl,
+        startDate: startDate,
+        endDate: endDate,
+        durationDays: totalDays,
+        dailyPrice: dailyPrice,
+        rentalFee: rentalFee,
+        depositFee: depositFee,
+        totalAmount: totalAmount,
+        pickupLocation: pickupLocation || "Toko Mitra Rental",
+        conditionChecklist: conditionNotes || "Checklist fisik tervalidasi saat serah terima.",
+        handoverPhotos: [photoUrl],
+        returnPhotos: [],
+      },
+      lockedAmount: totalAmount,
+      depositAmount: depositFee,
+      rentalFeeAmount: rentalFee,
+      orderStatus: "paid_escrow", // 'paid_escrow' -> 'item_handed_over' -> 'returned' -> 'completed'
+      xenditStatus: "HELD_IN_ESCROW",
+      xenditInvoiceId: `XND-RENT-${Math.floor(100000 + Math.random() * 900000)}`,
+      lastUpdated: "Baru saja",
+      unreadCount: 0,
+      review: null,
+      messages: [
+        {
+          id: `msg-sys-${Date.now()}`,
+          senderId: "system",
+          senderName: "Bantuin Escrow Bot",
+          message: `Pembayaran sewa (${formatIDR(rentalFee)}) + Deposit Jaminan (${formatIDR(depositFee)}) total ${formatIDR(totalAmount)} telah aman di Rekening Bersama Escrow Bantuin. Silakan koordinasikan pengambilan/serah terima alat di sini.`,
+          timestamp: "Sekarang",
+          isSystem: true,
+        },
+        {
+          id: `msg-store-${Date.now()}`,
+          senderId: storeId || "mitra-rental",
+          senderName: storeName || "Toko Mitra",
+          senderAvatar: storeAvatar || "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=400&q=80",
+          message: `Halo! Pesanan sewa ${rentalTitle} telah kami terima. Unit sudah siap diserahterimakan dan dites bersama. Silakan konfirmasi jam kedatangan Anda.`,
+          timestamp: "Sekarang",
+        }
+      ]
+    };
+
+    setOrderRooms((prev) => [newRoom, ...prev]);
+    addToast("Pembayaran Escrow Berhasil!", `Slot sewa ${rentalTitle} telah diamankan. Silakan koordinasi serah terima di chat.`);
+    return newRoom;
+  };
+
+  const confirmRentalHandover = (roomId, handoverProof = {}) => {
+    setOrderRooms((prev) =>
+      prev.map((r) => {
+        if (r.id === roomId) {
+          const defaultPhotos = [
+            r.rentalDetails?.photoUrl || "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=800&q=80"
+          ];
+          const rawPhotos = handoverProof.photos && handoverProof.photos.length > 0
+            ? handoverProof.photos
+            : defaultPhotos;
+          const notes = handoverProof.notes || "Kondisi fisik alat, fungsi tombol/sensor, dan kelengkapan aksesoris (baterai, charger, tas) telah diverifikasi bersama pihak toko dalam kondisi prima.";
+
+          const nowDate = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+          const nowTime = new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+
+          const updatedMessages = [
+            ...r.messages,
+            {
+              id: `msg-hnd-${Date.now()}`,
+              senderId: "system",
+              senderName: "Bantuin Escrow Bot",
+              message: `🤝 Serah terima alat berhasil dikonfirmasi!\nKondisi fisik unit telah diverifikasi bersama pihak toko. Masa sewa sekarang berstatus AKTIF. Bukti foto baseline kondisi fisik alat tersimpan permanen di ruang obrolan ini sebagai dokumen jaminan perlindungan Escrow.`,
+              timestamp: nowTime,
+              isSystem: true,
+              isHandoverProof: true,
+              proofData: {
+                title: "Bukti Baseline Serah Terima Fisik",
+                unitName: r.rentalDetails?.unitName || r.requestTitle || "Unit Alat Sewa",
+                photos: rawPhotos,
+                notes: notes,
+                confirmedAt: `${nowDate}, ${nowTime}`,
+                depositHeld: r.depositAmount || 500000,
+                idHeld: "1 Identitas Fisik Asli (KTP/KTM/SIM) dititipkan di toko",
+                storeName: r.helper?.name || "Toko Mitra",
+                renterName: r.requester?.name || currentUser.fullName || "Penyewa"
+              }
+            }
+          ];
+          return {
+            ...r,
+            orderStatus: "item_handed_over",
+            lastUpdated: "Baru saja",
+            handoverProof: {
+              photos: rawPhotos,
+              notes: notes,
+              timestamp: new Date().toISOString(),
+              confirmedAt: `${nowDate}, ${nowTime}`
+            },
+            messages: updatedMessages,
+          };
+        }
+        return r;
+      })
+    );
+    addToast("Serah Terima Dikonfirmasi!", "Foto bukti fisik tersimpan di obrolan & masa sewa aktif.");
+  };
+
+  const confirmRentalReturn = (roomId, returnProof = {}) => {
+    let refundAmount = 0;
+    setOrderRooms((prev) =>
+      prev.map((r) => {
+        if (r.id === roomId) {
+          refundAmount = r.depositAmount || 0;
+          const returnPhotos = returnProof.photos || [];
+          const returnNotes = returnProof.notes || "Pemeriksaan akhir selesai. Unit dikembalikan lengkap & tanpa kerusakan.";
+
+          const nowDate = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+          const nowTime = new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+
+          const updatedMessages = [
+            ...r.messages,
+            {
+              id: `msg-ret-${Date.now()}`,
+              senderId: "system",
+              senderName: "Bantuin Escrow Bot",
+              message: `✅ Pengembalian alat telah selesai diperiksa & diverifikasi oleh pihak toko mitra.\nHak sewa toko sebesar Rp${((r.rentalFeeAmount || 150000) - Math.round((r.rentalFeeAmount || 150000) * 0.08)).toLocaleString('id-ID')} telah beralih ke status AVAILABLE (siap ditarik).\nDeposit jaminan sebesar ${formatIDR(refundAmount)} berstatus REFUND_PENDING menunggu transfer manual admin ke rekening bank Anda.`,
+              timestamp: nowTime,
+              isSystem: true,
+              isReturnProof: true,
+              proofData: {
+                title: "Bukti Pengembalian & Verifikasi Alat",
+                unitName: r.rentalDetails?.unitName || r.requestTitle || "Unit Alat Sewa",
+                refundAmount: refundAmount,
+                notes: returnNotes,
+                photos: returnPhotos,
+                confirmedAt: `${nowDate}, ${nowTime}`,
+                idReturned: "Identitas Fisik Asli (KTP/KTM) telah diserahkan kembali ke penyewa"
+              }
+            }
+          ];
+          return {
+            ...r,
+            orderStatus: "returned",
+            xenditStatus: "PAYOUT_RELEASED",
+            lastUpdated: "Baru saja",
+            returnProof: {
+              photos: returnPhotos,
+              notes: returnNotes,
+              timestamp: new Date().toISOString(),
+              confirmedAt: `${nowDate}, ${nowTime}`
+            },
+            messages: updatedMessages,
+          };
+        }
+        return r;
+      })
+    );
+
+    // Release owner rental fee to AVAILABLE balance
+    const targetRoom = orderRooms.find((r) => r.id === roomId);
+    const rentFee = targetRoom?.rentalFeeAmount || 150000;
+    const platFee = Math.round(rentFee * 0.08);
+    const ownerPayout = rentFee - platFee;
+    setMitraPendingBalance((prev) => Math.max(0, prev - ownerPayout));
+    setMitraAvailableBalance((prev) => prev + ownerPayout);
+    setMitraTotalEarned((prev) => prev + ownerPayout);
+
+    // Set customer deposit to REFUND_PENDING (menunggu transfer manual admin)
+    setCustomerDeposits((prev) =>
+      prev.map((d) =>
+        d.rentalOrderId === roomId ? { ...d, status: "REFUND_PENDING" } : d
+      )
+    );
+
+    addToast("Pemeriksaan Selesai!", `Hak sewa pemilik kini dapat dicairkan. Deposit ${formatIDR(refundAmount)} siap direfund oleh admin.`);
+  };
+
+  const submitRentalReview = (roomId, rating, comment, aspectRatings = null) => {
+    const numRating = Math.max(1, Math.min(5, Number(rating) || 5));
+    const finalComment = comment?.trim() || "Pelayanan toko sangat ramah, alat terawat dan berfungsi sangat baik!";
+
+    let targetRentalId = null;
+
+    setOrderRooms((prev) =>
+      prev.map((r) => {
+        if (r.id === roomId) {
+          targetRentalId = r.requestId;
+          const updatedMessages = [
+            ...r.messages,
+            {
+              id: `msg-rev-${Date.now()}`,
+              senderId: "system",
+              senderName: "Bantuin Escrow Bot",
+              message: `⭐ Penyewa memberikan rating ${numRating}/5 bintang: "${finalComment}". Transaksi sewa selesai sepenuhnya. Terima kasih!`,
+              timestamp: "Sekarang",
+              isSystem: true,
+            }
+          ];
+          return {
+            ...r,
+            orderStatus: "completed",
+            review: {
+              rating: numRating,
+              comment: finalComment,
+              createdAt: new Date().toISOString(),
+              reviewerName: currentUser?.fullName || "Penyewa",
+            },
+            messages: updatedMessages,
+          };
+        }
+        return r;
+      })
+    );
+
+    // Dynamic rating algorithm for rentals:
+    // newCount = oldCount + 1
+    // totalStars = (oldAvg * oldCount) + newRating
+    // newAvg = (totalStars / newCount).toFixed(2)
+    setRentals((prevRentals) =>
+      prevRentals.map((item) => {
+        if (item.id === targetRentalId || (!targetRentalId && item.id === "rent-1")) {
+          const oldCount = Number(item.ratingCount) || 38;
+          const oldAvg = Number(item.ratingAvg) || 4.95;
+          const newCount = oldCount + 1;
+          const totalStars = (oldAvg * oldCount) + numRating;
+          const newAvg = Number((totalStars / newCount).toFixed(2));
+
+          const newReviewObj = {
+            id: `rev-${Date.now()}`,
+            userName: currentUser?.fullName || "Rian Prasetya",
+            avatar: currentUser?.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80",
+            rating: numRating,
+            date: "Baru saja",
+            item: item.title,
+            comment: finalComment,
+            isVerifiedPurchase: true,
+            aspectRatings: aspectRatings || {
+              condition: numRating,
+              response: 5.0,
+              hospitality: 5.0,
+              accuracy: numRating,
+            },
+          };
+
+          return {
+            ...item,
+            ratingAvg: newAvg,
+            ratingCount: newCount,
+            reviews: [newReviewObj, ...(item.reviews || [])],
+            owner: {
+              ...(item.owner || {}),
+              rating: newAvg,
+            }
+          };
+        }
+        return item;
+      })
+    );
+
+    // Update rentalBookings
+    setRentalBookings((prev) =>
+      prev.map((b) => {
+        if (b.id === roomId || b.rentalId === targetRentalId) {
+          return { ...b, status: "completed", rating: numRating };
+        }
+        return b;
+      })
+    );
+
+    addToast(
+      "Penilaian Berhasil!",
+      `Rating ${numRating} bintang tercatat secara dinamis pada produk & profil toko mitra.`
+    );
+  };
+
+  // 8c. Start Rental Inquiry (Chat Toko Terlebih Dahulu sebelum bayar)
+  const startRentalInquiry = ({
+    rentalId,
+    rentalTitle,
+    photoUrl,
+    storeId,
+    storeName,
+    storeAvatar,
+    storePhone,
+    dailyPrice,
+    startDate,
+    endDate,
+    totalDays,
+    depositFee,
+    pickupLocation,
+    initialQuestion
+  }) => {
+    // Check if an inquiry room already exists with this store
+    const existing = orderRooms.find(
+      (r) => r.orderType === "rental" && r.helper?.id === storeId && r.orderStatus === "inquiry"
+    );
+    if (existing) {
+      if (initialQuestion) {
+        sendChatMessage(existing.id, initialQuestion);
+      }
+      return existing;
+    }
+
+    const roomId = `order-room-inquiry-${Date.now()}`;
+    const dur = totalDays || 1;
+    const rentFee = dailyPrice * dur;
+    const depFee = depositFee || Math.max(dailyPrice, 250000);
+    const tot = rentFee + depFee;
+
+    const newRoom = {
+      id: roomId,
+      categoryType: "sewa",
+      orderType: "rental",
+      stage: "inquiry",
+      requestId: rentalId || `rental-${Date.now()}`,
+      requestTitle: `Tanya Sewa ${rentalTitle}`,
+      category: "Sewa Alat & Kendaraan",
+      mode: "offline",
+      requester: {
+        id: currentUser.id || "user-current-01",
+        name: currentUser.fullName || "Rian Prasetya",
+        avatar: currentUser.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80",
+        phone: currentUser.phone || "081298765432",
+        rating: 4.95,
+      },
+      helper: {
+        id: storeId || "mitra-rental",
+        name: storeName || "Mitra Sewa Resmi",
+        avatar: storeAvatar || photoUrl || "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=400&q=80",
+        phone: storePhone || "081234567890",
+        rating: 4.9,
+        isStore: true,
+        storeId: storeId,
+        address: pickupLocation || "Toko Mitra Sewa",
+      },
+      rentalDetails: {
+        unitName: rentalTitle,
+        photoUrl: photoUrl,
+        startDate: startDate || "2026-09-20",
+        endDate: endDate || "2026-09-21",
+        durationDays: dur,
+        dailyPrice: dailyPrice,
+        rentalFee: rentFee,
+        depositFee: depFee,
+        totalAmount: tot,
+        pickupLocation: pickupLocation || "Toko Mitra Rental",
+        conditionChecklist: "Menunggu pemeriksaan fisik bersama saat serah terima di toko.",
+        handoverPhotos: [photoUrl],
+        returnPhotos: [],
+      },
+      lockedAmount: tot,
+      depositAmount: depFee,
+      rentalFeeAmount: rentFee,
+      orderStatus: "inquiry", // 'inquiry' -> 'paid_escrow' -> 'item_handed_over' -> 'returned' -> 'completed'
+      xenditStatus: "PENDING_PAYMENT",
+      lastUpdated: "Baru saja",
+      unreadCount: 0,
+      review: null,
+      messages: [
+        {
+          id: `msg-inq-1`,
+          senderId: "system",
+          senderName: "Bantuin Escrow Bot",
+          message: `💬 Ruang diskusi sewa untuk unit "${rentalTitle}". Silakan tanyakan ketersediaan tanggal, kelengkapan aksesoris, dan kondisi barang sebelum melakukan pembayaran escrow.`,
+          timestamp: "Sekarang",
+          isSystem: true,
+        },
+        {
+          id: `msg-inq-2`,
+          senderId: currentUser.id || "user-current-01",
+          senderName: currentUser.fullName || "Rian Prasetya",
+          message: initialQuestion || `Halo ${storeName}, apakah unit ${rentalTitle} ready untuk disewa? Boleh info kondisi fisik & kelengkapan aksesorisnya?`,
+          timestamp: "Sekarang",
+          isMe: true,
+        },
+        {
+          id: `msg-inq-3`,
+          senderId: storeId || "mitra-rental",
+          senderName: storeName || "Toko Mitra",
+          senderAvatar: storeAvatar || photoUrl,
+          message: `Halo Kak Rian! Unit ${rentalTitle} kami siap sewa dan dalam kondisi prima (sensor bersih & fungsi normal 100%). Sudah include baterai + charger + tas. Jaminan cukup titip 1 KTP/KTM asli saat ambil alat + deposit rekber. Kakak bisa langsung klik "Bayar Tagihan Sewa" di atas jika tanggal sudah fix ya!`,
+          timestamp: "Sekarang",
+        }
+      ]
+    };
+
+    setOrderRooms((prev) => [newRoom, ...prev]);
+    addToast("Obrolan Toko Dimulai", `Terhubung dengan ${storeName} mengenai ${rentalTitle}.`);
+    return newRoom;
+  };
+
+  // 8e. Start Jasa / Mitra Inquiry (Chat Konsultasi sebelum pesan jasa)
+  const startJasaInquiry = ({
+    serviceId,
+    serviceTitle,
+    serviceImage,
+    servicePrice,
+    providerId,
+    providerName,
+    providerAvatar,
+    providerPhone,
+    providerRating,
+    providerAddress,
+    category,
+    initialQuestion
+  }) => {
+    // Cari apakah sudah ada room konsultasi dengan mitra ini
+    const existing = orderRooms.find(
+      (r) =>
+        (r.orderType === "service" || r.orderType === "jasa") &&
+        (r.helper?.id === providerId || r.requestId === serviceId)
+    );
+    if (existing) {
+      if (initialQuestion) {
+        sendChatMessage(existing.id, initialQuestion);
+      }
+      return existing;
+    }
+
+    const roomId = `order-room-jasa-${providerId || Date.now()}`;
+    const newRoom = {
+      id: roomId,
+      categoryType: "jasa",
+      orderType: "service",
+      stage: "inquiry",
+      requestId: serviceId || `service-${Date.now()}`,
+      requestTitle: serviceTitle ? `Konsultasi: ${serviceTitle}` : `Konsultasi dengan ${providerName || "Mitra"}`,
+      category: category || "Layanan Jasa",
+      mode: "online",
+      requester: {
+        id: currentUser?.id || "user-current-01",
+        name: currentUser?.fullName || "Rian Prasetya",
+        avatar: currentUser?.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80",
+        phone: currentUser?.phone || "081298765432",
+        rating: 4.95,
+      },
+      helper: {
+        id: providerId || "mitra-jasa",
+        name: providerName || "Mitra Penyedia Jasa",
+        avatar: providerAvatar || serviceImage || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80",
+        phone: providerPhone || "081234567890",
+        rating: providerRating || 4.9,
+        address: providerAddress || "Purwokerto",
+      },
+      lockedAmount: servicePrice || 0,
+      orderStatus: "inquiry",
+      lastUpdated: "Baru saja",
+      unreadCount: 0,
+      review: null,
+      messages: [
+        {
+          id: `msg-jasa-inq-1`,
+          senderId: "system",
+          senderName: "Bantuin Escrow Bot",
+          message: `💬 Ruang konsultasi pra-pemesanan untuk "${serviceTitle || "Layanan Jasa"}". Diskusikan kebutuhan spesifik, jadwal pengerjaan, dan portofolio langsung dengan mitra ${providerName || "terverifikasi"} sebelum memesan.`,
+          timestamp: "Sekarang",
+          isSystem: true,
+        },
+        {
+          id: `msg-jasa-inq-2`,
+          senderId: currentUser?.id || "user-current-01",
+          senderName: currentUser?.fullName || "Rian Prasetya",
+          message: initialQuestion || `Halo kak ${providerName || "mitra"}, saya tertarik dengan layanan "${serviceTitle || "jasa"}". Boleh konsultasi terlebih dahulu mengenai estimasi dan teknis pengerjaannya?`,
+          timestamp: "Sekarang",
+          isMe: true,
+        },
+        {
+          id: `msg-jasa-inq-3`,
+          senderId: providerId || "mitra-jasa",
+          senderName: providerName || "Mitra Jasa",
+          senderAvatar: providerAvatar || serviceImage,
+          message: `Halo Kak Rian! Terima kasih sudah menghubungi kami di Bantuin. Tentu sangat bisa! Silakan sampaikan detail kebutuhan atau referensi yang Kakak inginkan ya. Setelah sepakat, Kakak bisa langsung klik "Pesan Layanan" untuk konfirmasi jadwal.`,
+          timestamp: "Sekarang",
+        }
+      ]
+    };
+
+    setOrderRooms((prev) => [newRoom, ...prev]);
+    addToast("Konsultasi Dimulai", `Terhubung dengan ${providerName || "Mitra"}.`);
+    return newRoom;
+  };
+
+  // 8f. Create Jasa Order & Lock Escrow
+  const createJasaOrder = ({
+    serviceId,
+    serviceTitle,
+    serviceImage,
+    packageId,
+    packageName,
+    servicePrice,
+    totalAmount,
+    targetDate,
+    targetTime,
+    alamat,
+    patokan,
+    notes,
+    brief,
+    isDigital,
+    coords,
+    providerId,
+    providerName,
+    providerAvatar,
+    providerPhone,
+    providerRating,
+    providerAddress,
+    category,
+    paymentMethod = "qris"
+  }) => {
+    const roomId = `order-room-jasa-${Date.now()}`;
+    const basePrice = Number(servicePrice) || 100000;
+    const finalTotal = Number(totalAmount) || basePrice; // Gross tagihan customer murni (gateway fee tidak otomatis ditambah ke tagihan)
+    const platformFee = Math.round(basePrice * 0.08);
+    const helperPayoutAmount = basePrice - platformFee;
+
+    // Hak pembayaran mitra berstatus PENDING (dana tertahan sampai pekerjaan dikonfirmasi selesai)
+    setMitraPendingBalance((prev) => prev + helperPayoutAmount);
+
+    // Catat mutasi akuntansi di ledger
+    setLedgerEntries((prev) => [
+      {
+        id: `LEDGER-${Date.now()}`,
+        orderId: roomId,
+        type: "CUSTOMER_PAYMENT",
+        grossAmount: finalTotal,
+        gatewayFee: 2000, // Tercatat di backend, tidak membebani tagihan awal customer
+        rentalFee: 0,
+        depositAmount: 0,
+        platformFee: platformFee,
+        mitraEntitlement: helperPayoutAmount,
+        description: `Pembayaran customer via ${paymentMethod || "QRIS"} untuk ${serviceTitle || "Layanan Jasa"}`,
+        timestamp: new Date().toISOString(),
+      },
+      ...prev,
+    ]);
+
+    const newRoom = {
+      id: roomId,
+      categoryType: "jasa",
+      orderType: "service",
+      stage: "active",
+      orderStatus: "paid_escrow", // 'paid_escrow' -> 'in_progress' -> 'proof_submitted' -> 'completed'
+      xenditStatus: "HELD_IN_ESCROW",
+      xenditInvoiceId: `XND-JASA-${Math.floor(100000 + Math.random() * 900000)}`,
+      requestId: serviceId || `service-${Date.now()}`,
+      requestTitle: serviceTitle || `Layanan Jasa: ${packageName || "Pilihan Paket"}`,
+      category: category || "Layanan Jasa",
+      mode: isDigital ? "online" : "offline",
+      lockedAmount: finalTotal,
+      platformFee: platformFee,
+      helperPayoutAmount: helperPayoutAmount,
+      serviceDetails: {
+        serviceId: serviceId,
+        serviceTitle: serviceTitle,
+        serviceImage: serviceImage,
+        packageId: packageId,
+        packageName: packageName,
+        servicePrice: basePrice,
+        totalAmount: finalTotal,
+        targetDate: targetDate,
+        targetTime: targetTime,
+        alamat: alamat,
+        patokan: patokan,
+        notes: notes,
+        brief: brief,
+        isDigital: isDigital,
+        coords: coords,
+        paymentMethod: paymentMethod,
+        createdAt: new Date().toISOString(),
+      },
+      requester: {
+        id: currentUser?.id || "user-current-01",
+        name: currentUser?.fullName || "Rian Prasetya",
+        avatar: currentUser?.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80",
+        phone: currentUser?.phone || "081298765432",
+        rating: 4.95,
+      },
+      helper: {
+        id: providerId || "mitra-jasa",
+        name: providerName || "Mitra Spesialis Resmi",
+        avatar: providerAvatar || serviceImage || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80",
+        phone: providerPhone || "081234567890",
+        rating: providerRating || 4.9,
+        address: providerAddress || "Purwokerto",
+      },
+      proofPhotos: [],
+      digitalFiles: [],
+      submissionUrl: "",
+      proofNotes: "",
+      lastUpdated: "Baru saja",
+      unreadCount: 0,
+      review: null,
+      messages: [
+        {
+          id: `msg-jasa-sys-${Date.now()}`,
+          senderId: "system",
+          senderName: "Bantuin Escrow Bot",
+          message: `Pembayaran sebesar ${formatIDR(finalTotal)} telah berhasil diamankan di Rekening Bersama (Escrow) Bantuin. Jadwal pengerjaan: ${targetDate || "Sesuai Jadwal"} pukul ${targetTime || "09:00"} WIB. Status pesanan: DANA DI ESCROW.`,
+          timestamp: "Sekarang",
+          isSystem: true,
+        },
+        {
+          id: `msg-jasa-prv-${Date.now()}`,
+          senderId: providerId || "mitra-jasa",
+          senderName: providerName || "Mitra Jasa",
+          senderAvatar: providerAvatar || serviceImage,
+          message: `Halo Kak Rian! Pesanan jasa "${serviceTitle || "Layanan"}" (${packageName || "Paket Standar"}) telah kami terima. Kami siap melaksanakan tugas sesuai rincian yang telah disepakati. Silakan kirimkan referensi atau catatan tambahan di sini ya!`,
+          timestamp: "Sekarang",
+        }
+      ]
+    };
+
+    setOrderRooms((prev) => [newRoom, ...prev]);
+    addToast("Pesanan Jasa Dikonfirmasi!", `Dana telah dikunci di Escrow. Silakan koordinasi dengan ${providerName || "Mitra"}.`);
+    return newRoom;
+  };
+
+  // 8g. Start Task Inquiry (Chat dengan Pelamar Tugas sebelum bayar escrow)
+  const startTaskInquiry = ({ request, offer }) => {
+    const helperId = offer?.helperId || offer?.id || "user-hlp-1";
+    const existing = orderRooms.find(
+      (r) => r.requestId === request?.id && (r.helper?.id === helperId || r.id === `inquiry-${request?.id}-${helperId}`)
+    );
+    if (existing) {
+      return existing;
+    }
+
+    const roomId = `inquiry-${request?.id || Date.now()}-${helperId}`;
+    const newRoom = {
+      id: roomId,
+      categoryType: "bantuan",
+      orderType: "task",
+      stage: "inquiry",
+      orderStatus: "inquiry",
+      requestId: request?.id || `req-${Date.now()}`,
+      requestTitle: request?.title || "Permintaan Bantuan",
+      category: request?.category || "Bantuan Komunitas",
+      mode: request?.mode || "offline",
+      requester: {
+        id: request?.requester?.id || currentUser?.id,
+        name: request?.requester?.name || currentUser?.fullName,
+        avatar: request?.requester?.avatar || currentUser?.avatar,
+        phone: "081298765432",
+        rating: 4.95,
+      },
+      helper: {
+        id: helperId,
+        name: offer?.helperName || "Helper Bantuin",
+        avatar: offer?.helperAvatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80",
+        phone: "081311223344",
+        rating: offer?.helperRating || 4.9,
+      },
+      lockedAmount: Number(offer?.proposedPrice) || Number(request?.rewardAmount) || 35000,
+      messages: [
+        {
+          id: `msg-sys-${Date.now()}`,
+          senderId: "system",
+          senderName: "Bantuin Escrow Bot",
+          message: `💬 Ruang diskusi pra-transaksi untuk tugas "${request?.title}". Diskusikan teknis pelaksanaan dan ketersediaan waktu sebelum mengunci dana di Escrow.`,
+          timestamp: "Sekarang",
+          isSystem: true,
+        },
+        {
+          id: `msg-pitch-${Date.now()}`,
+          senderId: helperId,
+          senderName: offer?.helperName || "Helper",
+          senderAvatar: offer?.helperAvatar,
+          message: offer?.pitchMessage || "Halo! Saya telah mengajukan penawaran untuk membantu tugas Anda. Ada yang perlu dikoordinasikan terlebih dahulu?",
+          timestamp: "Sekarang",
+        }
+      ]
+    };
+
+    setOrderRooms((prev) => [newRoom, ...prev]);
+    return newRoom;
+  };
+
+  // 8d. Pay Rental Escrow (dari dalam chat inquiry atau modal)
+  const payRentalEscrow = (roomId, paymentMethod = "qris") => {
+    let targetRentalId = null;
+    let targetLockedAmount = 0;
+
+    setOrderRooms((prev) =>
+      prev.map((r) => {
+        if (r.id === roomId) {
+          targetRentalId = r.requestId;
+          targetLockedAmount = r.lockedAmount || 0;
+          const updatedMessages = [
+            ...r.messages,
+            {
+              id: `msg-pay-${Date.now()}`,
+              senderId: "system",
+              senderName: "Bantuin Escrow Bot",
+              message: `💳 Pembayaran Escrow via ${paymentMethod.toUpperCase()} senilai ${formatIDR(r.lockedAmount)} (Sewa: ${formatIDR(r.rentalFeeAmount)} + Deposit Jaminan: ${formatIDR(r.depositAmount)}) BERHASIL! Dana aman di Rekber Bantuin. Status sewa kini: MENUNGGU SERAH TERIMA ALAT.`,
+              timestamp: "Sekarang",
+              isSystem: true,
+            }
+          ];
+          return {
+            ...r,
+            orderStatus: "paid_escrow",
+            stage: "active",
+            xenditStatus: "HELD_IN_ESCROW",
+            xenditInvoiceId: `XND-RENT-${Math.floor(100000 + Math.random() * 900000)}`,
+            lastUpdated: "Baru saja",
+            messages: updatedMessages,
+          };
+        }
+        return r;
+      })
+    );
+
+    // If paid using wallet, deduct balance
+    if (paymentMethod === "wallet" && targetLockedAmount > 0) {
+      setWalletBalance((prev) => Math.max(0, prev - targetLockedAmount));
+    }
+
+    // Dynamic update: Decrement available stock & increment totalRentedCount
+    if (targetRentalId) {
+      setRentals((prevRentals) =>
+        prevRentals.map((r) => {
+          if (r.id === targetRentalId) {
+            const curStock = typeof r.stock === "number" ? r.stock : 3;
+            const curRented = Number(r.totalRentedCount) || Number(r.owner?.completedOrders) || 86;
+            return {
+              ...r,
+              stock: Math.max(0, curStock - 1),
+              totalRentedCount: curRented + 1,
+              owner: {
+                ...(r.owner || {}),
+                completedOrders: (Number(r.owner?.completedOrders) || 86) + 1,
+              },
+            };
+          }
+          return r;
+        })
+      );
+    }
+
+    setRentalBookings((prev) =>
+      prev.map((b) => {
+        if (b.id === roomId || b.rentalId === targetRentalId) {
+          return { ...b, status: "paid_escrow", paymentMethod };
+        }
+        return b;
+      })
+    );
+
+    addToast("Pembayaran Escrow Berhasil!", "Dana terkunci aman di Rekening Bersama Bantuin. Silakan koordinasi serah terima alat.");
+  };
+
   // 9. KYC Submit & Admin KYC Verify
   const submitKYC = (ktmPhotoUrl, selfieUrl) => {
     setCurrentUser((prev) => ({
@@ -1077,6 +2356,40 @@ export function AppProvider({ children }) {
     addToast("Sengketa Selesai", "Keputusan admin telah tersimpan di immutable audit log.");
   };
 
+  // 11. User Submit Report (Notice & Takedown - Permenkominfo No. 5/2020)
+  const submitReport = ({ targetUserId, targetRoomId, targetRequestId, category, description, evidenceUrls = [] }) => {
+    const newReport = {
+      id: `rep-${Date.now()}`,
+      reporterId: currentUser?.id || "user-current",
+      reporterName: currentUser?.fullName || "Pengguna",
+      targetUserId: targetUserId || null,
+      targetRoomId: targetRoomId || null,
+      targetRequestId: targetRequestId || null,
+      category: category || "Lainnya",
+      description: description || "",
+      evidenceUrls,
+      status: "OPEN", // 'OPEN' | 'UNDER_REVIEW' | 'RESOLVED' | 'DISMISSED'
+      createdAt: new Date().toISOString(),
+    };
+
+    setReports((prev) => [newReport, ...(prev || [])]);
+
+    setAuditLogs((prev) => [
+      {
+        id: `log-${Date.now()}`,
+        actor: currentUser?.email || currentUser?.fullName || "Pengguna",
+        action: "USER_REPORT_SUBMITTED",
+        target: targetRoomId ? `ROOM #${targetRoomId}` : (targetUserId ? `USER #${targetUserId}` : "GENERAL"),
+        details: `Kategori: ${category}. Keterangan: ${description}`,
+        timestamp: new Date().toISOString(),
+      },
+      ...(prev || []),
+    ]);
+
+    addToast("Laporan Diterima", "Laporan Anda telah diteruskan ke tim moderasi untuk verifikasi.", "success");
+    return newReport;
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -1115,8 +2428,22 @@ export function AppProvider({ children }) {
         walletBalance,
         setWalletBalance,
         pendingEscrowBalance,
+        mitraAvailableBalance,
+        setMitraAvailableBalance,
+        mitraPendingBalance,
+        setMitraPendingBalance,
+        mitraTotalEarned,
+        setMitraTotalEarned,
+        customerDeposits,
+        setCustomerDeposits,
+        ledgerEntries,
+        setLedgerEntries,
         withdrawals,
         withdrawFunds,
+        adminMarkWithdrawalSuccess,
+        adminRejectWithdrawal,
+        adminMarkItemReturned,
+        adminMarkDepositRefunded,
         topUpFunds,
         providerSettings,
         updateProviderSettings,
@@ -1134,11 +2461,20 @@ export function AppProvider({ children }) {
         sendChatMessage,
         deleteChatMessage,
         editChatMessage,
-        deleteChatRoom,
         bookRental,
+        createRentalOrder,
+        startRentalInquiry,
+        startJasaInquiry,
+        startTaskInquiry,
+        createJasaOrder,
+        payRentalEscrow,
+        confirmRentalHandover,
+        confirmRentalReturn,
+        submitRentalReview,
         submitKYC,
         adminVerifyUser,
         resolveDispute,
+        submitReport,
       }}
     >
       {children}

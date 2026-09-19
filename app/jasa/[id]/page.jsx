@@ -5,40 +5,119 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
+import LocationPickerMap from "@/components/map/LocationPickerMap";
+import { reverseGeocodeCoordinates } from "@/lib/services/gpsService";
 import { useApp } from "@/lib/context/AppContext";
 import { formatIDR } from "@/lib/utils";
+import { getCatalogServiceById } from "@/lib/mock/providersData";
 import { 
-  ShieldCheck, 
-  Star, 
   ArrowLeft, 
+  Star, 
+  ShieldCheck, 
   CheckCircle2, 
-  Send, 
-  Palette,
-  Briefcase,
-  MapPin,
-  Navigation
+  Clock, 
+  MapPin, 
+  Store, 
+  Calendar,
+  ChevronRight,
+  MessageSquare,
+  Lock,
+  Check,
+  Award,
+  Globe,
+  FileText,
+  Home,
+  Navigation,
+  Loader2
 } from "lucide-react";
-import { getNavigationUrl } from "@/lib/services/gpsService";
-import MapComponent from "@/components/map/MapComponent";
 
-export default function JasaDetailPage() {
+export default function JasaCheckoutDetailPage() {
   const { id } = useParams();
   const router = useRouter();
-  const { services, createRequest, getDistanceToUser, userCoordinates } = useApp();
 
-  const [briefNotes, setBriefNotes] = useState("");
-  const [budgetVal, setBudgetVal] = useState("");
-  const [isSent, setIsSent] = useState(false);
+  const service = getCatalogServiceById(id);
 
-  const service = services.find((s) => s.id === id) || services[0];
+  const { 
+    userCoordinates, 
+    userRealLocation, 
+    selectedLocation, 
+    detectUserLocation,
+    startJasaInquiry 
+  } = useApp() || {};
 
+  // ── Semua hooks harus dideklarasikan SEBELUM early return (Rules of Hooks) ──
+  const tomorrowStr = new Date(Date.now() + 86400000).toISOString().split("T")[0];
+
+  const [activePhotoIndex, setActivePhotoIndex] = useState(0);
+  const [targetDate, setTargetDate] = useState(tomorrowStr);
+  const [targetTime, setTargetTime] = useState("09:00");
+  const [notes, setNotes] = useState("");
+  const [alamat, setAlamat] = useState(userRealLocation?.fullAddress || selectedLocation || "");
+  const [patokan, setPatokan] = useState("");
+  const [brief, setBrief] = useState("");     // untuk jasa digital
+  const [coords, setCoords] = useState(
+    userCoordinates || 
+    (userRealLocation ? { latitude: userRealLocation.latitude, longitude: userRealLocation.longitude } : { latitude: -7.4243, longitude: 109.2304 })
+  );
+  const [isDetectingGPS, setIsDetectingGPS] = useState(false);
+  const [isReverseGeocoding, setIsReverseGeocoding] = useState(false);
+
+  const handleUseMyGPS = async () => {
+    setIsDetectingGPS(true);
+    try {
+      let loc = userRealLocation;
+      if (!loc || !userCoordinates) {
+        if (detectUserLocation) {
+          loc = await detectUserLocation();
+        }
+      }
+      if (loc) {
+        const address = loc.fullAddress || `${loc.district ? loc.district + ", " : ""}${loc.city}`;
+        setAlamat(address);
+        setCoords({ latitude: loc.latitude, longitude: loc.longitude });
+      }
+    } catch (e) {
+      console.warn("GPS detection failed in jasa order:", e);
+    } finally {
+      setIsDetectingGPS(false);
+    }
+  };
+
+  const handleMapLocationChange = ({ latitude, longitude }) => {
+    setCoords({ latitude, longitude });
+  };
+
+  const handleSyncAddressFromCoords = async () => {
+    if (!coords) return;
+    setIsReverseGeocoding(true);
+    try {
+      const res = await reverseGeocodeCoordinates(coords.latitude, coords.longitude);
+      if (res && (res.fullAddress || res.shortLocation)) {
+        setAlamat(res.fullAddress || res.shortLocation);
+      }
+    } catch (e) {
+      console.warn("Reverse geocode failed:", e);
+    } finally {
+      setIsReverseGeocoding(false);
+    }
+  };
+
+  // Pilihan paket — diinisialisasi null dulu, di-resolve setelah guard
+  const [selectedPackage, setSelectedPackage] = useState(null);
+  const [isOrderedSuccess, setIsOrderedSuccess] = useState(false);
+
+  // Jika jasa tidak ditemukan
   if (!service) {
     return (
-      <div className="min-h-screen flex flex-col bg-[#F5FAFF]">
+      <div className="min-h-screen flex flex-col bg-[#F8FAFC]">
         <Navbar />
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-          <h2 className="text-xl font-bold text-[#102A43]">Jasa Tidak Ditemukan</h2>
-          <Link href="/jasa" className="mt-4 px-4 py-2 bg-[#1683FF] text-white rounded-xl text-xs font-semibold">
+          <h2 className="text-xl font-bold text-slate-900">Layanan Jasa Tidak Ditemukan</h2>
+          <p className="text-xs text-slate-500 mt-1">Layanan yang Anda cari mungkin sudah tidak aktif atau berpindah.</p>
+          <Link 
+            href="/jasa" 
+            className="mt-4 px-4 py-2 bg-[#1683FF] text-white rounded-xl text-xs font-semibold hover:bg-[#0F6FE5] transition"
+          >
             Kembali ke Katalog Jasa
           </Link>
         </div>
@@ -47,234 +126,752 @@ export default function JasaDetailPage() {
     );
   }
 
-  const handleSendBrief = (e) => {
-    e.preventDefault();
-    if (!briefNotes.trim()) return;
-    
-    // Create linked request
-    createRequest({
-      title: `Pesanan Jasa: ${service.title}`,
-      description: briefNotes,
-      category: service.category,
-      mode: "online",
-      locationName: "Online Workroom",
-      deadline: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
-      rewardAmount: Number(budgetVal) || service.startingPrice,
-      isVoluntary: false,
-    });
+  // ── Deteksi tipe jasa: Online/Digital vs Offline/Lapangan ──
+  const catGroup = (service.categoryGroup || "").toLowerCase();
+  const isDigitalService =
+    catGroup.includes("desain") ||
+    catGroup.includes("web") ||
+    catGroup.includes("it") ||
+    catGroup.includes("bahasa") ||
+    (service.provider?.city || "").toLowerCase().includes("online") ||
+    (service.provider?.city || "").toLowerCase().includes("remote");
 
-    setIsSent(true);
+  // Galeri Foto
+  const photos = service.photos && service.photos.length > 0
+    ? service.photos
+    : [service.image];
+
+  // Pilihan Paket Layanan yang Benar-Benar Sesuai dengan Penyedia Jasa
+  const availablePackages = service.packages && service.packages.length > 0
+    ? service.packages
+    : [
+        {
+          id: `pkg-${service.id}`,
+          name: service.title,
+          tier: "Layanan Standar",
+          price: service.price,
+          duration: "1 - 2 Hari Kerja",
+          description: service.desc || "Pengerjaan layanan standar sesuai deskripsi kebutuhan.",
+          features: [
+            "Pengerjaan langsung oleh mitra terverifikasi",
+            "Garansi pengerjaan & revisi wajar",
+            "File resolusi tinggi siap pakai",
+            "Koordinasi langsung via chat Bantuin"
+          ],
+          isPopular: true
+        }
+      ];
+
+  // Resolve paket aktif (gunakan state jika sudah dipilih, fallback ke popular/first)
+  const activePkg = selectedPackage ||
+    (availablePackages.find((p) => p.isPopular) || availablePackages[0]);
+
+  const platformFee = Math.round(activePkg.price * 0.08);
+  const netProviderPayout = activePkg.price - platformFee;
+
+  const handleCheckout = (e) => {
+    e.preventDefault();
+    const finalAlamat = [alamat, patokan ? `(Patokan: ${patokan})` : ""].filter(Boolean).join(" ");
+    const extraParam = isDigitalService
+      ? `&brief=${encodeURIComponent(brief)}`
+      : `&time=${encodeURIComponent(targetTime)}&alamat=${encodeURIComponent(finalAlamat)}&lat=${coords?.latitude || ""}&lng=${coords?.longitude || ""}`;
+    router.push(
+      `/jasa/${service.id}/pembayaran?pkg=${activePkg.id}&date=${targetDate}${extraParam}&notes=${encodeURIComponent(notes)}&mode=${isDigitalService ? "digital" : "lokasi"}`
+    );
   };
 
-  const distanceInfo = getDistanceToUser
-    ? getDistanceToUser(service.latitude, service.longitude, service.distanceMeters)
-    : null;
+  const handleStartChat = () => {
+    if (startJasaInquiry && service) {
+      const inqRoom = startJasaInquiry({
+        serviceId: service.id,
+        serviceTitle: service.title,
+        serviceImage: service.image,
+        servicePrice: activePkg?.price || service.price,
+        providerId: service.provider?.id,
+        providerName: service.provider?.name,
+        providerAvatar: service.provider?.avatar,
+        providerPhone: service.provider?.phone,
+        providerRating: service.provider?.rating,
+        providerAddress: service.provider?.address || service.provider?.location,
+        category: service.category,
+      });
+      router.push(`/chat?room=${inqRoom?.id}`);
+    } else {
+      router.push(`/chat?partnerId=${service.provider?.id}&serviceId=${service.id}`);
+    }
+  };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#F5FAFF]">
+    <div className="min-h-screen flex flex-col bg-[#F8FAFC]">
       <Navbar />
 
-      <main className="flex-1 max-w-[1100px] w-full mx-auto px-4 md:px-6 py-8">
+      <main className="flex-1 max-w-[1360px] w-full mx-auto px-4 md:px-6 lg:px-8 py-6 sm:py-8">
         
-        {/* Back Link */}
-        <Link
-          href="/jasa"
-          className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#61758A] hover:text-[#1683FF] mb-6 transition"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Kembali ke Katalog Jasa</span>
-        </Link>
+        {/* Breadcrumb / Navigasi Kembali */}
+        <div className="mb-5">
+          <Link
+            href="/jasa"
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-[#1683FF] transition"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Kembali ke Katalog Jasa</span>
+          </Link>
+        </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        {/* Layout 2 Kolom: Detail Layanan (Kiri) + Checkout Box (Kanan) */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-7 items-start">
           
-          {/* Main Content (7 cols) */}
+          {/* ============================================================ */}
+          {/* KOLOM KIRI (7 Kolom): FOTO, RINCIAN & PILIHAN PAKETAN       */}
+          {/* ============================================================ */}
           <div className="lg:col-span-7 space-y-6">
             
-            {/* Service Profile Card */}
-            <div className="bg-white border border-[#DCEAF7] rounded-2xl p-6 sm:p-8 shadow-sm">
-              <div className="flex items-start gap-4 mb-6">
-                <img
-                  src={service.avatarUrl}
-                  alt={service.providerName}
-                  className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-md ring-2 ring-[#EAF4FF]"
-                />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="font-bold text-base text-[#102A43]">{service.providerName}</h2>
-                    {service.isVerified && (
-                      <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                        <ShieldCheck className="w-3 h-3" />
-                        Terverifikasi
-                      </span>
-                    )}
+            {/* CARD 1: FOTO & DETAIL UTAMA JASA */}
+            <div className="bg-white rounded-3xl border border-slate-200/90 p-5 sm:p-7 shadow-xs space-y-5">
+              
+              {/* Galeri Foto Jasa */}
+              <div className="space-y-3">
+                <div className="relative aspect-[16/10] w-full rounded-2xl overflow-hidden bg-slate-100 border border-slate-100">
+                  <img
+                    src={photos[activePhotoIndex] || service.image}
+                    alt={service.title}
+                    className="w-full h-full object-cover transition-all duration-300"
+                  />
+                  <div className="absolute top-3 left-3">
+                    <span className="text-xs font-extrabold px-3 py-1 rounded-lg bg-black/60 text-white backdrop-blur-xs shadow-xs">
+                      {service.category}
+                    </span>
                   </div>
-                  <p className="text-xs text-[#61758A] mt-0.5">{service.providerFaculty}</p>
-                  <div className="flex items-center gap-2 mt-2 text-xs font-semibold text-[#102A43]">
-                    <div className="flex items-center gap-1">
-                      <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" />
-                      <span>{service.ratingAvg}</span>
-                    </div>
-                    <span>·</span>
-                    <span className="text-[#61758A] font-normal">{service.completedJobs} pesanan selesai</span>
+                </div>
+
+                {/* Thumbnail Bar jika lebih dari 1 foto */}
+                {photos.length > 1 && (
+                  <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+                    {photos.map((pUrl, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setActivePhotoIndex(idx)}
+                        className={`relative w-16 h-16 rounded-xl overflow-hidden shrink-0 border-2 transition cursor-pointer ${
+                          activePhotoIndex === idx
+                            ? "border-[#1683FF] ring-2 ring-[#1683FF]/20"
+                            : "border-slate-200 opacity-70 hover:opacity-100"
+                        }`}
+                      >
+                        <img
+                          src={pUrl}
+                          alt={`Thumbnail ${idx + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                      </button>
+                    ))}
                   </div>
+                )}
+              </div>
+
+              {/* Judul & Rating */}
+              <div className="space-y-2 pt-1 border-t border-slate-100">
+                <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-snug">
+                  {service.title}
+                </h1>
+
+                <div className="flex items-center gap-3 text-xs text-slate-500">
+                  <div className="flex items-center gap-1 font-bold text-amber-500">
+                    <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                    <span>{service.provider.rating}</span>
+                    <span className="text-slate-400 font-normal">
+                      ({service.provider.reviewsCount || 42} ulasan)
+                    </span>
+                  </div>
+                  <span>•</span>
+                  <span className="font-semibold text-slate-700">
+                    {service.provider.completedJobs || 58} pesanan selesai
+                  </span>
                 </div>
               </div>
 
-              <h1 className="text-xl sm:text-2xl font-bold text-[#102A43] tracking-tight mb-4">
-                {service.title}
-              </h1>
-
-              <div className="flex flex-wrap gap-1.5 mb-6">
-                {service.tags?.map((tag, i) => (
-                  <span key={i} className="text-xs px-3 py-1 bg-[#F5FAFF] text-[#1683FF] border border-[#DCEAF7] rounded-lg">
-                    {tag}
-                  </span>
-                ))}
+              {/* Deskripsi Layanan */}
+              <div className="pt-3 border-t border-slate-100 space-y-1.5">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  Deskripsi Layanan
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
+                  {service.desc}
+                </p>
               </div>
 
-              <div className="text-sm text-[#61758A] leading-relaxed mb-6">
-                {service.desc || "Siap membantu pengerjaan desain, visual, dan kebutuhan materi kampus dengan pengerjaan profesional dan revisi cepat."}
+            </div>
+
+            {/* CARD 2: PROFIL TOKO / MITRA PENYEDIA (DILENGKAPI BANNER & FOTO PROFIL) */}
+            <div className="bg-white rounded-3xl border border-slate-200/90 overflow-hidden shadow-xs">
+              {/* Mini Cover Banner */}
+              {service.provider.coverBanner && (
+                <div className="relative h-20 sm:h-24 w-full bg-slate-900 overflow-hidden">
+                  <img
+                    src={service.provider.coverBanner}
+                    alt={service.provider.name}
+                    className="w-full h-full object-cover opacity-50"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 to-transparent" />
+                </div>
+              )}
+              
+              <div className="p-5 sm:p-6 -mt-8 relative z-10 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <img
+                      src={service.provider.avatar}
+                      alt={service.provider.name}
+                      className="w-16 h-16 rounded-2xl object-cover border-3 border-white shadow-md shrink-0 bg-white"
+                    />
+                    <div className="min-w-0 pt-3 sm:pt-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="font-black text-sm sm:text-base text-slate-900 truncate">
+                          {service.provider.name}
+                        </h4>
+                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 flex items-center gap-1 shrink-0">
+                          <ShieldCheck className="w-3 h-3" />
+                          <span>Terverifikasi</span>
+                        </span>
+                      </div>
+                      <div className="text-xs text-slate-500 line-clamp-1 mt-0.5">
+                        {service.provider.brandTitle}
+                      </div>
+                    </div>
+                  </div>
+
+                  <Link
+                    href={`/jasa/penyedia/${service.provider.id}`}
+                    className="px-4 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#1683FF] text-xs font-bold transition flex items-center gap-1.5 shrink-0 self-start sm:self-auto border border-blue-100 shadow-2xs"
+                  >
+                    <Store className="w-3.5 h-3.5" />
+                    <span>Kunjungi Profil Lengkap</span>
+                  </Link>
+                </div>
+
+                <div className="flex items-center gap-3 text-xs text-slate-500 pt-2 border-t border-slate-100 flex-wrap">
+                  <div className="flex items-center gap-1 text-amber-500 font-bold">
+                    <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                    <span>{service.provider.rating || 4.98}</span>
+                    <span className="text-slate-400 font-medium">({service.provider.reviewsCount || 54} ulasan)</span>
+                  </div>
+                  <span>•</span>
+                  <span className="flex items-center gap-1">
+                    <Award className="w-3.5 h-3.5 text-[#1683FF]" />
+                    <span>{service.provider.completedJobs || 72} Projek Selesai</span>
+                  </span>
+                  <span>•</span>
+                  <span className="flex items-center gap-1 text-slate-600">
+                    <MapPin className="w-3 h-3 text-[#1683FF]" />
+                    <span className="truncate max-w-[160px]">{service.provider.location}</span>
+                  </span>
+                </div>
               </div>
             </div>
 
-            {/* Direct Geolocation Studio / Workshop Point Card */}
-            {service.latitude && service.longitude && (
-              <div className="bg-white border border-[#DCEAF7] rounded-2xl p-6 shadow-sm space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <MapPin className="w-4 h-4 text-[#7C3AED]" />
-                    <h3 className="font-bold text-sm text-[#102A43]">
-                      Titik Lokasi Studio / Workshop Layanan
-                    </h3>
-                  </div>
-                  <a
-                    href={getNavigationUrl(
-                      service.latitude,
-                      service.longitude,
-                      userCoordinates?.latitude,
-                      userCoordinates?.longitude
-                    )}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-[#1683FF] hover:text-[#0F6FE5] bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-xl border border-blue-200 transition"
-                  >
-                    <Navigation className="w-3.5 h-3.5" />
-                    <span>Petunjuk Arah Google Maps</span>
-                  </a>
-                </div>
-
-                <div className="text-xs text-[#61758A]">
-                  <div className="font-medium text-slate-800">{service.address || service.location}</div>
-                  {distanceInfo?.text && (
-                    <div className="mt-1 flex items-center gap-1.5 text-slate-600 font-semibold">
-                      <span>Jarak: {distanceInfo.text} dari posisi GPS Anda</span>
-                      {distanceInfo?.isRealtime && (
-                        <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200">
-                          GPS Aktif
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <MapComponent
-                  points={[
-                    {
-                      id: service.id,
-                      title: service.title,
-                      latitude: service.latitude,
-                      longitude: service.longitude,
-                      type: "service",
-                      startingPrice: service.startingPrice,
-                      address: service.address || service.location,
-                    }
-                  ]}
-                  userLocation={userCoordinates}
-                  height="220px"
-                  showRouteLine={true}
-                />
-              </div>
-            )}
-
-            {service.mode === "online" && (
-              <div className="bg-white border border-[#DCEAF7] rounded-2xl p-6 shadow-sm flex items-center gap-3.5">
-                <div className="w-11 h-11 rounded-xl bg-purple-50 text-[#7C3AED] flex items-center justify-center shrink-0">
-                  <Palette className="w-5 h-5" />
-                </div>
+            {/* CARD 3: PILIHAN PAKETAN (BENTUK CARD SEDERHANA) */}
+            <div className="bg-white rounded-3xl border border-slate-200/90 p-5 sm:p-7 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-slate-100 pb-3">
                 <div>
-                  <h4 className="font-bold text-xs sm:text-sm text-[#102A43]">Pengerjaan Online / Remote</h4>
-                  <p className="text-xs text-[#61758A] mt-0.5">
-                    Layanan ini dapat dipesan dan dikerjakan dari mana saja di seluruh Indonesia via order room dan koordinasi digital.
+                  <h3 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
+                    Pilihan Paket Layanan
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Pilih paket yang sesuai kebutuhan Anda. Rincian harga di samping akan otomatis menyesuaikan.
                   </p>
                 </div>
+                <span className="text-xs font-bold text-slate-400 shrink-0">
+                  {availablePackages.length} Pilihan Tersedia
+                </span>
               </div>
-            )}
+
+              {/* Grid Card Sederhana Pilihan Paketan */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 pt-1">
+                {availablePackages.map((pkg) => {
+                  const isSelected = activePkg.id === pkg.id;
+                  return (
+                    <div
+                      key={pkg.id}
+                      onClick={() => setSelectedPackage(pkg)}
+                      className={`p-4 rounded-2xl border-2 transition-all duration-200 cursor-pointer flex flex-col justify-between relative ${
+                        isSelected
+                          ? "border-[#1683FF] bg-blue-50/35 shadow-xs"
+                          : "border-slate-200/80 bg-white hover:border-slate-300 hover:bg-slate-50/50"
+                      }`}
+                    >
+                      {/* Checkmark Indicator Terpilih */}
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div>
+                          {pkg.tier && (
+                            <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 block w-fit mb-1">
+                              {pkg.tier}
+                            </span>
+                          )}
+                          <h4 className="font-bold text-sm text-slate-900 leading-snug">
+                            {pkg.name}
+                          </h4>
+                        </div>
+
+                        <div
+                          className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition ${
+                            isSelected
+                              ? "bg-[#1683FF] text-white"
+                              : "border-2 border-slate-300 text-transparent"
+                          }`}
+                        >
+                          <Check className="w-3 h-3 stroke-[3]" />
+                        </div>
+                      </div>
+
+                      {/* Deskripsi & Durasi */}
+                      <p className="text-xs text-slate-500 line-clamp-2 mb-3">
+                        {pkg.description}
+                      </p>
+
+                      {/* Fitur Bullet List */}
+                      {pkg.features && pkg.features.length > 0 && (
+                        <div className="space-y-1.5 pt-2 border-t border-slate-100/80 mb-3">
+                          {pkg.features.slice(0, 3).map((feat, fIdx) => (
+                            <div key={fIdx} className="flex items-start gap-1.5 text-[11px] text-slate-700">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                              <span className="line-clamp-1">{feat}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Harga Paket */}
+                      <div className="pt-2 border-t border-slate-100/80 flex items-center justify-between mt-auto">
+                        <span className="text-[11px] text-slate-400 font-medium">
+                          Durasi: {pkg.duration || "1-2 Hari"}
+                        </span>
+                        <span className="font-black text-sm sm:text-base text-[#1683FF]">
+                          {formatIDR(pkg.price)}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+            </div>
+
+            {/* CARD 4: ULASAN PELANGGAN TERVERIFIKASI */}
+            <div className="bg-white rounded-3xl border border-slate-200/90 p-5 sm:p-7 shadow-xs space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 className="text-sm sm:text-base font-bold text-slate-900">
+                  Ulasan Pelanggan ({service.reviews?.length || 2})
+                </h3>
+                <div className="text-xs font-bold text-amber-500 flex items-center gap-1">
+                  <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                  <span>{service.provider.rating} / 5.0</span>
+                </div>
+              </div>
+
+              <div className="space-y-3.5 divide-y divide-slate-100">
+                {(service.reviews && service.reviews.length > 0 ? service.reviews : [
+                  {
+                    id: "rev-default-1",
+                    userName: "Dimas Saputra",
+                    userAvatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80",
+                    rating: 5,
+                    date: "3 hari yang lalu",
+                    comment: "Pengerjaan sangat cepat dan rapi. Komunikatif sekali via chat dan hasilnya memuaskan!"
+                  },
+                  {
+                    id: "rev-default-2",
+                    userName: "Nadia Rahma",
+                    userAvatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=120&q=80",
+                    rating: 5,
+                    date: "1 minggu yang lalu",
+                    comment: "Mitra datang tepat waktu dan ramah. Biaya transparan sesuai aplikasi tanpa biaya tersembunyi."
+                  }
+                ]).map((rev) => (
+                  <div key={rev.id} className="pt-3.5 first:pt-0 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <img
+                          src={rev.userAvatar || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80"}
+                          alt={rev.userName}
+                          className="w-7 h-7 rounded-full object-cover border border-slate-200"
+                        />
+                        <div>
+                          <span className="font-bold text-xs text-slate-900 block leading-tight">
+                            {rev.userName}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {rev.date}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-0.5">
+                        {[...Array(5)].map((_, i) => (
+                          <Star key={i} className="w-3 h-3 fill-amber-400 text-amber-400" />
+                        ))}
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-600 pl-9.5 leading-relaxed">
+                      {rev.comment}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
 
           </div>
 
-          {/* Right Column: Brief Inquiry Form (5 cols) */}
-          <div className="lg:col-span-5 space-y-6">
-            <div className="bg-white border border-[#DCEAF7] rounded-2xl p-6 sm:p-8 shadow-sm">
-              <div className="mb-6 pb-4 border-b border-[#DCEAF7]">
-                <span className="text-xs text-[#61758A]">Harga Mulai Dari</span>
-                <div className="text-2xl font-extrabold text-[#1683FF]">
-                  {formatIDR(service.startingPrice)}
+          {/* ============================================================ */}
+          {/* KOLOM KANAN (5 Kolom): STICKY CHECKOUT PANEL (MIRIP SEWA)   */}
+          {/* ============================================================ */}
+          <div className="lg:col-span-5 lg:sticky lg:top-24">
+            <div className="bg-white border border-slate-200/90 rounded-3xl p-5 sm:p-7 shadow-xs space-y-5">
+              
+              {/* Header Box Checkout */}
+              <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
+                <h3 className="font-black text-sm sm:text-base text-slate-900">
+                  Checkout Pesanan Jasa
+                </h3>
+                <span className="text-[11px] font-bold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
+                  Rekber Aktif
+                </span>
+              </div>
+
+              {/* Preview Produk & Penyedia */}
+              <div className="flex items-center gap-3 p-3 rounded-2xl bg-slate-50/80 border border-slate-100">
+                <img
+                  src={service.image}
+                  alt={service.title}
+                  className="w-14 h-14 rounded-xl object-cover border border-slate-200 shrink-0"
+                />
+                <div className="min-w-0 flex-1">
+                  <h4 className="font-bold text-xs sm:text-sm text-slate-900 truncate">
+                    {service.title}
+                  </h4>
+                  <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                    Oleh: <span className="font-semibold text-slate-700">{service.provider.name}</span>
+                  </p>
                 </div>
               </div>
 
-              {!isSent ? (
-                <form onSubmit={handleSendBrief} className="space-y-4">
-                  <h3 className="font-bold text-sm text-[#102A43]">Kirim Brief Kebutuhan</h3>
+              {/* Rincian Paket Terpilih */}
+              <div className="p-3.5 rounded-2xl bg-blue-50/60 border border-blue-100 space-y-1">
+                <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider block">
+                  Paket yang Dipilih:
+                </span>
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-xs sm:text-sm text-slate-900">
+                    {activePkg.name}
+                  </span>
+                  <span className="font-black text-sm sm:text-base text-[#1683FF]">
+                    {formatIDR(activePkg.price)}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-500 pt-0.5">
+                  Estimasi durasi: {activePkg.duration || "1-2 Hari"}
+                </div>
+              </div>
 
+              {/* Form Input Pesanan */}
+              {!isOrderedSuccess ? (
+                <form onSubmit={handleCheckout} className="space-y-4">
+
+                  {/* Badge tipe jasa: Digital vs Datang ke Lokasi */}
+                  <div className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl text-xs font-bold border ${
+                    isDigitalService
+                      ? "bg-blue-50 text-blue-700 border-blue-200/80"
+                      : "bg-amber-50 text-amber-800 border-amber-200/80"
+                  }`}>
+                    {isDigitalService
+                      ? <Globe className="w-4 h-4 shrink-0 text-blue-600" />
+                      : <MapPin className="w-4 h-4 shrink-0 text-amber-600" />}
+                    <span>
+                      {isDigitalService
+                        ? "Jasa Digital — Pengerjaan Berkas & Jarak Jauh"
+                        : "Datang ke Lokasi — Mitra Hadir Langsung ke Tempatmu"}
+                    </span>
+                  </div>
+
+                  {/* Tanggal — semua tipe jasa */}
                   <div>
-                    <label className="block text-xs font-semibold text-[#102A43] mb-1">
-                      Deskripsi Tugas / Project:
+                    <label className="block text-xs font-bold text-slate-800 mb-1">
+                      {isDigitalService ? "Deadline / Target Selesai:" : "Tanggal Pelaksanaan yang Diinginkan:"}
+                    </label>
+                    <div className="relative">
+                      <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="date"
+                        required
+                        value={targetDate}
+                        onChange={(e) => setTargetDate(e.target.value)}
+                        className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/15 transition bg-white"
+                      />
+                    </div>
+                  </div>
+
+                  {/* ── JASA DATANG KE LOKASI: Jam + Titik Maps + Alamat Otomatis ── */}
+                  {!isDigitalService && (
+                    <>
+                      {/* Jam Pelaksanaan */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-xs font-bold text-slate-800">
+                            Jam Mulai Pengerjaan:
+                          </label>
+                          <span className="text-[11px] font-bold text-[#1683FF]">
+                            {targetTime} WIB
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="relative w-36 shrink-0">
+                            <Clock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                            <input
+                              type="time"
+                              required
+                              value={targetTime}
+                              onChange={(e) => setTargetTime(e.target.value)}
+                              className="w-full pl-9 pr-2 py-2 rounded-xl border border-slate-200 text-xs text-slate-900 outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/15 transition bg-white font-bold"
+                            />
+                          </div>
+                          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
+                            {["07:00", "09:00", "11:00", "14:00", "16:00"].map((preset) => (
+                              <button
+                                key={preset}
+                                type="button"
+                                onClick={() => setTargetTime(preset)}
+                                className={`px-2 py-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer border shrink-0 ${
+                                  targetTime === preset
+                                    ? "bg-[#1683FF] text-white border-[#1683FF]"
+                                    : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
+                                }`}
+                              >
+                                {preset}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Interactive Map & Titik Lokasi Pengerjaan */}
+                      <div className="space-y-3 p-3.5 sm:p-4 rounded-2xl bg-slate-50/80 border border-slate-200/90">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1 border-b border-slate-200/60">
+                          <div>
+                            <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                              <MapPin className="w-3.5 h-3.5 text-[#1683FF]" />
+                              <span>Titik Lokasi Pengerjaan</span>
+                              <span className="text-red-500">*</span>
+                            </h4>
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                              Tentukan titik di peta agar Anda tidak perlu mengetik alamat manual.
+                            </p>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={handleUseMyGPS}
+                            disabled={isDetectingGPS}
+                            className="inline-flex items-center gap-1.5 text-xs font-bold text-[#1683FF] hover:text-[#0F6FE5] bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-xl border border-blue-200/80 transition cursor-pointer self-start sm:self-auto"
+                          >
+                            {isDetectingGPS ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                <span>Mendeteksi GPS...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Navigation className="w-3.5 h-3.5" />
+                                <span>Gunakan GPS Saya</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        {/* Peta Pin Picker */}
+                        <div>
+                          <LocationPickerMap
+                            latitude={coords?.latitude || -7.4243}
+                            longitude={coords?.longitude || 109.2304}
+                            onChange={handleMapLocationChange}
+                            onUseGps={handleUseMyGPS}
+                            isDetectingGPS={isDetectingGPS}
+                            height="220px"
+                          />
+
+                          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                            <div className="flex items-center gap-1.5 text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/80 font-medium">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                              <span>
+                                Pin Terkunci: {coords ? `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}` : "Belum ditentukan"}
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={handleSyncAddressFromCoords}
+                              disabled={isReverseGeocoding}
+                              className="text-[#1683FF] hover:text-[#0F6FE5] font-bold hover:underline inline-flex items-center gap-1 cursor-pointer"
+                            >
+                              {isReverseGeocoding ? (
+                                <>
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  <span>Membaca Alamat Peta...</span>
+                                </>
+                              ) : (
+                                <span>Gunakan Alamat dari Titik Pin Peta</span>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Alamat Terisi Otomatis & Patokan */}
+                        <div className="space-y-2 pt-1">
+                          <div>
+                            <label className="block text-xs font-bold text-slate-800 mb-1">
+                              <span className="text-red-500">*</span> Alamat Lengkap:
+                            </label>
+                            <textarea
+                              rows={2}
+                              required
+                              value={alamat}
+                              onChange={(e) => setAlamat(e.target.value)}
+                              placeholder="Alamat akan terisi otomatis dari titik peta, atau ketik langsung di sini..."
+                              className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 placeholder-slate-400 outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/15 transition resize-none bg-white"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                              Patokan / Detail Khusus (Opsional):
+                            </label>
+                            <input
+                              type="text"
+                              value={patokan}
+                              onChange={(e) => setPatokan(e.target.value)}
+                              placeholder="Contoh: Kamar 3B, pagar hitam, belakang Indomaret..."
+                              className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs text-slate-900 placeholder-slate-400 outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/15 transition bg-white"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {/* ── JASA DIGITAL: Brief / Keterangan Detail ── */}
+                  {isDigitalService && (
+                    <div>
+                      <label className="block text-xs font-bold text-slate-800 mb-1">
+                        <span className="text-red-500">*</span> Brief / Keterangan Detail Kebutuhan:
+                      </label>
+                      <textarea
+                        rows={4}
+                        required
+                        value={brief}
+                        onChange={(e) => setBrief(e.target.value)}
+                        placeholder="Ceritakan kebutuhanmu secara detail:\n• Ukuran / format output yang diinginkan\n• Referensi gaya / contoh yang kamu suka\n• Warna, font, atau tema yang diinginkan\n• Deadline dan revisi yang diharapkan"
+                        className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 placeholder-slate-400 outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/15 transition resize-none bg-white"
+                      />
+                      <p className="text-[10px] text-slate-400 mt-1">Semakin detail brief-mu, semakin cepat mitra bisa mulai mengerjakan.</p>
+                    </div>
+                  )}
+
+                  {/* Catatan Tambahan — semua tipe jasa */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-800 mb-1">
+                      Catatan Tambahan (Opsional):
                     </label>
                     <textarea
-                      rows={4}
-                      required
-                      value={briefNotes}
-                      onChange={(e) => setBriefNotes(e.target.value)}
-                      placeholder="Jelaskan kebutuhanmu, ukuran/format, deadline, dan referensi..."
-                      className="w-full text-xs p-3 rounded-xl border border-[#DCEAF7] focus:outline-none focus:border-[#1683FF]"
+                      rows={2}
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      placeholder={isDigitalService
+                        ? "Contoh: Tolong kirim file .AI dan .PNG sekaligus, ada logo lama bisa saya kirim via chat..."
+                        : "Contoh: Tolong bawa tangga ekstra, ada 2 unit AC di lantai 2..."}
+                      className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 placeholder-slate-400 outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/15 transition resize-none bg-white"
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-[#102A43] mb-1">
-                      Estimasi Budget Kamu (Rp):
-                    </label>
-                    <input
-                      type="number"
-                      defaultValue={service.startingPrice}
-                      onChange={(e) => setBudgetVal(e.target.value)}
-                      className="w-full text-xs p-2.5 rounded-xl border border-[#DCEAF7] focus:outline-none"
-                    />
+                  {/* Rincian Transparansi Biaya */}
+                  <div className="pt-3 border-t border-slate-100 space-y-2 text-xs">
+                    <div className="flex items-center justify-between text-slate-600">
+                      <span>Tarif Layanan ({activePkg.name})</span>
+                      <span className="font-semibold text-slate-900">{formatIDR(activePkg.price)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-500 text-[11px]">
+                      <span>Potongan Platform Bantuin (8%)</span>
+                      <span className="text-slate-700 font-medium">-{formatIDR(platformFee)} (ditanggung mitra)</span>
+                    </div>
+                    <div className="flex items-center justify-between text-slate-500 text-[11px]">
+                      <span>Biaya Rekening Bersama (Escrow)</span>
+                      <span className="text-emerald-600 font-bold">Gratis (Rp 0)</span>
+                    </div>
+                    <div className="pt-2.5 border-t border-slate-200/90 flex items-baseline justify-between mt-1">
+                      <div>
+                        <span className="font-black text-xs sm:text-sm text-slate-900 block">Total Pembayaran</span>
+                        <span className="text-[10px] text-slate-400 font-normal">Wajib bayar dulu ke Rekber Bantuin</span>
+                      </div>
+                      <span className="text-[#1683FF] text-xl sm:text-2xl font-black tracking-tight">
+                        {formatIDR(activePkg.price)}
+                      </span>
+                    </div>
                   </div>
 
-                  <button
-                    type="submit"
-                    className="w-full py-3 rounded-xl bg-[#1683FF] text-white font-semibold text-xs hover:bg-[#0F6FE5] shadow flex items-center justify-center gap-1.5 transition"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>Kirim Pesanan Jasa</span>
-                  </button>
+                  {/* Jaminan Rekber */}
+                  <div className="p-3 rounded-2xl bg-emerald-50/60 border border-emerald-100 flex items-start gap-2.5 text-[11px] text-emerald-800 leading-snug">
+                    <Lock className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <span>
+                      <strong>Rekber Aman Bantuin:</strong> Bayar dulu ke rekening bersama kami. Dana baru dicairkan ke mitra setelah pekerjaan selesai diverifikasi.
+                    </span>
+                  </div>
+
+                  {/* Tombol Lanjut */}
+                  <div className="pt-1 space-y-2">
+                    <button
+                      type="submit"
+                      className="w-full py-3.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm transition shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Lock className="w-4 h-4" />
+                      <span>Lanjut ke Pembayaran (Bayar Dulu)</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleStartChat}
+                      className="w-full py-2.5 rounded-xl border border-slate-200 hover:border-[#1683FF] text-slate-700 hover:text-[#1683FF] font-bold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span>Tanya / Konsultasi via Chat</span>
+                    </button>
+                  </div>
+
                 </form>
               ) : (
-                <div className="text-center py-6 space-y-3">
-                  <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto" />
-                  <h4 className="font-bold text-sm text-[#102A43]">Brief Berhasil Dikirim!</h4>
-                  <p className="text-xs text-[#61758A]">
-                    Penyedia jasa akan meninjau kebutuhanmu dan merespon via chat/order room.
+                /* State Berhasil Checkout */
+                <div className="text-center py-6 space-y-3 animate-in fade-in duration-200">
+                  <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
+                  <h4 className="font-bold text-base text-slate-900">
+                    Pesanan Jasa Berhasil Dibuat!
+                  </h4>
+                  <p className="text-xs text-slate-500 leading-relaxed px-2">
+                    Mitra penyedia telah menerima rincian pesanan Anda dan akan segera mengonfirmasi jadwal pengerjaan.
                   </p>
-                  <Link
-                    href="/activity"
-                    className="inline-block mt-2 px-4 py-2 bg-[#1683FF] text-white rounded-xl text-xs font-semibold"
-                  >
-                    Lihat Aktivitas
-                  </Link>
+                  <div className="pt-3 space-y-2">
+                    <Link
+                      href="/activity"
+                      className="block w-full py-2.5 rounded-xl bg-[#1683FF] text-white font-bold text-xs hover:bg-[#0F6FE5] transition"
+                    >
+                      Lihat Aktivitas &amp; Status Pesanan
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => setIsOrderedSuccess(false)}
+                      className="text-xs font-semibold text-slate-500 hover:underline"
+                    >
+                      Pesan Layanan Lain
+                    </button>
+                  </div>
                 </div>
               )}
+
             </div>
           </div>
 

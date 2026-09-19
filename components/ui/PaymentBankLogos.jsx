@@ -7,7 +7,7 @@ import briImg from "@/components/image/bri_clean.png";
 import bniImg from "@/components/image/bni_clean.png";
 import bantuinImg from "@/components/image/logo_clean.png";
 
-export function QrisLogo({ className = "h-5 sm:h-7 w-auto max-w-[65px] sm:max-w-[90px] object-contain" }) {
+export function QrisLogo({ className = "max-h-7 max-w-full w-auto object-contain" }) {
   return (
     <Image 
       src={qrisImg} 
@@ -18,7 +18,7 @@ export function QrisLogo({ className = "h-5 sm:h-7 w-auto max-w-[65px] sm:max-w-
   );
 }
 
-export function BcaLogo({ className = "h-5 sm:h-7 w-auto max-w-[70px] sm:max-w-[95px] object-contain" }) {
+export function BcaLogo({ className = "max-h-7 max-w-full w-auto object-contain" }) {
   return (
     <Image 
       src={bcaImg} 
@@ -29,7 +29,7 @@ export function BcaLogo({ className = "h-5 sm:h-7 w-auto max-w-[70px] sm:max-w-[
   );
 }
 
-export function MandiriLogo({ className = "h-4.5 sm:h-6.5 w-auto max-w-[65px] sm:max-w-[90px] object-contain" }) {
+export function MandiriLogo({ className = "max-h-6 max-w-full w-auto object-contain" }) {
   return (
     <Image 
       src={mandiriImg} 
@@ -40,7 +40,7 @@ export function MandiriLogo({ className = "h-4.5 sm:h-6.5 w-auto max-w-[65px] sm
   );
 }
 
-export function BriLogo({ className = "h-4.5 sm:h-6.5 w-auto max-w-[65px] sm:max-w-[90px] object-contain" }) {
+export function BriLogo({ className = "max-h-6 max-w-full w-auto object-contain" }) {
   return (
     <Image 
       src={briImg} 
@@ -51,7 +51,7 @@ export function BriLogo({ className = "h-4.5 sm:h-6.5 w-auto max-w-[65px] sm:max
   );
 }
 
-export function BniLogo({ className = "h-4.5 sm:h-6.5 w-auto max-w-[65px] sm:max-w-[90px] object-contain" }) {
+export function BniLogo({ className = "max-h-6 max-w-full w-auto object-contain" }) {
   return (
     <Image 
       src={bniImg} 
@@ -62,7 +62,7 @@ export function BniLogo({ className = "h-4.5 sm:h-6.5 w-auto max-w-[65px] sm:max
   );
 }
 
-export function BantuinPayLogo({ className = "h-4.5 sm:h-6.5 w-auto max-w-[70px] sm:max-w-[95px] object-contain" }) {
+export function BantuinPayLogo({ className = "max-h-6 max-w-full w-auto object-contain" }) {
   return (
     <Image 
       src={bantuinImg} 

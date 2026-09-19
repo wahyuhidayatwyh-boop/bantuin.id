@@ -87,14 +87,25 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     avatar_url TEXT,
     bio TEXT,
     campus_name TEXT DEFAULT 'Universitas Indonesia',
-    faculty TEXT,
-    verification_status verification_status DEFAULT 'unverified',
-    id_card_url TEXT,
-    selfie_url TEXT,
-    verification_notes TEXT,
+    -- Account Role: 'user' (Mahasiswa/Klien), 'provider' (Penyedia Jasa), 'partner' (Mitra Toko Rental), 'admin'
+    account_role TEXT DEFAULT 'user' CHECK (account_role IN ('user', 'provider', 'partner', 'admin')),
     is_partner BOOLEAN DEFAULT FALSE,
     partner_business_name TEXT,
+    partner_address TEXT,
     is_admin BOOLEAN DEFAULT FALSE,
+    verification_status verification_status DEFAULT 'unverified',
+
+    -- KYC & Identity Vault (Enkripsi AES-256 / Protected UU PDP)
+    -- id_card_url merujuk ke private bucket 'kyc-vault' (bukan public URL)
+    id_number TEXT, -- NIK (16 digit) / NIM Mahasiswa
+    id_card_url TEXT, -- Private bucket path: kyc-vault/user-id/ktp.jpg
+    selfie_url TEXT,
+    verification_notes TEXT,
+
+    -- Payout Account (Untuk transfer manual m-Banking oleh Admin Bantuin.id)
+    payout_bank TEXT, -- BCA, Mandiri, BRI, BNI, BSI
+    payout_account_number TEXT,
+    payout_account_holder TEXT,
     
     -- Reputation & Metrics
     rating_avg NUMERIC(3,2) DEFAULT 5.00,

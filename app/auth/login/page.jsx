@@ -9,7 +9,7 @@ import { useApp } from "@/lib/context/AppContext";
 export default function LoginPage() {
   const router = useRouter();
   const { addToast } = useApp();
-  const [email, setEmail] = useState("mahasiswa@ui.ac.id");
+  const [email, setEmail] = useState("pengguna@bantuin.id");
   const [password, setPassword] = useState("password123");
   const [loading, setLoading] = useState(false);
 
@@ -47,7 +47,7 @@ export default function LoginPage() {
           <form className="space-y-4" onSubmit={handleLogin}>
             <div>
               <label className="block text-xs font-semibold text-[#102A43] mb-1">
-                Email Kampus / Akun
+                Alamat Email Terdaftar
               </label>
               <div className="relative">
                 <Mail className="w-4 h-4 text-[#61758A] absolute left-3 top-1/2 -translate-y-1/2" />

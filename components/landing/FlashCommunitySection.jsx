@@ -199,7 +199,7 @@ export default function FlashCommunitySection() {
                   </div>
                 </div>
                 <p className="text-xs text-slate-600 italic leading-relaxed">
-                  &ldquo;Titip ambil dokumen di rektorat beres dalam 20 menit! Helper-nya sigap dan komunikatif di chat.&rdquo;
+                  &ldquo;Titip ambil dokumen di rektorat beres dalam 20 menit! Tenaga bantuannya sigap dan komunikatif di chat.&rdquo;
                 </p>
               </div>
 

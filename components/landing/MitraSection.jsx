@@ -1,190 +1,145 @@
 "use client";
 
-import React, { useRef } from "react";
+import React from "react";
 import Link from "next/link";
-import { Store, ShieldCheck, ArrowRight, ChevronLeft, ChevronRight } from "lucide-react";
+import { Store, ShieldCheck, ArrowRight } from "lucide-react";
+import { useApp } from "@/lib/context/AppContext";
 
 export default function MitraSection() {
-  const scrollRef = useRef(null);
+  const { activeKabupaten } = useApp();
 
   const partners = [
     {
       id: "mitra-kamera",
       name: "Rental Kamera",
       desc: "Kamera mirrorless, lensa premium, gimbal stabilizer & lighting profesional.",
-      count: "12 Vendor Terdaftar",
+      count: `Rental Aktif di ${activeKabupaten}`,
       image: "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=800&q=80",
-      href: "/sewa",
-      tag: "Top Rental",
+      href: "/mitra/mitra-kamera",
+      tag: "Rental Kamera",
     },
     {
       id: "mitra-cetak",
-      name: "Percetakan",
-      desc: "Print skripsi kilat 24 jam, jilid hard cover, cetak banner & poster event.",
-      count: "8 Mitra Resmi",
+      name: "Rental Printer Event",
+      desc: "Sewa printer laserjet, scanner dokumen ADF & mesin laminating seminar.",
+      count: `Rental Resmi ${activeKabupaten}`,
       image: "https://images.unsplash.com/photo-1562654501-a0ccc0fc3fb1?auto=format&fit=crop&w=800&q=80",
-      href: "/bantuan?q=Print",
-      tag: "Layanan Kilat",
+      href: "/mitra/mitra-cetak",
+      tag: "Rental Printer",
     },
     {
       id: "mitra-sound",
-      name: "Rental Sound",
-      desc: "Sound system portable, wireless microphone, mixer audio, & speaker aktif.",
-      count: "6 Vendor Sound",
+      name: "Rental Sound System",
+      desc: "Speaker portable 15', sound akustik 2000W, mic wireless & mixer audio.",
+      count: `Rental Sound ${activeKabupaten}`,
       image: "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?auto=format&fit=crop&w=800&q=80",
-      href: "/sewa",
-      tag: "Alat Event",
+      href: "/mitra/mitra-sound",
+      tag: "Rental Sound",
     },
     {
       id: "mitra-studio",
-      name: "Studio Foto",
-      desc: "Studio foto wisuda, pas foto visa/ijazah, portrait keluarga & photoshoot.",
-      count: "5 Studio Terverifikasi",
+      name: "Rental Studio Foto",
+      desc: "Sewa ruang studio foto per jam, paket lighting godox & kostum toga.",
+      count: `Studio Resmi ${activeKabupaten}`,
       image: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80",
-      href: "/jasa",
-      tag: "Studio Wisuda",
+      href: "/mitra/mitra-studio",
+      tag: "Rental Studio",
     },
     {
       id: "mitra-event",
-      name: "Vendor Event",
-      desc: "Panggung modular, tenda sarnafil, kursi lipat, backdrop & dekorasi acara.",
-      count: "9 Vendor Event",
+      name: "Rental Tenda & Event",
+      desc: "Tenda sarnafil kerucut, panggung modular, kursi futura & kipas kabut.",
+      count: `Vendor Tenda ${activeKabupaten}`,
       image: "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=800&q=80",
-      href: "/sewa",
-      tag: "Perlengkapan",
+      href: "/mitra/mitra-event",
+      tag: "Rental Event",
     },
     {
       id: "mitra-laptop",
-      name: "Service Laptop",
-      desc: "Reparasi hardware, install ulang OS, upgrade SSD/RAM & servis keyboard.",
-      count: "7 Teknisi Valid",
+      name: "Rental Laptop & IT",
+      desc: "Sewa laptop core i5/i7 ujian, proyektor 3600 lumens, layar & smart TV.",
+      count: `Vendor IT ${activeKabupaten}`,
       image: "https://images.unsplash.com/photo-1588872657578-7efd1f1555ed?auto=format&fit=crop&w=800&q=80",
-      href: "/jasa",
-      tag: "Teknisi Cepat",
+      href: "/mitra/mitra-laptop",
+      tag: "Rental Laptop",
     },
   ];
 
-  const marqueeItems = [...partners, ...partners];
-
-  const scroll = (direction) => {
-    if (scrollRef.current) {
-      const { scrollLeft, clientWidth } = scrollRef.current;
-      const scrollAmount = clientWidth * 0.75;
-      scrollRef.current.scrollTo({
-        left: direction === "left" ? scrollLeft - scrollAmount : scrollLeft + scrollAmount,
-        behavior: "smooth",
-      });
-    }
-  };
-
   return (
-    <section className="py-14 md:py-20 bg-white border-b border-slate-100 overflow-hidden">
+    <section className="py-12 md:py-16 bg-white border-b border-slate-100">
       <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8">
         
         {/* Section Header */}
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6 sm:mb-8">
           <div>
             <div className="inline-flex items-center gap-1.5 text-xs font-bold text-[#1683FF] uppercase tracking-wider mb-2">
               <Store className="w-3.5 h-3.5" />
-              <span>EKOSISTEM BISNIS LOKAL</span>
+              <span>EKOSISTEM MITRA PENYEWAAN DI {activeKabupaten.toUpperCase()}</span>
             </div>
-            <h2 className="text-2xl sm:text-3xl md:text-4xl font-black text-slate-900 tracking-tight">
-              Mitra Terpercaya
+            <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
+              Mitra Penyewaan di <span className="text-[#1683FF]">{activeKabupaten}</span>
             </h2>
             <p className="text-xs sm:text-sm text-slate-500 mt-1">
-              Vendor, studio, dan bisnis lokal terverifikasi di sekitarmu yang siap kamu andalkan.
+              Vendor persewaan barang terverifikasi di wilayah {activeKabupaten} yang siap kamu sewa dengan aman.
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => scroll("left")}
-              aria-label="Scroll left"
-              className="w-10 h-10 rounded-full border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center text-slate-700 transition shadow-2xs"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => scroll("right")}
-              aria-label="Scroll right"
-              className="w-10 h-10 rounded-full border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center text-slate-700 transition shadow-2xs"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
+          <div>
             <Link
               href="/mitra/dashboard"
-              className="ml-2 inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-[#1683FF] hover:text-[#0F6FE5] bg-blue-50 px-4 py-2.5 rounded-xl transition"
+              className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-[#1683FF] hover:text-[#0F6FE5] bg-blue-50 hover:bg-blue-100/70 px-4 py-2.5 rounded-xl transition"
             >
-              <span>Daftar Jadi Mitra</span>
+              <span>Daftar Mitra Rental</span>
               <ArrowRight className="w-4 h-4" />
             </Link>
           </div>
         </div>
 
-      </div>
-
-      {/* Full-width Smooth Running Carousel (Right to Left) */}
-      <div 
-        ref={scrollRef}
-        className="w-full overflow-x-auto horizontal-scroll-container py-2"
-      >
-        <div className="animate-marquee flex gap-5 px-4 sm:px-6">
-          {marqueeItems.map((item, idx) => (
+        {/* 6 Squircle Cards in 1 Row on Desktop, Static without Moving Animation */}
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 sm:gap-4 lg:gap-5">
+          {partners.map((item) => (
             <Link
-              key={`${item.id}-${idx}`}
+              key={item.id}
               href={item.href}
-              className="group relative w-[280px] sm:w-[320px] md:w-[350px] h-[380px] sm:h-[420px] rounded-[28px] overflow-hidden shrink-0 shadow-[0_10px_30px_rgba(0,0,0,0.08)] border border-white/40 transition-transform duration-300 hover:scale-[1.02] flex flex-col justify-between p-6"
+              className="group flex flex-col items-center text-center"
             >
-              {/* Background Photographic Image */}
-              <img
-                src={item.image}
-                alt={item.name}
-                className="absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 ease-out"
-              />
+              {/* Squircle Image Card matching reference */}
+              <div className="w-full aspect-square rounded-[22px] sm:rounded-[26px] md:rounded-[30px] overflow-hidden bg-slate-100 border border-slate-200/80 shadow-2xs group-hover:shadow-md group-hover:border-[#1683FF]/50 group-hover:-translate-y-1 transition-all duration-300 relative">
+                <img
+                  src={item.image}
+                  alt={item.name}
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out"
+                />
+                
+                {/* Verified icon pill */}
+                <div className="absolute top-2 right-2 sm:top-2.5 sm:right-2.5">
+                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white/90 text-emerald-600 backdrop-blur-md shadow-2xs border border-white/60">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                  </span>
+                </div>
 
-              {/* Dark Gradient Overlay inside the photo */}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-black/25 group-hover:via-black/50 transition-colors" />
-
-              {/* Top Tags inside photo */}
-              <div className="relative z-10 flex items-center justify-between gap-2">
-                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-3 py-1 rounded-full bg-emerald-500/90 text-white backdrop-blur-md shadow-xs border border-emerald-400/50">
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>Mitra Terverifikasi</span>
-                </span>
-
-                <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-white/20 text-white backdrop-blur-md border border-white/20">
-                  {item.tag}
-                </span>
+                {/* Subtle bottom hover gradient */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-center p-2.5">
+                  <span className="text-[11px] font-bold text-white flex items-center gap-1">
+                    Buka <ArrowRight className="w-3 h-3" />
+                  </span>
+                </div>
               </div>
 
-              {/* Bottom Content inside photo */}
-              <div className="relative z-10 text-left">
-                <div className="text-[11px] text-sky-300 font-semibold mb-1">
-                  {item.count}
-                </div>
-                
-                {/* Title inside photo */}
-                <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight leading-tight mb-2">
+              {/* Title & Tag */}
+              <div className="mt-2 sm:mt-2.5 w-full px-1">
+                <h3 className="text-xs sm:text-sm font-bold text-slate-800 group-hover:text-[#1683FF] transition-colors truncate">
                   {item.name}
                 </h3>
-
-                {/* Description inside photo */}
-                <p className="text-xs sm:text-[13px] text-slate-200 leading-relaxed line-clamp-2 mb-4 font-normal">
-                  {item.desc}
+                <p className="text-[10px] sm:text-[11px] text-slate-500 truncate mt-0.5">
+                  {item.tag}
                 </p>
-
-                {/* Bottom Action inside photo */}
-                <div className="inline-flex items-center gap-2 text-xs font-bold text-white bg-white/15 hover:bg-white/30 backdrop-blur-md px-4 py-2 rounded-xl border border-white/25 transition">
-                  <span>Lihat Katalog Mitra</span>
-                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-                </div>
               </div>
-
             </Link>
           ))}
         </div>
-      </div>
 
+      </div>
     </section>
   );
 }

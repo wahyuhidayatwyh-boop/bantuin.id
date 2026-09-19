@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
@@ -24,11 +24,22 @@ import {
   Send,
   Info,
   Navigation,
-  Loader2
+  Loader2,
+  Camera,
+  ImagePlus,
+  X,
+  Trash2,
+  UserCheck,
+  Scale,
+  Ban
 } from "lucide-react";
+import { detectProhibitedContent } from "@/lib/security";
 
-export default function CreateRequestPage() {
+function CreateRequestForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const targetHelper = searchParams.get("helper");
+
   const { 
     createRequest, 
     bantuinPoints, 
@@ -44,6 +55,32 @@ export default function CreateRequestPage() {
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("Ambil Dokumen");
   const [mode, setMode] = useState("offline");
+  const [photos, setPhotos] = useState([]);
+  
+  // Legal & Item Safety Declaration (Pola Grab/Gojek Self-Declaration)
+  const [itemType, setItemType] = useState("Dokumen / Berkas");
+  const [legalDeclarationChecked, setLegalDeclarationChecked] = useState(false);
+  const [prohibitedWarning, setProhibitedWarning] = useState(null);
+
+  const handlePhotoUpload = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    files.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          setPhotos((prev) => [...prev, event.target.result]);
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = "";
+  };
+
+  const handleRemovePhoto = (indexToRemove) => {
+    setPhotos((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+  };
   
   // Custom Location & Map Pin Picker States
   const [locationName, setLocationName] = useState(
@@ -209,8 +246,24 @@ export default function CreateRequestPage() {
     if (!description.trim() || description.length < 15) {
       errs.description = "Deskripsi minimal 15 karakter agar helper memahami kebutuhan tugas Anda.";
     }
+
+    // Safety & Prohibited Content Detection (Risk Classification: BLOCK vs REVIEW)
+    const checkText = `${title} ${description}`;
+    const safetyCheck = detectProhibitedContent(checkText);
+    if (safetyCheck.flagged) {
+      setProhibitedWarning(safetyCheck);
+      if (safetyCheck.severity === "BLOCK") {
+        errs.prohibited = safetyCheck.reason;
+      }
+    } else {
+      setProhibitedWarning(null);
+    }
+
     if (mode === "offline" && !locationName.trim()) {
       errs.locationName = "Tentukan alamat atau titik lokasi penjemputan/tugas";
+    }
+    if (mode === "offline" && !legalDeclarationChecked) {
+      errs.legalDeclaration = "Wajib menyetujui pernyataan kepatuhan muatan barang sebelum mempublikasikan permintaan.";
     }
     if (!isVoluntary && (!rewardAmount || Number(rewardAmount) < 1000)) {
       errs.rewardAmount = "Nominal imbalan minimal Rp1.000 (atau aktifkan mode sukarela)";
@@ -240,6 +293,8 @@ export default function CreateRequestPage() {
         description,
         category,
         mode,
+        itemType: mode === "offline" ? itemType : "Online Task",
+        legalDeclared: true,
         locationName: mode === "online" ? "Online / Remote" : locationName,
         latitude: coords?.latitude || userCoordinates?.latitude || null,
         longitude: coords?.longitude || userCoordinates?.longitude || null,
@@ -249,6 +304,7 @@ export default function CreateRequestPage() {
         deadlineDisplay: deadlineDisplay,
         rewardAmount: isVoluntary ? 0 : Number(rewardAmount),
         isVoluntary,
+        photos,
       });
 
       setIsSubmitting(false);
@@ -272,14 +328,39 @@ export default function CreateRequestPage() {
         </Link>
 
         {/* Page Title */}
-        <div className="mb-8">
+        <div className="mb-6">
           <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
             Buat Permintaan Bantuan Baru
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Publikasikan kebutuhan tugas Anda. Helper terverifikasi di sekitar Anda akan langsung mengajukan tawaran bantuan.
+            Publikasikan kebutuhan tugas Anda. Tenaga bantuan terverifikasi di sekitar Anda akan langsung mengajukan tawaran bantuan.
           </p>
         </div>
+
+        {/* Banner Ditujukan ke Tenaga Bantuan Tertentu (Jika Dipilih dari Card / Modal) */}
+        {targetHelper && (
+          <div className="mb-6 p-4 rounded-2xl bg-blue-50 border border-blue-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-[#1683FF] text-white flex items-center justify-center shrink-0">
+                <UserCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-blue-950">
+                  Permintaan Khusus untuk: <span className="text-[#1683FF] font-black underline">{targetHelper}</span>
+                </p>
+                <p className="text-[11px] text-blue-700 mt-0.5">
+                  Tenaga bantuan ini akan menerima prioritas notifikasi tugas dan penawaran langsung dari Anda.
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/bantuan/create"
+              className="text-xs font-bold text-slate-500 hover:text-slate-800 underline self-start sm:self-auto shrink-0"
+            >
+              Hapus Target Khusus
+            </Link>
+          </div>
+        )}
 
         {/* UNIFIED COHESIVE MODERN CONTAINER */}
         <div className="bg-white border border-slate-200 rounded-[32px] p-6 sm:p-8 lg:p-10 shadow-xs">
@@ -372,6 +453,73 @@ export default function CreateRequestPage() {
                     } focus:outline-none leading-relaxed`}
                   />
                   {errors.description && <p className="text-[11px] text-red-500 mt-1">{errors.description}</p>}
+                </div>
+
+                {/* Upload Foto Barang / Bukti Tugas (Opsional) */}
+                <div className="p-4 sm:p-5 rounded-2xl bg-slate-50/80 border border-slate-200/90 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                    <div>
+                      <label className="block text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                        <Camera className="w-4 h-4 text-[#1683FF]" />
+                        <span>Foto Barang / Bukti Kebutuhan</span>
+                        <span className="text-[11px] font-normal text-slate-400">(Opsional)</span>
+                      </label>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Lampirkan foto barang yang ingin dititip beli, bukti dokumen, foto lokasi, atau barang yang perlu dipindahkan agar helper langsung memahami kebutuhan Anda.
+                      </p>
+                    </div>
+                    {photos.length > 0 && (
+                      <span className="text-xs font-bold text-[#1683FF] bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100 self-start sm:self-auto shrink-0">
+                        {photos.length} Foto Terlampir
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Preview Thumbnails */}
+                  {photos.length > 0 && (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+                      {photos.map((photoUrl, idx) => (
+                        <div key={idx} className="relative group rounded-xl overflow-hidden border border-slate-200 bg-white aspect-square shadow-2xs">
+                          <img
+                            src={photoUrl}
+                            alt={`Lampiran barang ${idx + 1}`}
+                            className="w-full h-full object-cover group-hover:scale-105 transition duration-200"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleRemovePhoto(idx)}
+                            className="absolute top-1.5 right-1.5 p-1 rounded-full bg-slate-900/80 hover:bg-red-600 text-white shadow-xs transition cursor-pointer"
+                            title="Hapus foto"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                          <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-slate-900/70 text-white text-[10px] font-bold">
+                            Foto {idx + 1}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Upload Drop Zone */}
+                  <label className="border-2 border-dashed border-slate-300 hover:border-[#1683FF] bg-white rounded-2xl p-4 sm:p-5 flex flex-col items-center justify-center text-center cursor-pointer transition group hover:bg-blue-50/20">
+                    <input
+                      type="file"
+                      multiple
+                      accept="image/*"
+                      onChange={handlePhotoUpload}
+                      className="hidden"
+                    />
+                    <div className="w-10 h-10 rounded-full bg-blue-50 text-[#1683FF] flex items-center justify-center mb-2 group-hover:scale-110 transition">
+                      <ImagePlus className="w-5 h-5" />
+                    </div>
+                    <span className="text-xs font-bold text-slate-800 group-hover:text-[#1683FF] transition">
+                      Klik untuk ambil foto kamera / unggah dari galeri
+                    </span>
+                    <span className="text-[11px] text-slate-400 mt-0.5">
+                      Mendukung format JPG, PNG, WEBP (Bisa lebih dari 1 foto)
+                    </span>
+                  </label>
                 </div>
 
                 {/* Lokasi Bebas & Tentukan Titik Peta (jika Tatap Muka) */}
@@ -678,6 +826,85 @@ export default function CreateRequestPage() {
                   </div>
                 </div>
 
+                {/* Prohibited Content Detected Alert */}
+                {prohibitedWarning && (
+                  <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 space-y-2 animate-in fade-in duration-200">
+                    <div className="flex items-center gap-2 font-bold text-xs sm:text-sm text-rose-900">
+                      <Ban className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>Pelanggaran Konten &amp; Kepatuhan: {prohibitedWarning.category}</span>
+                    </div>
+                    <p className="text-xs text-rose-700 leading-relaxed">
+                      {prohibitedWarning.reason}
+                    </p>
+                    <div className="text-[11px] text-rose-600 font-medium">
+                      Silakan ubah rincian tugas Anda agar mematuhi Syarat &amp; Ketentuan dan kode etik kampus sebelum melanjutkan.
+                    </div>
+                  </div>
+                )}
+
+                {/* DEKLARASI MUATAN BARANG & KEPATUHAN HUKUM (POLA GRAB/GOJEK) */}
+                <div className="p-4 sm:p-5 rounded-2xl bg-blue-50/70 border border-blue-200/90 space-y-3.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-blue-100 flex items-center justify-center text-[#1683FF]">
+                        <Scale className="w-3.5 h-3.5" />
+                      </div>
+                      <span className="font-bold text-xs sm:text-sm text-slate-900">
+                        Deklarasi Muatan &amp; Kepatuhan Hukum
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-bold text-[#1683FF] bg-white px-2 py-0.5 rounded-md border border-blue-100">
+                      Standar Kepatuhan PSE
+                    </span>
+                  </div>
+
+                  {mode === "offline" && (
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1.5">
+                        Jenis Muatan / Barang yang Ditangani:
+                      </label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          "Dokumen / Berkas",
+                          "Makanan / Minuman",
+                          "Pakaian / Laundry",
+                          "Gadget / Elektronik",
+                          "Belanja Kebutuhan",
+                          "Lainnya (Legal)"
+                        ].map((item) => (
+                          <button
+                            key={item}
+                            type="button"
+                            onClick={() => setItemType(item)}
+                            className={`text-xs px-2.5 py-1.5 rounded-lg font-bold transition border ${
+                              itemType === item
+                                ? "bg-[#1683FF] text-white border-[#1683FF] shadow-2xs"
+                                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                            }`}
+                          >
+                            {item}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <label className="flex items-start gap-2.5 pt-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={legalDeclarationChecked}
+                      onChange={(e) => setLegalDeclarationChecked(e.target.checked)}
+                      className="mt-0.5 rounded border-slate-300 text-[#1683FF] focus:ring-[#1683FF]"
+                    />
+                    <span className="text-[11px] text-slate-700 leading-relaxed select-none">
+                      Saya menyatakan dan menjamin bahwa muatan/tugas ini <strong>aman, legal menurut hukum RI</strong>, dan <strong>bebas dari narkotika, miras oplosan, senjata, atau barang curian</strong>. Segala ketidaksesuaian atau kebohongan isi muatan menjadi tanggung jawab penuh pihak pengirim sesuai peraturan perundang-undangan yang berlaku dan Syarat &amp; Ketentuan Layanan.
+                    </span>
+                  </label>
+                  {errors.legalDeclaration && (
+                    <p className="text-[11px] text-red-500 font-semibold">{errors.legalDeclaration}</p>
+                  )}
+                </div>
+
                 {/* Submit Action */}
                 <div className="flex items-center gap-4 pt-4 border-t border-slate-100">
                   <Link
@@ -763,7 +990,7 @@ export default function CreateRequestPage() {
                 <div>
                   <div className="text-xs font-bold text-slate-900">Garansi Rekening Bersama (Escrow)</div>
                   <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
-                    Dana imbalan Anda disimpan aman di rekening bersama resmi dan baru dicairkan setelah Anda menyetujui hasil kerja helper.
+                    Dana imbalan Anda disimpan aman di rekening bersama resmi dan baru dicairkan setelah Anda menyetujui hasil kerja tenaga bantuan.
                   </p>
                 </div>
               </div>
@@ -777,5 +1004,17 @@ export default function CreateRequestPage() {
 
       <Footer />
     </div>
+  );
+}
+
+export default function CreateRequestPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-[#EEF2F6]">
+        <div className="text-slate-500 font-medium text-sm">Memuat formulir bantuan...</div>
+      </div>
+    }>
+      <CreateRequestForm />
+    </Suspense>
   );
 }

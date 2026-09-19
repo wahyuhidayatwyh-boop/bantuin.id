@@ -56,7 +56,8 @@ export default function PelamarListPage() {
     walletBalance, 
     addToast,
     userCoordinates,
-    getDistanceToUser
+    getDistanceToUser,
+    startTaskInquiry
   } = useApp();
 
   const [searchFilter, setSearchFilter] = useState("");
@@ -143,12 +144,12 @@ export default function PelamarListPage() {
 
   // Open Direct Full-Page Workspace Room (No Floating Popups)
   const handleOpenChat = (offer) => {
-    const roomId = offer?.helperName?.toLowerCase().includes("clarissa")
-      ? "inquiry-clarissa"
-      : offer?.helperName?.toLowerCase().includes("bayu")
-      ? "inquiry-bayu"
-      : "order-room-101";
-    router.push(`/order/${roomId}`);
+    if (startTaskInquiry && request) {
+      const inqRoom = startTaskInquiry({ request, offer });
+      router.push(`/chat?room=${inqRoom?.id || "order-room-101"}`);
+    } else {
+      router.push(`/chat?room=order-room-101`);
+    }
   };
 
   const handleSendChatMessage = (e) => {
@@ -525,7 +526,14 @@ export default function PelamarListPage() {
                             </span>
                             <button
                               type="button"
-                              onClick={() => router.push("/chat")}
+                              onClick={() => {
+                                if (startTaskInquiry && request) {
+                                  const inqRoom = startTaskInquiry({ request, offer });
+                                  router.push(`/chat?room=${inqRoom?.id || "order-room-101"}`);
+                                } else {
+                                  router.push(`/chat?room=order-room-101`);
+                                }
+                              }}
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-bold text-slate-700 text-xs transition cursor-pointer"
                             >
                               <MessageSquare className="w-3.5 h-3.5 text-slate-400" />

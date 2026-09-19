@@ -36,6 +36,8 @@ import {
   AlertCircle,
   Loader2,
   Navigation,
+  Camera,
+  Eye,
   X
 } from "lucide-react";
 
@@ -47,10 +49,12 @@ export default function RequestDetailPage() {
     currentUser, 
     userCoordinates,
     getDistanceToUser,
-    detectUserLocation
+    detectUserLocation,
+    startTaskInquiry
   } = useApp();
 
   const request = requests.find((r) => r.id === id);
+  const [selectedPhotoModal, setSelectedPhotoModal] = useState(null);
 
   if (!request) {
     return (
@@ -82,12 +86,12 @@ export default function RequestDetailPage() {
 
   // Open Direct Full-Page Workspace Room (No Floating Popups)
   const handleOpenChat = (offer) => {
-    const roomId = offer?.helperName?.toLowerCase().includes("clarissa")
-      ? "inquiry-clarissa"
-      : offer?.helperName?.toLowerCase().includes("bayu")
-      ? "inquiry-bayu"
-      : "order-room-101";
-    router.push(`/order/${roomId}`);
+    if (startTaskInquiry && request) {
+      const inqRoom = startTaskInquiry({ request, offer });
+      router.push(`/chat?room=${inqRoom?.id || "order-room-101"}`);
+    } else {
+      router.push(`/chat?room=order-room-101`);
+    }
   };
 
   return (
@@ -144,6 +148,46 @@ export default function RequestDetailPage() {
                   {request.description}
                 </p>
               </div>
+
+              {/* Foto Barang / Bukti Kebutuhan (Jika Ada) */}
+              {Array.isArray(request.photos) && request.photos.length > 0 && (
+                <div className="p-4 sm:p-5 rounded-2xl bg-slate-50/90 border border-slate-200/80 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Camera className="w-4 h-4 text-[#1683FF]" />
+                      <h4 className="text-xs sm:text-sm font-bold text-slate-900">
+                        Foto Barang &amp; Bukti Tugas ({request.photos.length})
+                      </h4>
+                    </div>
+                    <span className="text-[11px] text-slate-400">
+                      Klik foto untuk memperbesar
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                    {request.photos.map((photo, pIdx) => (
+                      <div
+                        key={pIdx}
+                        onClick={() => setSelectedPhotoModal(photo)}
+                        className="relative group rounded-xl overflow-hidden border border-slate-200 bg-white aspect-square shadow-2xs cursor-pointer hover:border-blue-300 transition"
+                      >
+                        <img
+                          src={photo}
+                          alt={`Foto barang ${pIdx + 1}`}
+                          className="w-full h-full object-cover group-hover:scale-105 transition duration-200"
+                        />
+                        <div className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs font-bold gap-1.5 backdrop-blur-[1px]">
+                          <Eye className="w-4 h-4" />
+                          <span>Perbesar</span>
+                        </div>
+                        <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-slate-900/70 text-white text-[10px] font-bold">
+                          Foto {pIdx + 1}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Clean Info Strip */}
               <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-200/70 grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -431,9 +475,14 @@ export default function RequestDetailPage() {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  router.push(`/order/order-room-101`);
+                                  if (startTaskInquiry && request) {
+                                    const inqRoom = startTaskInquiry({ request, offer });
+                                    router.push(`/chat?room=${inqRoom?.id || "order-room-101"}`);
+                                  } else {
+                                    router.push(`/chat?room=order-room-101`);
+                                  }
                                 }}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-bold text-slate-700 text-xs transition"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-bold text-slate-700 text-xs transition cursor-pointer"
                               >
                                 <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
                                 <span>Chat Peminta Bantuan</span>
@@ -495,6 +544,33 @@ export default function RequestDetailPage() {
           </div>
         </div>
       </main>
+
+      {/* Modal Lightbox Perbesar Foto */}
+      {selectedPhotoModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setSelectedPhotoModal(null)}
+        >
+          <div
+            className="relative max-w-4xl w-full max-h-[90vh] flex flex-col items-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => setSelectedPhotoModal(null)}
+              className="absolute -top-12 right-0 sm:-right-2 text-white/90 hover:text-white p-2 rounded-full bg-white/20 hover:bg-white/30 transition cursor-pointer flex items-center gap-1 text-xs font-bold"
+            >
+              <X className="w-5 h-5" />
+              <span className="hidden sm:inline">Tutup</span>
+            </button>
+            <img
+              src={selectedPhotoModal}
+              alt="Detail foto barang"
+              className="max-h-[85vh] w-auto max-w-full rounded-2xl object-contain shadow-2xl border border-white/10"
+            />
+          </div>
+        </div>
+      )}
 
       <Footer />
     </div>

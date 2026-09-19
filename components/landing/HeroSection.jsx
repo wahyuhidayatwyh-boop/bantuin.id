@@ -181,7 +181,7 @@ export default function HeroSection() {
                   <Users className="w-5 h-5" />
                 </div>
                 <div>
-                  <div className="text-xs font-bold text-slate-900">2.4K+ Helper Aktif</div>
+                  <div className="text-xs font-bold text-slate-900">2.4K+ Tenaga Bantuan</div>
                   <div className="text-[11px] text-slate-500">Siap bantu di sekitarmu</div>
                 </div>
               </div>
