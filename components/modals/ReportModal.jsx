@@ -18,7 +18,7 @@ const REPORT_CATEGORIES = [
   { id: "suspicious_item", label: "Barang / Muatan Mencurigakan", desc: "Paket berbau tajam, zat kimia tak berlabel, atau segel tertutup gelap" },
   { id: "academic_violation", label: "Permintaan Ilegal / Joki Akademik", desc: "Permintaan joki skripsi, ujian online, atau pelanggaran etika kampus" },
   { id: "harassment", label: "Pelecehan / Keamanan Fisik", desc: "Pelecehan verbal, tindakan asusila, atau ancaman saat bertemu" },
-  { id: "disintermediation", label: "Ajakan Transaksi di Luar Platform", desc: "Memaksa transfer rekening pribadi atau membatalkan escrow" },
+  { id: "disintermediation", label: "Ajakan Transaksi di Luar Platform", desc: "Memaksa transfer rekening pribadi atau bypass pembayaran resmi" },
   { id: "payment_dispute", label: "Masalah Pembayaran / Refund", desc: "Perselisihan pemotongan deposit atau pembatalan sepihak" },
   { id: "other", label: "Pelanggaran Lainnya", desc: "Masalah lain yang melanggar Syarat & Ketentuan Bantuin" }
 ];

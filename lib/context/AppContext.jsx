@@ -12,6 +12,7 @@ import {
   INITIAL_ORDER_ROOM,
   BANTUIN_POINTS,
 } from "@/lib/mock/mockData";
+import { initialVouchers, isVoucherLocationMatch } from "@/lib/mock/voucherData";
 import { detectDisintermediation } from "@/lib/security";
 import { 
   calculateDistanceInMeters, 
@@ -30,51 +31,109 @@ const AppContext = createContext(null);
 export function AppProvider({ children }) {
   // Current logged in user
   const [currentUser, setCurrentUser] = useState(INITIAL_USER);
-  
-  // Persistent location across page refreshes
-  const [selectedLocation, setSelectedLocation] = useState(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = localStorage.getItem("bantuin_selected_location");
-        if (saved) return saved;
-      } catch (e) {}
-    }
-    return "Jakarta Selatan";
-  });
-  
-  // Real GPS Coordinates & Location persisted across page refreshes
-  const [userCoordinates, setUserCoordinates] = useState(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = localStorage.getItem("bantuin_user_coords");
-        if (saved) return JSON.parse(saved);
-      } catch (e) {}
-    }
-    return null;
-  });
 
-  const [userRealLocation, setUserRealLocation] = useState(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = localStorage.getItem("bantuin_user_real_location");
-        if (saved) return JSON.parse(saved);
-      } catch (e) {}
-    }
-    return null;
-  });
+  // ─── Voucher State ──────────────────────────────────────────────────────────
+  const [vouchers, setVouchers] = useState(initialVouchers);
 
+  /** Validate & apply a voucher. Returns { ok, discount, voucher, error } */
+  const redeemVoucher = (code, category, amount, location = null) => {
+    const vc = vouchers.find((v) => v.code.toUpperCase() === code.trim().toUpperCase());
+    if (!vc) return { ok: false, error: "Kode voucher tidak ditemukan." };
+    if (!vc.isActive) return { ok: false, error: "Voucher ini sudah tidak aktif." };
+    if (vc.quota - vc.usedCount <= 0) return { ok: false, error: "Kuota voucher sudah habis." };
+    if (new Date(vc.expiresAt) < new Date()) return { ok: false, error: "Voucher sudah kadaluarsa." };
+    if (vc.appliesTo !== "all" && vc.appliesTo !== category)
+      return { ok: false, error: `Voucher ini hanya berlaku untuk layanan ${vc.appliesTo}.` };
+
+    // Validasi Wilayah / Lokasi Promo
+    const effectiveLoc = location || selectedLocation || "";
+    if (vc.targetLocation && !isVoucherLocationMatch(vc.targetLocation, effectiveLoc)) {
+      return { 
+        ok: false, 
+        error: `Voucher ini hanya berlaku khusus untuk wilayah ${vc.targetLocation}. Lokasi Anda saat ini (${effectiveLoc || "di luar wilayah promo"}) tidak memenuhi kriteria.` 
+      };
+    }
+
+    if (amount < vc.minOrder)
+      return { ok: false, error: `Minimum transaksi Rp ${vc.minOrder.toLocaleString("id-ID")} untuk voucher ini.` };
+
+    const rawDiscount =
+      vc.type === "percent" ? Math.round((vc.value / 100) * amount) : vc.value;
+    const discount = Math.min(rawDiscount, vc.maxDiscount);
+
+    // Increment usedCount
+    setVouchers((prev) =>
+      prev.map((v) => (v.id === vc.id ? { ...v, usedCount: v.usedCount + 1 } : v))
+    );
+    return { ok: true, discount, voucher: vc, error: null };
+  };
+
+  /** Admin: tambah voucher baru */
+  const adminAddVoucher = (data) => {
+    const newVc = {
+      id: `vc-${Date.now()}`,
+      usedCount: 0,
+      isActive: true,
+      color: "from-[#1683FF] to-[#0F6FE5]",
+      targetLocation: "all",
+      ...data,
+    };
+    setVouchers((prev) => [newVc, ...prev]);
+    return newVc;
+  };
+
+  /** Admin: toggle aktif/nonaktif voucher */
+  const adminToggleVoucher = (id) => {
+    setVouchers((prev) =>
+      prev.map((v) => (v.id === id ? { ...v, isActive: !v.isActive } : v))
+    );
+  };
+
+  /** Admin: hapus voucher */
+  const adminDeleteVoucher = (id) => {
+    setVouchers((prev) => prev.filter((v) => v.id !== id));
+  };
+  // ────────────────────────────────────────────────────────────────────────────
+
+  
+  const [selectedLocation, setSelectedLocation] = useState("");
+  const [userCoordinates, setUserCoordinates] = useState(null);
+  const [userRealLocation, setUserRealLocation] = useState(null);
   const [isDetectingLocation, setIsDetectingLocation] = useState(false);
   const [isGpsModalOpen, setIsGpsModalOpen] = useState(false);
+  const [filterByKabupaten, setFilterByKabupaten] = useState(true);
 
-  const [filterByKabupaten, setFilterByKabupaten] = useState(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = localStorage.getItem("bantuin_filter_kabupaten");
-        if (saved !== null) return JSON.parse(saved);
-      } catch (e) {}
+  // Load persisted state safely on client mount (prevents SSR hydration mismatch)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const savedLoc = localStorage.getItem("bantuin_selected_location");
+      if (savedLoc && savedLoc !== "Jakarta Selatan") {
+        setSelectedLocation(savedLoc);
+      }
+      const savedCoords = localStorage.getItem("bantuin_user_coords");
+      if (savedCoords) {
+        setUserCoordinates(JSON.parse(savedCoords));
+      }
+      const savedReal = localStorage.getItem("bantuin_user_real_location");
+      if (savedReal) {
+        const parsed = JSON.parse(savedReal);
+        setUserRealLocation(parsed);
+        if (savedLoc && savedLoc !== "Jakarta Selatan") {
+          setCurrentUser((prev) => ({
+            ...prev,
+            campusName: parsed?.fullAddress || savedLoc,
+          }));
+        }
+      }
+      const savedFilter = localStorage.getItem("bantuin_filter_kabupaten");
+      if (savedFilter !== null) {
+        setFilterByKabupaten(JSON.parse(savedFilter));
+      }
+    } catch (e) {
+      console.warn("Error hydrating location from localStorage:", e);
     }
-    return true;
-  });
+  }, []);
 
   // Sync location state to localStorage whenever changed
   useEffect(() => {
@@ -94,23 +153,6 @@ export function AppProvider({ children }) {
       console.warn("Could not sync location state:", e);
     }
   }, [selectedLocation, userCoordinates, userRealLocation, filterByKabupaten]);
-
-  // Sync currentUser campusName with saved location on mount
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const savedLoc = localStorage.getItem("bantuin_selected_location");
-        const savedReal = localStorage.getItem("bantuin_user_real_location");
-        if (savedLoc && savedLoc !== "Jakarta Selatan") {
-          const parsed = savedReal ? JSON.parse(savedReal) : null;
-          setCurrentUser((prev) => ({
-            ...prev,
-            campusName: parsed?.fullAddress || savedLoc,
-          }));
-        }
-      } catch (e) {}
-    }
-  }, []);
   
   // Datasets
   const [requests, setRequests] = useState(INITIAL_REQUESTS);
@@ -155,18 +197,23 @@ export function AppProvider({ children }) {
     }));
   };
 
-  const [rentals, setRentals] = useState(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = localStorage.getItem("bantuin_rentals_state");
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+  const [rentals, setRentals] = useState(getInitialRentals);
+
+  // Hydrate rentals from localStorage on mount
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const saved = localStorage.getItem("bantuin_rentals_state");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setRentals(parsed);
         }
-      } catch (e) {}
+      }
+    } catch (e) {
+      console.warn("Could not hydrate rentals:", e);
     }
-    return getInitialRentals();
-  });
+  }, []);
 
   // Sync rentals to localStorage whenever changed
   useEffect(() => {
@@ -182,7 +229,7 @@ export function AppProvider({ children }) {
 
   const [services, setServices] = useState(INITIAL_SERVICES);
   const [helpers, setHelpers] = useState(INITIAL_HELPERS);
-  const [partners] = useState(INITIAL_PARTNERS);
+  const [partners, setPartners] = useState(INITIAL_PARTNERS);
   const [orderRooms, setOrderRooms] = useState(INITIAL_ORDER_ROOMS);
   const [activeOrderRoomId, setActiveOrderRoomId] = useState("order-room-dedi");
   const [bantuinPoints] = useState(BANTUIN_POINTS);
@@ -382,18 +429,23 @@ export function AppProvider({ children }) {
     },
   ];
 
-  const [rentalBookings, setRentalBookings] = useState(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = localStorage.getItem("bantuin_rental_bookings_state");
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+  const [rentalBookings, setRentalBookings] = useState(INITIAL_BOOKINGS);
+
+  // Hydrate rentalBookings from localStorage on mount
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const saved = localStorage.getItem("bantuin_rental_bookings_state");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setRentalBookings(parsed);
         }
-      } catch (e) {}
+      }
+    } catch (e) {
+      console.warn("Could not hydrate rental bookings:", e);
     }
-    return INITIAL_BOOKINGS;
-  });
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -413,7 +465,7 @@ export function AppProvider({ children }) {
       actor: "system@bantuin.id",
       action: "ESCROW_LOCK",
       target: "ORDER #101",
-      details: "Dana Rp15.000 berhasil ditahan di Xendit Test Mode Escrow",
+      details: "Dana Rp15.000 berhasil ditahan di Rekening Bersama Bantuin",
       timestamp: new Date(Date.now() - 40 * 60 * 1000).toISOString(),
     },
     {
@@ -438,8 +490,122 @@ export function AppProvider({ children }) {
     },
   ]);
 
+  const deleteReport = (reportId) => {
+    setReports((prev) => prev.filter((r) => r.id !== reportId));
+    try {
+      if (typeof window !== "undefined") {
+        const raw = localStorage.getItem("bantuin_reports_state");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            const filtered = parsed.filter((r) => r.id !== reportId);
+            localStorage.setItem("bantuin_reports_state", JSON.stringify(filtered));
+          }
+        }
+      }
+    } catch (e) {}
+  };
+
   // Toast notification system
   const [toasts, setToasts] = useState([]);
+
+  // Central Interactive System & Activity Notifications
+  const INITIAL_NOTIFICATIONS = [
+    {
+      id: "notif-1",
+      title: "Unit Sewa Kamera Siap Diambil",
+      desc: "Focus Lens Studio telah menyiapkan Sony Alpha A7 III beserta 2 baterai.",
+      time: "2m lalu",
+      unread: true,
+      category: "sewa",
+      link: "/chat?room=order-room-rental-kamera",
+      createdAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+    },
+    {
+      id: "notif-2",
+      title: "Helper Menuju Lokasi (Bantuan Dokumen)",
+      desc: "Dimas Arya telah mengambil berkas dan sedang menuju titik temu.",
+      time: "15m lalu",
+      unread: true,
+      category: "bantuan",
+      link: "/chat?room=order-room-101",
+      createdAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+    },
+    {
+      id: "notif-3",
+      title: "Desain Banner Siap Direview",
+      desc: "Sarah Kartika telah mengirimkan file pratinjau resolusi tinggi untuk event kamu.",
+      time: "1j lalu",
+      unread: false,
+      category: "jasa",
+      link: "/chat?room=order-room-102",
+      createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    },
+    {
+      id: "notif-4",
+      title: "Dana Aman di Rekening Escrow Bantuin",
+      desc: "Pembayaran sewa mobil Toyota Avanza Rp650.000 (termasuk deposit) aman terkunci.",
+      time: "3j lalu",
+      unread: false,
+      category: "sewa",
+      link: "/activity?tab=menyewa",
+      createdAt: new Date(Date.now() - 180 * 60 * 1000).toISOString(),
+    },
+  ];
+
+  const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
+
+  // Hydrate notifications from localStorage on mount
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const saved = localStorage.getItem("bantuin_notifications_list");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setNotifications(parsed);
+        }
+      }
+    } catch (e) {
+      console.warn("Could not hydrate notifications:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem("bantuin_notifications_list", JSON.stringify(notifications));
+    } catch (e) {}
+  }, [notifications]);
+
+  const markNotificationAsRead = (id) => {
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, unread: false } : n))
+    );
+  };
+
+  const markAllNotificationsAsRead = () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })));
+  };
+
+  const addNotification = (notif) => {
+    const newNotif = {
+      id: `notif-${Date.now()}`,
+      unread: true,
+      createdAt: new Date().toISOString(),
+      time: "Baru saja",
+      ...notif,
+    };
+    setNotifications((prev) => [newNotif, ...prev]);
+  };
+
+  const markChatRoomAsRead = (roomId) => {
+    setOrderRooms((prev) =>
+      prev.map((room) =>
+        room.id === roomId ? { ...room, unreadCount: 0 } : room
+      )
+    );
+  };
 
   const addToast = (title, message, type = "success") => {
     const id = Date.now() + Math.random().toString();
@@ -582,10 +748,12 @@ export function AppProvider({ children }) {
     return isItemInKabupaten(item, activeKabupaten, userCoordinates);
   };
 
-  // Distance helper against current user GPS
-  const getDistanceToUser = (targetLat, targetLon, fallbackDistanceMeters) => {
+  // Genuine distance helper against user GPS coordinates (Section R & V)
+  const getDistanceToUser = (targetLat, targetLon) => {
     if (
       userCoordinates &&
+      typeof userCoordinates.latitude === "number" &&
+      typeof userCoordinates.longitude === "number" &&
       targetLat !== undefined &&
       targetLat !== null &&
       targetLon !== undefined &&
@@ -594,10 +762,10 @@ export function AppProvider({ children }) {
       const meters = calculateDistanceInMeters(
         userCoordinates.latitude,
         userCoordinates.longitude,
-        targetLat,
-        targetLon
+        Number(targetLat),
+        Number(targetLon)
       );
-      if (meters !== null) {
+      if (meters !== null && !isNaN(meters)) {
         return {
           meters,
           text: formatDistanceText(meters),
@@ -605,10 +773,12 @@ export function AppProvider({ children }) {
         };
       }
     }
-    const fb = fallbackDistanceMeters || 850;
+
+    // When GPS is inactive or coords are not available
+    const isOnline = targetLat === null && targetLon === null;
     return {
-      meters: fb,
-      text: formatDistanceText(fb),
+      meters: null,
+      text: isOnline ? "Online" : "Atur lokasi untuk melihat jarak",
       isRealtime: false,
     };
   };
@@ -752,8 +922,8 @@ export function AppProvider({ children }) {
         {
           id: `msg-${Date.now()}`,
           senderId: "system",
-          senderName: "Bantuin Escrow Bot",
-          message: `Dana sebesar Rp${baseAmount.toLocaleString('id-ID')} telah berhasil dikunci di Rekening Bersama (Escrow). Helper dapat segera mulai pengerjaan tugas!`,
+          senderName: "Bantuin System",
+          message: `Dana sebesar Rp${baseAmount.toLocaleString('id-ID')} telah berhasil diverifikasi melalui Payment Gateway. Helper dapat segera mulai pengerjaan tugas!`,
           timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
           isSystem: true,
         },
@@ -778,8 +948,8 @@ export function AppProvider({ children }) {
             {
               id: `msg-${Date.now()}`,
               senderId: "system",
-              senderName: "Bantuin Escrow Bot",
-              message: `Dana sebesar Rp${baseAmount.toLocaleString('id-ID')} telah berhasil dikunci di Rekening Bersama (Escrow) Bantuin. Status penugasan kini AKTIF!`,
+              senderName: "Bantuin System",
+              message: `Dana sebesar Rp${baseAmount.toLocaleString('id-ID')} telah berhasil diverifikasi melalui Payment Gateway Bantuin. Status penugasan kini AKTIF!`,
               timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
               isSystem: true,
             },
@@ -901,10 +1071,10 @@ export function AppProvider({ children }) {
               {
                 id: `msg-${Date.now()}`,
                 senderId: "system",
-                senderName: "Bantuin Escrow Bot",
+                senderName: "Bantuin System",
                 message: room.orderType === "service"
-                  ? `Layanan jasa "${room.requestTitle}" telah dikonfirmasi selesai! Dana imbalan sebesar Rp${releasedAmount.toLocaleString('id-ID')} telah dicairkan ke saldo mitra ${helperName}. Penilaian diberikan: ⭐ ${numericRating}/5. Transaksi selesai!`
-                  : `Tugas telah dikonfirmasi selesai! Imbalan Rp${releasedAmount.toLocaleString('id-ID')} telah dicairkan ke dompet ${helperName}. Penilaian diberikan: ⭐ ${numericRating}/5. Profil helper berhasil diperbarui!`,
+                  ? `Layanan jasa "${room.requestTitle}" telah dikonfirmasi selesai! Dana imbalan sebesar Rp${releasedAmount.toLocaleString('id-ID')} telah dicairkan ke saldo mitra ${helperName}. Penilaian diberikan: ${numericRating}/5. Transaksi selesai!`
+                  : `Tugas telah dikonfirmasi selesai! Imbalan Rp${releasedAmount.toLocaleString('id-ID')} telah dicairkan ke dompet ${helperName}. Penilaian diberikan: ${numericRating}/5. Profil helper berhasil diperbarui!`,
                 timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
                 isSystem: true,
               },
@@ -1576,8 +1746,8 @@ export function AppProvider({ children }) {
         {
           id: `msg-sys-${Date.now()}`,
           senderId: "system",
-          senderName: "Bantuin Escrow Bot",
-          message: `Pembayaran sewa (${formatIDR(rentalFee)}) + Deposit Jaminan (${formatIDR(depositFee)}) total ${formatIDR(totalAmount)} telah aman di Rekening Bersama Escrow Bantuin. Silakan koordinasikan pengambilan/serah terima alat di sini.`,
+          senderName: "Bantuin System",
+          message: `Pembayaran sewa (${formatIDR(rentalFee)}) + Deposit Jaminan (${formatIDR(depositFee)}) total ${formatIDR(totalAmount)} telah aman terverifikasi via Payment Gateway Bantuin. Silakan koordinasikan pengambilan/serah terima alat di sini.`,
           timestamp: "Sekarang",
           isSystem: true,
         },
@@ -1593,7 +1763,7 @@ export function AppProvider({ children }) {
     };
 
     setOrderRooms((prev) => [newRoom, ...prev]);
-    addToast("Pembayaran Escrow Berhasil!", `Slot sewa ${rentalTitle} telah diamankan. Silakan koordinasi serah terima di chat.`);
+    addToast("Pembayaran Berhasil!", `Slot sewa ${rentalTitle} telah diamankan. Silakan koordinasi serah terima di chat.`);
     return newRoom;
   };
 
@@ -1617,8 +1787,8 @@ export function AppProvider({ children }) {
             {
               id: `msg-hnd-${Date.now()}`,
               senderId: "system",
-              senderName: "Bantuin Escrow Bot",
-              message: `🤝 Serah terima alat berhasil dikonfirmasi!\nKondisi fisik unit telah diverifikasi bersama pihak toko. Masa sewa sekarang berstatus AKTIF. Bukti foto baseline kondisi fisik alat tersimpan permanen di ruang obrolan ini sebagai dokumen jaminan perlindungan Escrow.`,
+              senderName: "Bantuin System",
+              message: `Serah terima alat berhasil dikonfirmasi!\nKondisi fisik unit telah diverifikasi bersama pihak toko. Masa sewa sekarang berstatus AKTIF. Bukti foto baseline kondisi fisik alat tersimpan permanen di ruang obrolan ini sebagai dokumen serah terima resmi.`,
               timestamp: nowTime,
               isSystem: true,
               isHandoverProof: true,
@@ -1671,8 +1841,8 @@ export function AppProvider({ children }) {
             {
               id: `msg-ret-${Date.now()}`,
               senderId: "system",
-              senderName: "Bantuin Escrow Bot",
-              message: `✅ Pengembalian alat telah selesai diperiksa & diverifikasi oleh pihak toko mitra.\nHak sewa toko sebesar Rp${((r.rentalFeeAmount || 150000) - Math.round((r.rentalFeeAmount || 150000) * 0.08)).toLocaleString('id-ID')} telah beralih ke status AVAILABLE (siap ditarik).\nDeposit jaminan sebesar ${formatIDR(refundAmount)} berstatus REFUND_PENDING menunggu transfer manual admin ke rekening bank Anda.`,
+              senderName: "Bantuin System",
+              message: `Pengembalian alat telah selesai diperiksa & diverifikasi oleh pihak toko mitra.\nHak sewa toko sebesar Rp${((r.rentalFeeAmount || 150000) - Math.round((r.rentalFeeAmount || 150000) * 0.08)).toLocaleString('id-ID')} telah beralih ke status AVAILABLE (siap ditarik).\nDeposit jaminan sebesar ${formatIDR(refundAmount)} berstatus REFUND_PENDING menunggu transfer manual admin ke rekening bank Anda.`,
               timestamp: nowTime,
               isSystem: true,
               isReturnProof: true,
@@ -1739,8 +1909,8 @@ export function AppProvider({ children }) {
             {
               id: `msg-rev-${Date.now()}`,
               senderId: "system",
-              senderName: "Bantuin Escrow Bot",
-              message: `⭐ Penyewa memberikan rating ${numRating}/5 bintang: "${finalComment}". Transaksi sewa selesai sepenuhnya. Terima kasih!`,
+              senderName: "Bantuin System",
+              message: `Penyewa memberikan rating ${numRating}/5 bintang: "${finalComment}". Transaksi sewa selesai sepenuhnya. Terima kasih!`,
               timestamp: "Sekarang",
               isSystem: true,
             }
@@ -1909,8 +2079,8 @@ export function AppProvider({ children }) {
         {
           id: `msg-inq-1`,
           senderId: "system",
-          senderName: "Bantuin Escrow Bot",
-          message: `💬 Ruang diskusi sewa untuk unit "${rentalTitle}". Silakan tanyakan ketersediaan tanggal, kelengkapan aksesoris, dan kondisi barang sebelum melakukan pembayaran escrow.`,
+          senderName: "Bantuin System",
+          message: `Ruang diskusi sewa untuk unit "${rentalTitle}". Silakan tanyakan ketersediaan tanggal, kelengkapan aksesoris, dan kondisi barang sebelum melakukan konfirmasi pembayaran.`,
           timestamp: "Sekarang",
           isSystem: true,
         },
@@ -1927,7 +2097,7 @@ export function AppProvider({ children }) {
           senderId: storeId || "mitra-rental",
           senderName: storeName || "Toko Mitra",
           senderAvatar: storeAvatar || photoUrl,
-          message: `Halo Kak Rian! Unit ${rentalTitle} kami siap sewa dan dalam kondisi prima (sensor bersih & fungsi normal 100%). Sudah include baterai + charger + tas. Jaminan cukup titip 1 KTP/KTM asli saat ambil alat + deposit rekber. Kakak bisa langsung klik "Bayar Tagihan Sewa" di atas jika tanggal sudah fix ya!`,
+          message: `Halo Kak Rian! Unit ${rentalTitle} kami siap sewa dan dalam kondisi prima (sensor bersih & fungsi normal 100%). Sudah include baterai + charger + tas. Jaminan cukup titip 1 KTP/KTM asli saat ambil alat + deposit jaminan sewa. Kakak bisa langsung klik "Bayar Tagihan Sewa" di atas jika tanggal sudah fix ya!`,
           timestamp: "Sekarang",
         }
       ]
@@ -2000,8 +2170,8 @@ export function AppProvider({ children }) {
         {
           id: `msg-jasa-inq-1`,
           senderId: "system",
-          senderName: "Bantuin Escrow Bot",
-          message: `💬 Ruang konsultasi pra-pemesanan untuk "${serviceTitle || "Layanan Jasa"}". Diskusikan kebutuhan spesifik, jadwal pengerjaan, dan portofolio langsung dengan mitra ${providerName || "terverifikasi"} sebelum memesan.`,
+          senderName: "Bantuin System",
+          message: `Ruang konsultasi pra-pemesanan untuk "${serviceTitle || "Layanan Jasa"}". Diskusikan kebutuhan spesifik, jadwal pengerjaan, dan portofolio langsung dengan mitra ${providerName || "terverifikasi"} sebelum memesan.`,
           timestamp: "Sekarang",
           isSystem: true,
         },
@@ -2142,8 +2312,8 @@ export function AppProvider({ children }) {
         {
           id: `msg-jasa-sys-${Date.now()}`,
           senderId: "system",
-          senderName: "Bantuin Escrow Bot",
-          message: `Pembayaran sebesar ${formatIDR(finalTotal)} telah berhasil diamankan di Rekening Bersama (Escrow) Bantuin. Jadwal pengerjaan: ${targetDate || "Sesuai Jadwal"} pukul ${targetTime || "09:00"} WIB. Status pesanan: DANA DI ESCROW.`,
+          senderName: "Bantuin System",
+          message: `Pembayaran sebesar ${formatIDR(finalTotal)} telah berhasil diverifikasi via Payment Gateway Bantuin. Jadwal pengerjaan: ${targetDate || "Sesuai Jadwal"} pukul ${targetTime || "09:00"} WIB. Status pesanan: PEMBAYARAN TERKONFIRMASI.`,
           timestamp: "Sekarang",
           isSystem: true,
         },
@@ -2159,7 +2329,7 @@ export function AppProvider({ children }) {
     };
 
     setOrderRooms((prev) => [newRoom, ...prev]);
-    addToast("Pesanan Jasa Dikonfirmasi!", `Dana telah dikunci di Escrow. Silakan koordinasi dengan ${providerName || "Mitra"}.`);
+    addToast("Pesanan Jasa Dikonfirmasi!", `Pembayaran telah terverifikasi aman. Silakan koordinasi dengan ${providerName || "Mitra"}.`);
     return newRoom;
   };
 
@@ -2203,8 +2373,8 @@ export function AppProvider({ children }) {
         {
           id: `msg-sys-${Date.now()}`,
           senderId: "system",
-          senderName: "Bantuin Escrow Bot",
-          message: `💬 Ruang diskusi pra-transaksi untuk tugas "${request?.title}". Diskusikan teknis pelaksanaan dan ketersediaan waktu sebelum mengunci dana di Escrow.`,
+          senderName: "Bantuin System",
+          message: `Ruang diskusi pra-transaksi untuk tugas "${request?.title}". Diskusikan teknis pelaksanaan dan ketersediaan waktu sebelum melanjutkan pembayaran.`,
           timestamp: "Sekarang",
           isSystem: true,
         },
@@ -2238,8 +2408,8 @@ export function AppProvider({ children }) {
             {
               id: `msg-pay-${Date.now()}`,
               senderId: "system",
-              senderName: "Bantuin Escrow Bot",
-              message: `💳 Pembayaran Escrow via ${paymentMethod.toUpperCase()} senilai ${formatIDR(r.lockedAmount)} (Sewa: ${formatIDR(r.rentalFeeAmount)} + Deposit Jaminan: ${formatIDR(r.depositAmount)}) BERHASIL! Dana aman di Rekber Bantuin. Status sewa kini: MENUNGGU SERAH TERIMA ALAT.`,
+              senderName: "Bantuin System",
+              message: `Pembayaran via ${paymentMethod.toUpperCase()} senilai ${formatIDR(r.lockedAmount)} (Sewa: ${formatIDR(r.rentalFeeAmount)} + Deposit Jaminan: ${formatIDR(r.depositAmount)}) BERHASIL! Status pembayaran terverifikasi aman melalui Payment Gateway Bantuin. Status sewa kini: MENUNGGU SERAH TERIMA ALAT.`,
               timestamp: "Sekarang",
               isSystem: true,
             }
@@ -2308,7 +2478,7 @@ export function AppProvider({ children }) {
     addToast("Dokumen KYC Terkirim", "Tim verifikasi Bantuin akan meninjau dokumenmu dalam 1x24 jam.");
   };
 
-  const adminVerifyUser = (userId, approved, reason) => {
+  const adminVerifyUser = (userId, approved = true, reason = "") => {
     setCurrentUser((prev) => {
       if (prev.id === userId) {
         return {
@@ -2320,19 +2490,85 @@ export function AppProvider({ children }) {
       return prev;
     });
 
+    setHelpers((prev) =>
+      prev.map((h) =>
+        h.id === userId
+          ? { ...h, verificationStatus: approved ? "verified" : "rejected" }
+          : h
+      )
+    );
+
+    setPartners((prev) =>
+      prev.map((p) =>
+        p.id === userId
+          ? { ...p, verificationStatus: approved ? "verified" : "rejected" }
+          : p
+      )
+    );
+
     setAuditLogs((prev) => [
       {
         id: `log-${Date.now()}`,
         actor: "admin@bantuin.id",
         action: approved ? "KYC_APPROVED" : "KYC_REJECTED",
         target: `USER #${userId}`,
-        details: approved ? "Identitas resmi disetujui" : `Ditolak: ${reason}`,
+        details: approved ? "Identitas resmi disetujui" : `Ditolak: ${reason || "Dokumen tidak valid"}`,
         timestamp: new Date().toISOString(),
       },
       ...prev,
     ]);
 
     addToast(approved ? "User Disetujui" : "User Ditolak", `Status KYC telah diperbarui.`);
+  };
+
+  // 9b. Admin Cancel Order & Refund Escrow
+  const adminCancelOrderEscrow = (orderId, reason = "Dibatalkan oleh Admin") => {
+    let cancelledOrder = null;
+    setOrderRooms((prev) =>
+      prev.map((o) => {
+        if (o.id === orderId) {
+          cancelledOrder = { ...o, stage: "cancelled", cancelReason: reason };
+          return cancelledOrder;
+        }
+        return o;
+      })
+    );
+
+    if (cancelledOrder) {
+      const refundAmount = Number(cancelledOrder.totalAmount || cancelledOrder.price || 0);
+      setLedgerEntries((prev) => [
+        {
+          id: `LEDGER-${Date.now()}`,
+          orderId: cancelledOrder.id,
+          type: "ESCROW_REFUND_CUSTOMER",
+          grossAmount: 0,
+          gatewayFee: 0,
+          rentalFee: 0,
+          depositAmount: 0,
+          platformFee: 0,
+          mitraEntitlement: 0,
+          description: `Pembatalan pesanan #${orderId} oleh Admin. Refund dana escrow Rp${refundAmount.toLocaleString('id-ID')} ke customer. Alasan: ${reason}`,
+          timestamp: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
+
+      setAuditLogs((prev) => [
+        {
+          id: `log-${Date.now()}`,
+          actor: "admin@bantuin.id",
+          action: "ORDER_CANCELLED_REFUND",
+          target: `ORDER #${orderId}`,
+          details: `Pesanan dibatalkan admin & escrow Rp${refundAmount.toLocaleString('id-ID')} direfund ke customer. Alasan: ${reason}`,
+          timestamp: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
+
+      addToast("Pesanan Dibatalkan & Refund", `Dana escrow pesanan #${orderId} telah dikembalikan ke customer.`);
+      return true;
+    }
+    return false;
   };
 
   // 10. Admin Resolve Dispute
@@ -2415,8 +2651,10 @@ export function AppProvider({ children }) {
         rentals,
         setRentals,
         services,
+        setServices,
         helpers,
         partners,
+        setPartners,
         orderRooms,
         activeOrderRoomId,
         setActiveOrderRoomId,
@@ -2424,7 +2662,14 @@ export function AppProvider({ children }) {
         rentalBookings,
         auditLogs,
         reports,
+        setReports,
+        deleteReport,
         toasts,
+        notifications,
+        markNotificationAsRead,
+        markAllNotificationsAsRead,
+        addNotification,
+        markChatRoomAsRead,
         walletBalance,
         setWalletBalance,
         pendingEscrowBalance,
@@ -2473,8 +2718,15 @@ export function AppProvider({ children }) {
         submitRentalReview,
         submitKYC,
         adminVerifyUser,
+        adminCancelOrderEscrow,
         resolveDispute,
         submitReport,
+        // Voucher
+        vouchers,
+        redeemVoucher,
+        adminAddVoucher,
+        adminToggleVoucher,
+        adminDeleteVoucher,
       }}
     >
       {children}

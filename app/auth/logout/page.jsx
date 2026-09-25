@@ -7,12 +7,17 @@ import logoImg from "@/components/image/logo.png";
 import { useApp } from "@/lib/context/AppContext";
 import { LogOut, ArrowRight, ShieldCheck } from "lucide-react";
 
+import { authService } from "@/lib/services/authService";
+
 export default function LogoutPage() {
   const { setCurrentUser } = useApp();
 
   useEffect(() => {
-    // Clear user session
-    setCurrentUser(null);
+    // Clear user session using centralized authService
+    authService.logout();
+    if (setCurrentUser) {
+      setCurrentUser(null);
+    }
   }, [setCurrentUser]);
 
   return (
@@ -65,7 +70,7 @@ export default function LogoutPage() {
 
           <div className="mt-6 flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-            <span>Rekening & Saldo Escrow Tersimpan Aman</span>
+            <span>Proteksi & Data Transaksi Tersimpan Aman</span>
           </div>
 
         </div>

@@ -49,7 +49,7 @@ export default function AboutSection() {
             </div>
 
             <p className="text-xl sm:text-2xl md:text-3xl text-slate-800 font-medium leading-relaxed tracking-tight mb-8">
-              Bantuin berawal dari misi sederhana: memberi warga, mahasiswa, dan komunitas lokal cara yang paling mudah & aman untuk saling tolong-menolong. Dari titip print tugas, antar dokumen kilat, sewa kamera harian, hingga jasa profesional — semua terlindungi rekening escrow resmi.
+              Bantuin berawal dari misi sederhana: memberi warga, mahasiswa, dan komunitas lokal cara yang paling mudah &amp; aman untuk saling tolong-menolong. Dari titip print tugas, antar dokumen kilat, sewa kamera harian, hingga jasa profesional — semua terlindungi sistem pembayaran terverifikasi.
             </p>
 
             <div className="flex flex-wrap items-center gap-4">
@@ -67,7 +67,7 @@ export default function AboutSection() {
                 href="/keamanan"
                 className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-slate-700 hover:text-[#1683FF] transition"
               >
-                <span>Pelajari Sistem Escrow & Keamanan</span>
+                <span>Pelajari Keamanan &amp; Pembayaran</span>
                 <ArrowUpRight className="w-3.5 h-3.5" />
               </Link>
             </div>

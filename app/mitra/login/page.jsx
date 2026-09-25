@@ -5,13 +5,16 @@ import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import logoImg from "@/components/image/logo.png";
-import { Store, ShieldCheck, ArrowRight, Lock, Mail, ArrowLeft } from "lucide-react";
+import { Store, ShieldCheck, ArrowRight, Lock, Mail, ArrowLeft, Loader2 } from "lucide-react";
+import GoogleIcon from "@/components/common/GoogleIcon";
+import { authService, CANONICAL_ROLES } from "@/lib/services/authService";
 
 export default function MitraLoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("mitra@bantuin.id");
   const [password, setPassword] = useState("password123");
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
   const handleLogin = (e) => {
     e.preventDefault();
@@ -19,6 +22,17 @@ export default function MitraLoginPage() {
     setTimeout(() => {
       router.push("/mitra/dashboard");
     }, 800);
+  };
+
+  const handleGoogleLogin = async () => {
+    if (isLoading || isGoogleLoading) return;
+    setIsGoogleLoading(true);
+    try {
+      await authService.loginWithGoogle();
+      router.push("/mitra/dashboard");
+    } finally {
+      setIsGoogleLoading(false);
+    }
   };
 
   return (
@@ -113,18 +127,50 @@ export default function MitraLoginPage() {
 
             <button
               type="submit"
-              disabled={isLoading}
-              className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-black text-xs sm:text-sm shadow-[0_8px_20px_rgba(16,185,129,0.3)] transition active:scale-95 flex items-center justify-center gap-2 mt-2"
+              disabled={isLoading || isGoogleLoading}
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-black text-xs sm:text-sm shadow-[0_8px_20px_rgba(16,185,129,0.3)] transition active:scale-95 flex items-center justify-center gap-2 mt-2 cursor-pointer disabled:opacity-60"
             >
               <span>{isLoading ? "Memverifikasi Akun..." : "Masuk ke Dashboard Mitra"}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </form>
 
-          {/* Escrow Guarantee Badge */}
+          {/* Divider */}
+          <div className="relative my-5">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-white/15" />
+            </div>
+            <div className="relative flex justify-center text-xs">
+              <span className="bg-[#122238] px-3 text-slate-300 font-medium">
+                atau masuk dengan
+              </span>
+            </div>
+          </div>
+
+          {/* Google Login Button */}
+          <button
+            type="button"
+            disabled={isLoading || isGoogleLoading}
+            onClick={handleGoogleLogin}
+            className="w-full py-2.5 px-4 rounded-xl border border-white/20 hover:border-white/40 bg-white/10 hover:bg-white/15 text-white text-xs sm:text-sm font-semibold shadow-xs transition flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-60"
+          >
+            {isGoogleLoading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                <span>Menghubungkan ke Google...</span>
+              </>
+            ) : (
+              <>
+                <GoogleIcon className="w-4 h-4 shrink-0" />
+                <span>Lanjutkan dengan Google</span>
+              </>
+            )}
+          </button>
+
+          {/* Payment Gateway Badge */}
           <div className="mt-6 pt-4 border-t border-white/10 flex items-center justify-center gap-2 text-[11px] text-slate-300">
             <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>Escrow & Rekening Merchant Terverifikasi</span>
+            <span>Payment Gateway &amp; Rekening Merchant Terverifikasi</span>
           </div>
 
         </div>

@@ -1,16 +1,52 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { Star, ShieldCheck, ArrowRight, Palette, MapPin } from "lucide-react";
+import { Star, ShieldCheck, ArrowRight, Palette, MapPin, Rocket } from "lucide-react";
 import { formatIDR } from "@/lib/utils";
 import { useApp } from "@/lib/context/AppContext";
+import { promotionService } from "@/lib/services/promotionService";
 
 export default function JasaSection() {
-  const { services, activeKabupaten, isItemInCurrentKabupaten } = useApp();
+  const { services, activeKabupaten = "Indonesia", isItemInCurrentKabupaten } = useApp();
 
-  const localServices = services.filter((item) => isItemInCurrentKabupaten(item));
-  const displayedServices = localServices.slice(0, 4);
+  const [activePromos, setActivePromos] = useState(() => promotionService.getActivePromotionsSync({ targetType: "service" }));
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      setActivePromos(promotionService.getActivePromotionsSync({ targetType: "service" }));
+    };
+    window.addEventListener("bantuin_promotions_updated", handleUpdate);
+    window.addEventListener("bantuin_payments_updated", handleUpdate);
+    return () => {
+      window.removeEventListener("bantuin_promotions_updated", handleUpdate);
+      window.removeEventListener("bantuin_payments_updated", handleUpdate);
+    };
+  }, []);
+
+  const localServices = (services || []).filter((s) =>
+    isItemInCurrentKabupaten ? isItemInCurrentKabupaten(s.location || s.domicile || "") : true
+  );
+  const baseList = localServices.length > 0 ? localServices : (services || []);
+
+  const promoTargetIds = new Set(activePromos.map((p) => p.targetId));
+
+  // 1. Promoted Services (Verified Paid & Active)
+  const promotedList = baseList
+    .filter((s) => promoTargetIds.has(s.id))
+    .map((s) => ({ ...s, isPromoted: true }));
+
+  // 2. Organic Services
+  const organicList = baseList
+    .filter((s) => !promoTargetIds.has(s.id))
+    .sort((a, b) => {
+      const scoreA = (Number(a.ratingAvg || a.rating) || 0) * 10 + (Number(a.completedJobs || a.completedOrders) || 0) + (a.isVerified ? 10 : 0);
+      const scoreB = (Number(b.ratingAvg || b.rating) || 0) * 10 + (Number(b.completedJobs || b.completedOrders) || 0) + (b.isVerified ? 10 : 0);
+      return scoreB - scoreA;
+    })
+    .map((s) => ({ ...s, isPromoted: false }));
+
+  const displayedServices = [...promotedList, ...organicList].slice(0, 4);
 
   return (
     <section className="py-16 md:py-20 bg-[#F4F7FB] border-b border-slate-200/60">
@@ -42,11 +78,11 @@ export default function JasaSection() {
 
         {/* 4 Cards dynamically matching location or empty state */}
         {displayedServices.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4 md:gap-5">
             {displayedServices.map((item) => (
               <div
                 key={item.id}
-                className="bg-white rounded-[22px] border border-slate-200/90 overflow-hidden shadow-[0_4px_16px_rgba(0,0,0,0.03)] hover:shadow-[0_12px_30px_rgba(22,131,255,0.09)] hover:-translate-y-1 transition-all duration-200 flex flex-col justify-between"
+                className="bg-white rounded-xl sm:rounded-[22px] border border-slate-200/90 overflow-hidden shadow-[0_4px_16px_rgba(0,0,0,0.03)] hover:shadow-[0_12px_30px_rgba(22,131,255,0.09)] hover:-translate-y-1 transition-all duration-200 flex flex-col justify-between"
               >
                 <div>
                   {/* Photo & Badge */}
@@ -56,52 +92,65 @@ export default function JasaSection() {
                       alt={item.title}
                       className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"
                     />
-                    <div className="absolute top-3 left-3 bg-white/90 backdrop-blur-md px-2.5 py-0.5 rounded-full text-[10px] font-bold text-slate-800 shadow-2xs">
-                      {item.badge || item.category}
-                    </div>
-                    <div className="absolute top-3 right-3 bg-blue-50/95 backdrop-blur-md border border-blue-200 px-2 py-0.5 rounded-full text-[10px] font-bold text-[#1683FF] flex items-center gap-1 shadow-2xs">
+                    {item.isPromoted ? (
+                      <div className="absolute top-2 left-2 sm:top-3 sm:left-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-extrabold flex items-center gap-1 shadow-xs">
+                        <Rocket className="w-2.5 h-2.5" />
+                        <span>Unggulan</span>
+                      </div>
+                    ) : (
+                      <div className="absolute top-2 left-2 sm:top-3 sm:left-3 bg-white/90 backdrop-blur-md px-1.5 sm:px-2.5 py-0.5 rounded-full text-[9px] sm:text-[10px] font-bold text-slate-800 shadow-2xs">
+                        {item.badge || item.category}
+                      </div>
+                    )}
+                    <div className="absolute top-2 right-2 sm:top-3 sm:right-3 bg-blue-50/95 backdrop-blur-md border border-blue-200 px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-bold text-[#1683FF] flex items-center gap-0.5 sm:gap-1 shadow-2xs">
                       <ShieldCheck className="w-3 h-3 text-[#1683FF]" />
-                      <span>Terverifikasi</span>
+                      <span className="hidden sm:inline">Terverifikasi</span>
                     </div>
                   </div>
 
                   {/* Details */}
-                  <div className="p-4 sm:p-5">
-                    <h3 className="font-bold text-base text-slate-900 mb-0.5 line-clamp-1">
+                  <div className="p-2.5 sm:p-5">
+                    <h3 className="font-bold text-xs sm:text-base text-slate-900 mb-0.5 line-clamp-2 leading-snug min-h-[32px] sm:min-h-0">
                       {item.title}
                     </h3>
-                    <div className="flex items-center justify-between text-xs text-slate-500 font-semibold mb-2">
-                      <span>Oleh <strong className="text-slate-800">{item.providerName}</strong></span>
-                      <span className="flex items-center gap-0.5 text-[11px] text-[#1683FF]">
-                        <MapPin className="w-3 h-3 shrink-0" />
-                        <span className="truncate max-w-[100px]">{item.city || "Lokal"}</span>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between text-[10px] sm:text-xs text-slate-500 font-semibold mb-1.5 sm:mb-2 gap-0.5">
+                      <span className="truncate">Oleh <strong className="text-slate-800">{item.providerName}</strong></span>
+                      <span className="flex items-center gap-0.5 text-[10px] sm:text-[11px] text-[#1683FF]">
+                        <MapPin className="w-2.5 h-2.5 sm:w-3 sm:h-3 shrink-0" />
+                        <span className="truncate max-w-[80px] sm:max-w-[100px]">{item.city || "Lokal"}</span>
                       </span>
                     </div>
-                    <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed mb-3">
+                    <p className="hidden sm:block text-xs text-slate-500 line-clamp-2 leading-relaxed mb-3">
                       {item.desc || item.description}
                     </p>
                     
                     {/* Rating */}
-                    <div className="flex items-center gap-1 text-xs font-semibold text-slate-800">
-                      <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                      <span>{item.ratingAvg || item.rating || 4.9}</span>
-                      <span className="text-slate-400 font-normal">({item.completedJobs || 24} order)</span>
+                    <div className="flex items-center gap-1 text-[10px] sm:text-xs font-semibold text-slate-800">
+                      {(item.ratingAvg || item.rating) ? (
+                        <>
+                          <Star className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-amber-400 text-amber-400" />
+                          <span>{item.ratingAvg || item.rating}</span>
+                          <span className="text-slate-400 font-normal">({item.completedJobs || item.completedOrders || 0})</span>
+                        </>
+                      ) : (
+                        <span className="text-slate-400 font-medium">Belum ada rating</span>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 {/* Bottom Price & Button */}
-                <div className="p-4 sm:p-5 pt-0 flex items-center justify-between gap-2 border-t border-slate-100 mt-2">
+                <div className="p-2.5 sm:p-5 pt-0 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-2 border-t border-slate-100 mt-2">
                   <div>
-                    <div className="text-[10px] text-slate-400 font-medium uppercase">Mulai dari</div>
-                    <div className="font-black text-base text-[#1683FF]">
+                    <div className="text-[9px] sm:text-[10px] text-slate-400 font-medium uppercase">Mulai dari</div>
+                    <div className="font-black text-xs sm:text-base text-[#1683FF]">
                       {formatIDR(item.startingPrice || item.priceStartFrom || 50000)}
                     </div>
                   </div>
 
                   <Link
                     href={`/jasa/${item.id}`}
-                    className="px-4 py-2 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs shadow-xs transition active:scale-95"
+                    className="w-full sm:w-auto text-center justify-center px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-[11px] sm:text-xs shadow-xs transition active:scale-95"
                   >
                     Pesan
                   </Link>

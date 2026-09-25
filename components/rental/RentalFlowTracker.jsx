@@ -16,7 +16,6 @@ import {
   HelpCircle,
   MapPin,
   Calendar,
-  Sparkles,
   X,
   FileCheck2,
   Wallet,
@@ -42,7 +41,7 @@ import {
   BantuinPayLogo 
 } from "@/components/ui/PaymentBankLogos";
 
-export default function RentalFlowTracker({ room }) {
+export default function RentalFlowTracker({ room, activeRole = "requester" }) {
   const { 
     confirmRentalHandover, 
     confirmRentalReturn, 
@@ -163,8 +162,8 @@ export default function RentalFlowTracker({ room }) {
     {
       id: "paid_escrow",
       number: 2,
-      title: "Bayar Escrow",
-      desc: "Uang aman di Rekber",
+      title: "Pembayaran",
+      desc: "Diproses via Gateway",
       isComplete: ["item_handed_over", "returned", "completed"].includes(room.orderStatus),
       isActive: room.orderStatus === "paid_escrow",
     },
@@ -292,49 +291,88 @@ export default function RentalFlowTracker({ room }) {
         <div className="flex items-center gap-2 shrink-0">
           <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 shadow-2xs">
             <ShieldCheck className="w-3.5 h-3.5 text-[#1683FF]" />
-            <span>Escrow: <strong>{formatIDR(room.lockedAmount)}</strong></span>
+            <span>Total Bayar: <strong>{formatIDR(room.lockedAmount)}</strong></span>
             <span className="text-[10px] text-slate-400">(Deposit: {formatIDR(room.depositAmount)})</span>
           </div>
 
-          {/* Primary Action Button (Clean & Single Brand Blue) */}
+          {/* Primary Action Button based on activeRole */}
           {isInquiry && (
-            <Link
-              href={`/sewa/${room.rentalDetails?.rentalId || room.requestId || 'rental-101'}/pembayaran?roomId=${room.id}&start=${rental.startDate || '2026-09-20'}&end=${rental.endDate || '2026-09-22'}`}
-              className="px-3 py-1.5 rounded-lg bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
-            >
-              <Lock className="w-3 h-3" />
-              <span>Bayar Escrow</span>
-            </Link>
+            activeRole === "requester" ? (
+              <Link
+                href={`/sewa/${room.rentalDetails?.rentalId || room.requestId || 'rental-101'}/pembayaran?roomId=${room.id}&start=${rental.startDate || '2026-09-20'}&end=${rental.endDate || '2026-09-22'}`}
+                className="px-3 py-1.5 rounded-lg bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Lock className="w-3 h-3" />
+                <span>Bayar Sekarang</span>
+              </Link>
+            ) : (
+              <span className="px-2.5 py-1 bg-blue-50 text-[#1683FF] border border-blue-200 rounded-lg text-[11px] font-bold flex items-center gap-1">
+                <Clock className="w-3 h-3" />
+                <span>Menunggu Pembayaran Penyewa</span>
+              </span>
+            )
           )}
 
           {room.orderStatus === "paid_escrow" && (
-            <button
-              onClick={() => setIsHandoverModalOpen(true)}
-              className="px-3 py-1.5 rounded-lg bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
-            >
-              <Camera className="w-3 h-3" />
-              <span>Serah Terima</span>
-            </button>
+            activeRole === "helper" ? (
+              <button
+                onClick={() => setIsHandoverModalOpen(true)}
+                className="px-3 py-1.5 rounded-lg bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Camera className="w-3 h-3" />
+                <span>Serah Terima Unit</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => setIsHandoverModalOpen(true)}
+                className="px-3 py-1.5 rounded-lg bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Camera className="w-3 h-3" />
+                <span>Konfirmasi Ambil Unit</span>
+              </button>
+            )
           )}
 
           {room.orderStatus === "item_handed_over" && (
-            <button
-              onClick={() => setIsReturnModalOpen(true)}
-              className="px-3 py-1.5 rounded-lg bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
-            >
-              <RefreshCw className="w-3 h-3" />
-              <span>Kembalikan</span>
-            </button>
+            activeRole === "helper" ? (
+              <button
+                onClick={() => setIsReturnModalOpen(true)}
+                className="px-3 py-1.5 rounded-lg bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <RefreshCw className="w-3 h-3" />
+                <span>Verifikasi Pengembalian & Cairkan Deposit</span>
+              </button>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <span className="px-2.5 py-1 bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-[11px] font-semibold flex items-center gap-1">
+                  <Clock className="w-3 h-3 text-[#1683FF]" />
+                  <span>Sedang Disewa (s/d {rental.endDate || 'Selesai'})</span>
+                </span>
+                <button
+                  onClick={() => setIsReturnModalOpen(true)}
+                  className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold transition cursor-pointer"
+                >
+                  Ajukan Pengembalian
+                </button>
+              </div>
+            )
           )}
 
           {room.orderStatus === "returned" && (
-            <button
-              onClick={() => setIsReviewModalOpen(true)}
-              className="px-3 py-1.5 rounded-lg bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
-            >
-              <Star className="w-3 h-3 fill-white" />
-              <span>Beri Rating</span>
-            </button>
+            activeRole === "requester" ? (
+              <button
+                onClick={() => setIsReviewModalOpen(true)}
+                className="px-3 py-1.5 rounded-lg bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Star className="w-3 h-3 fill-white" />
+                <span>Beri Rating Toko</span>
+              </button>
+            ) : (
+              <span className="px-2.5 py-1 bg-blue-50 text-[#1683FF] border border-blue-200 rounded-lg text-[11px] font-bold flex items-center gap-1">
+                <Clock className="w-3 h-3" />
+                <span>Menunggu Ulasan Penyewa</span>
+              </span>
+            )
           )}
 
           {room.orderStatus === "completed" && (
@@ -343,7 +381,7 @@ export default function RentalFlowTracker({ room }) {
               className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 text-xs font-bold transition flex items-center gap-1.5 shadow-2xs"
             >
               <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
-              <span>Lihat di Katalog Sewa</span>
+              <span>Selesai (Lihat di Katalog Sewa)</span>
             </Link>
           )}
 
@@ -429,7 +467,7 @@ export default function RentalFlowTracker({ room }) {
                 </div>
                 <div>
                   <h3 className="font-extrabold text-base text-slate-900">
-                    Pembayaran Escrow (Rekber Bantuin)
+                    Pembayaran Resmi (Payment Gateway)
                   </h3>
                   <p className="text-[11px] text-slate-500">
                     Sewa {rental.unitName} di {room.helper?.name}
@@ -466,7 +504,7 @@ export default function RentalFlowTracker({ room }) {
                 <span className="font-bold text-slate-900">{formatIDR(room.depositAmount)}</span>
               </div>
               <div className="pt-2 border-t border-slate-200 flex items-center justify-between font-extrabold text-slate-900">
-                <span>Total Escrow Diamankan:</span>
+                <span>Total Pembayaran Diamankan:</span>
                 <span className="text-[#1683FF] text-base">{formatIDR(room.lockedAmount)}</span>
               </div>
             </div>
@@ -568,12 +606,12 @@ export default function RentalFlowTracker({ room }) {
                 {isProcessingPayment ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Memverifikasi Escrow...</span>
+                    <span>Memverifikasi Pembayaran...</span>
                   </>
                 ) : (
                   <>
                     <Lock className="w-3.5 h-3.5" />
-                    <span>Konfirmasi &amp; Kunci Escrow</span>
+                    <span>Konfirmasi &amp; Bayar</span>
                   </>
                 )}
               </button>
@@ -630,7 +668,7 @@ export default function RentalFlowTracker({ room }) {
                     onClick={handleUseSamplePhotos}
                     className="text-[11px] font-bold text-[#1683FF] hover:underline cursor-pointer flex items-center gap-1"
                   >
-                    <Sparkles className="w-3 h-3" />
+                    <ImageIcon className="w-3 h-3" />
                     <span>Gunakan Foto Contoh</span>
                   </button>
                 </div>
@@ -656,7 +694,7 @@ export default function RentalFlowTracker({ room }) {
                       Klik untuk Ambil / Unggah Foto Alat
                     </div>
                     <div className="text-[10px] text-slate-500 mt-0.5">
-                      Unggah foto bodi, lensa, dan kelengkapan. Foto otomatis tersimpan di ruang chat sebagai bukti sah Rekber.
+                      Unggah foto bodi, lensa, dan kelengkapan. Foto otomatis tersimpan di ruang transaksi sebagai bukti serah terima resmi.
                     </div>
                   </div>
                 ) : (

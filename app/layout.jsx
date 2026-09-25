@@ -24,9 +24,9 @@ export const viewport = {
 };
 
 export const metadata = {
-  title: "Bantuin — Platform Jasa, Bantuan, & Sewa Komunitas Terpercaya",
-  description: "Temukan penyedia jasa, bantuan harian, dan sewa barang terpercaya di sekitarmu. Sistem pembayaran aman bergaransi escrow dan verifikasi identitas resmi.",
-  keywords: ["bantuin", "marketplace jasa", "bantuan harian", "sewa barang", "rental kamera", "escrow indonesia", "freelancer"],
+  title: "Bantuin — Platform Jasa, Bantuan, & Sewa Barang",
+  description: "Temukan penyedia jasa, bantuan harian, dan sewa barang di sekitarmu. Dilengkapi sistem pembayaran resmi terverifikasi dan identitas resmi pengguna.",
+  keywords: ["bantuin", "marketplace jasa", "bantuan harian", "sewa barang", "rental kamera", "payment gateway", "freelancer"],
   authors: [{ name: "Bantuin Team" }],
 };
 

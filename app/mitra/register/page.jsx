@@ -24,10 +24,12 @@ import {
   Trash2,
   Navigation,
   Loader2,
-  Sparkles,
   AlertCircle,
-  Clock
+  Clock,
+  Zap,
+  Check
 } from "lucide-react";
+import CategoryIcon from "@/components/common/CategoryIcon";
 
 export default function MitraRegisterPage() {
   const router = useRouter();
@@ -38,6 +40,7 @@ export default function MitraRegisterPage() {
   const [isDetectingGps, setIsDetectingGps] = useState(false);
   const [gpsSuccessMsg, setGpsSuccessMsg] = useState("");
   const [gpsErrorMsg, setGpsErrorMsg] = useState("");
+  const [mitraKycChoice, setMitraKycChoice] = useState("later"); // 'later' (Buka Toko Dulu) or 'now' (Lengkapi Sekarang)
 
   const [formData, setFormData] = useState({
     // Step 1: Profil Usaha
@@ -138,17 +141,23 @@ export default function MitraRegisterPage() {
     e.preventDefault();
 
     if (step === 3) {
-      if (!formData.ownerNik || formData.ownerNik.length < 16) {
-        addToast?.("NIK Belum Valid", "Harap masukkan 16 digit NIK pemilik toko yang valid.", "error");
+      if (!formData.ownerName.trim()) {
+        addToast?.("Nama Pemilik Belum Diisi", "Harap isi nama lengkap pemilik toko/usaha.", "error");
         return;
       }
-      if (!formData.ktpPhotoPreview) {
-        addToast?.("Foto KTP Belum Diunggah", "Harap unggah foto KTP asli pemilik untuk validasi legalitas toko.", "error");
-        return;
-      }
-      if (!formData.accountNumber) {
-        addToast?.("Nomor Rekening Belum Diisi", "Harap masukkan nomor rekening untuk pencairan hak sewa.", "error");
-        return;
+      if (mitraKycChoice === "now") {
+        if (!formData.ownerNik || formData.ownerNik.length < 16) {
+          addToast?.("NIK Belum Valid", "Harap masukkan 16 digit NIK pemilik toko yang valid.", "error");
+          return;
+        }
+        if (!formData.ktpPhotoPreview) {
+          addToast?.("Foto KTP Belum Diunggah", "Harap unggah foto KTP asli pemilik untuk validasi legalitas toko.", "error");
+          return;
+        }
+        if (!formData.accountNumber) {
+          addToast?.("Nomor Rekening Belum Diisi", "Harap masukkan nomor rekening untuk pencairan hak sewa.", "error");
+          return;
+        }
       }
     }
 
@@ -157,9 +166,14 @@ export default function MitraRegisterPage() {
     } else {
       setIsLoading(true);
       setTimeout(() => {
-        addToast?.("Pendaftaran Mitra Berhasil!", "Toko Anda telah terdaftar. Dokumen legalitas sedang dalam verifikasi admin.");
+        addToast?.(
+          "Pendaftaran Mitra Berhasil!", 
+          mitraKycChoice === "now"
+            ? "Toko Anda telah terdaftar. Dokumen legalitas sedang dalam verifikasi admin."
+            : "Toko Anda berhasil aktif! Anda dapat mulai mengunggah alat rental dan melengkapi KTP nanti di dashboard."
+        );
         router.push("/mitra/dashboard");
-      }, 1200);
+      }, 1000);
     }
   };
 
@@ -267,7 +281,7 @@ export default function MitraRegisterPage() {
                 </div>
 
                 {formData.businessCategory.startsWith("Lainnya") && (
-                  <div className="p-3.5 bg-blue-50/60 rounded-2xl border border-blue-200 animate-in fade-in">
+                  <div className="p-3.5 bg-blue-50/60 rounded-2xl border border-blue-200 animate-in fade-in space-y-2">
                     <label className="block text-xs font-bold text-slate-700 mb-1">
                       Tuliskan Kategori Usaha Anda:
                     </label>
@@ -279,6 +293,12 @@ export default function MitraRegisterPage() {
                       onChange={(e) => setFormData({ ...formData, customCategory: e.target.value })}
                       className="w-full bg-white border border-slate-200 text-slate-900 placeholder-slate-400 rounded-xl px-4 py-2.5 text-xs sm:text-sm focus:outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/20"
                     />
+                    {formData.customCategory.trim() && (
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white rounded-xl text-xs font-semibold text-[#1683FF] border border-blue-100 shadow-2xs">
+                        <CategoryIcon category={formData.customCategory} className="w-4 h-4 text-[#1683FF] shrink-0" />
+                        <span>Icon otomatis: {formData.customCategory}</span>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -354,7 +374,7 @@ export default function MitraRegisterPage() {
                 </div>
 
                 {/* GPS Detector Banner */}
-                <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-blue-50 border border-blue-200/80 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+                <div className="bg-blue-50/70 border border-blue-200/80 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-[#1683FF] text-white flex items-center justify-center shrink-0 shadow-sm relative font-black">
                       <Navigation className="w-5 h-5 animate-pulse" />
@@ -362,7 +382,6 @@ export default function MitraRegisterPage() {
                     <div>
                       <div className="text-xs sm:text-sm font-black text-slate-900 flex items-center gap-1.5">
                         <span>Kunci Koordinat GPS Toko</span>
-                        <Sparkles className="w-3.5 h-3.5 text-amber-500" />
                       </div>
                       <div className="text-[11px] text-slate-600 mt-0.5">
                         Memudahkan pelanggan membuka rute Google Maps langsung ke outlet Anda.
@@ -528,26 +547,26 @@ export default function MitraRegisterPage() {
               </div>
             )}
 
-            {/* STEP 3: LEGALITAS PEMILIK, UPLOAD KTP & REKENING PAYOUT */}
+            {/* STEP 3: LEGALITAS PEMILIK & VERIFIKASI FLEKSIBEL (PROGRESSIVE KYC) */}
             {step === 3 && (
               <div className="space-y-4 animate-in fade-in duration-200">
                 <div className="flex items-center gap-3.5 mb-2">
                   <div className="w-12 h-12 rounded-2xl bg-blue-100 text-[#1683FF] flex items-center justify-center font-bold shrink-0">
-                    <CreditCard className="w-6 h-6" />
+                    <Store className="w-6 h-6" />
                   </div>
                   <div>
                     <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-                      Legalitas KTP &amp; Rekening Payout
+                      Kepemilikan Toko &amp; Verifikasi Fleksibel
                     </h2>
                     <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-                      Hak sewa toko akan dicairkan via transfer manual m-Banking oleh Admin Bantuin tanpa potongan biaya admin.
+                      Pilih kemudahan registrasi. Anda dapat membuka toko sekarang dan melengkapi KTP nanti.
                     </p>
                   </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Nama Lengkap Pemilik Usaha (Sesuai KTP &amp; Buku Tabungan)
+                    Nama Lengkap Pemilik Usaha / Penanggung Jawab
                   </label>
                   <input
                     type="text"
@@ -559,118 +578,177 @@ export default function MitraRegisterPage() {
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Nomor Induk Kependudukan (NIK Pemilik 16 Digit)
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={16}
-                    placeholder="Contoh: 3201234567890001"
-                    value={formData.ownerNik}
-                    onChange={(e) => setFormData({ ...formData, ownerNik: e.target.value })}
-                    className="w-full bg-white border border-slate-200 text-slate-900 placeholder-slate-400 rounded-2xl px-4 py-3 text-xs sm:text-sm focus:outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/20"
-                  />
-                </div>
-
-                {/* Upload KTP Pemilik Usaha dari Lokal */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Foto KTP Asli Pemilik Usaha
+                {/* DUA PILIHAN VERIFIKASI FLEKSIBEL UNTUK MITRA (WARNA KONSISTEN) */}
+                <div className="pt-1">
+                  <label className="block text-xs font-bold text-slate-800 mb-2">
+                    Pilihan Kelengkapan Dokumen:
                   </label>
 
-                  {formData.ktpPhotoPreview ? (
-                    <div className="relative rounded-2xl border-2 border-[#1683FF]/40 p-4 bg-blue-50/50 flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-3">
-                        <img
-                          src={formData.ktpPhotoPreview}
-                          alt="KTP Preview"
-                          className="w-20 h-14 rounded-xl object-cover border border-slate-200 shadow-xs"
-                        />
-                        <div>
-                          <div className="text-xs font-bold text-slate-900 flex items-center gap-1">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-[#1683FF]" />
-                            <span>Foto KTP Pemilik Siap Diverifikasi</span>
-                          </div>
-                          <div className="text-[11px] text-slate-500 mt-0.5">
-                            {formData.ktpPhotoFileName || "ktp_pemilik.jpg"} &middot; Vault Terenkripsi AES-256
-                          </div>
-                        </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Opsi 1: Buka Toko Dulu */}
+                    <div
+                      onClick={() => setMitraKycChoice("later")}
+                      className={`p-4 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
+                        mitraKycChoice === "later"
+                          ? "border-[#1683FF] bg-blue-50/60 shadow-2xs ring-2 ring-[#1683FF]/20"
+                          : "border-slate-200 hover:border-slate-300 bg-white"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-[#1683FF] flex items-center gap-1">
+                          <Zap className="w-3 h-3 text-[#1683FF]" />
+                          Rekomendasi Mitra
+                        </span>
+                        {mitraKycChoice === "later" && <CheckCircle2 className="w-4 h-4 text-[#1683FF]" />}
                       </div>
-
-                      <button
-                        type="button"
-                        onClick={() => setFormData({ ...formData, ktpPhotoPreview: null, ktpPhotoFileName: "" })}
-                        className="p-2 rounded-xl bg-white border border-red-200 text-red-600 hover:bg-red-50 transition shadow-2xs cursor-pointer"
-                        title="Hapus / Ganti Foto"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div>
+                        <h4 className="font-bold text-xs text-slate-900">Buka Toko Dulu (KTP Nanti)</h4>
+                        <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                          Daftarkan toko dan langsung upload etalase alat rental Anda hari ini. Foto KTP asli dan rekening bank dapat dilengkapi nanti di dashboard sebelum pesanan pertama selesai.
+                        </p>
+                      </div>
                     </div>
-                  ) : (
-                    <label
-                      htmlFor="owner-ktp-input"
-                      className="border-2 border-dashed border-slate-300 hover:border-[#1683FF] rounded-2xl p-6 text-center cursor-pointer transition bg-slate-50/50 hover:bg-slate-50 block"
+
+                    {/* Opsi 2: Lengkapi KTP Sekarang */}
+                    <div
+                      onClick={() => setMitraKycChoice("now")}
+                      className={`p-4 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
+                        mitraKycChoice === "now"
+                          ? "border-[#1683FF] bg-blue-50/60 shadow-2xs ring-2 ring-[#1683FF]/20"
+                          : "border-slate-200 hover:border-slate-300 bg-white"
+                      }`}
                     >
-                      <Upload className="w-7 h-7 text-[#1683FF] mx-auto mb-2" />
-                      <div className="text-xs sm:text-sm font-bold text-slate-900">
-                        Klik untuk Memilih File KTP Pemilik Toko
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 flex items-center gap-1">
+                          <ShieldCheck className="w-3 h-3 text-slate-600" />
+                          Verifikasi Lengkap
+                        </span>
+                        {mitraKycChoice === "now" && <CheckCircle2 className="w-4 h-4 text-[#1683FF]" />}
                       </div>
-                      <div className="text-[11px] text-slate-500 mt-1">
-                        Format JPG, PNG (Maks 5 MB). Dokumen dilindungi UU PDP.
+                      <div>
+                        <h4 className="font-bold text-xs text-slate-900">Unggah KTP Pemilik Sekarang</h4>
+                        <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                          Bagi Anda yang sudah memiliki file foto KTP &amp; rekening bank siap unggah untuk mendapatkan badge Toko Resmi sejak awal.
+                        </p>
                       </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Form Dokumen KTP jika memilih 'now' */}
+                {mitraKycChoice === "now" && (
+                  <div className="p-4 rounded-2xl bg-slate-50/90 border border-slate-200 space-y-3 animate-in fade-in">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Nomor Induk Kependudukan (NIK Pemilik 16 Digit)
+                      </label>
                       <input
-                        id="owner-ktp-input"
-                        type="file"
-                        accept="image/*"
-                        onChange={handleKtpPhotoUpload}
-                        className="hidden"
+                        type="text"
+                        required
+                        maxLength={16}
+                        placeholder="Contoh: 3201234567890001"
+                        value={formData.ownerNik}
+                        onChange={(e) => setFormData({ ...formData, ownerNik: e.target.value })}
+                        className="w-full bg-white border border-slate-200 text-slate-900 placeholder-slate-400 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-[#1683FF]"
                       />
-                    </label>
-                  )}
-                </div>
+                    </div>
 
-                {/* Rekening Payout */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      Bank Tujuan Payout
-                    </label>
-                    <select
-                      value={formData.bankName}
-                      onChange={(e) => setFormData({ ...formData, bankName: e.target.value })}
-                      className="w-full bg-white border border-slate-200 text-slate-900 rounded-2xl px-4 py-3 text-xs sm:text-sm focus:outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/20"
-                    >
-                      <option value="BCA">Bank BCA</option>
-                      <option value="Mandiri">Bank Mandiri</option>
-                      <option value="BRI">Bank BRI</option>
-                      <option value="BNI">Bank BNI</option>
-                      <option value="BSI">Bank BSI</option>
-                    </select>
-                  </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Foto KTP Asli Pemilik Usaha
+                      </label>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      Nomor Rekening Bank
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Contoh: 8820192841"
-                      value={formData.accountNumber}
-                      onChange={(e) => setFormData({ ...formData, accountNumber: e.target.value })}
-                      className="w-full bg-white border border-slate-200 text-slate-900 placeholder-slate-400 rounded-2xl px-4 py-3 text-xs sm:text-sm focus:outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/20"
-                    />
+                      {formData.ktpPhotoPreview ? (
+                        <div className="relative rounded-xl border-2 border-[#1683FF]/40 p-3.5 bg-blue-50/50 flex items-center justify-between gap-4">
+                          <div className="flex items-center gap-3">
+                            <img
+                              src={formData.ktpPhotoPreview}
+                              alt="KTP Preview"
+                              className="w-16 h-11 rounded-lg object-cover border border-slate-200"
+                            />
+                            <div>
+                              <div className="text-xs font-bold text-slate-900 flex items-center gap-1">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-[#1683FF]" />
+                                <span>Foto KTP Siap Diverifikasi</span>
+                              </div>
+                              <div className="text-[10px] text-slate-500">
+                                {formData.ktpPhotoFileName || "ktp_pemilik.jpg"}
+                              </div>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setFormData({ ...formData, ktpPhotoPreview: null, ktpPhotoFileName: "" })}
+                            className="text-xs text-rose-600 font-bold hover:underline cursor-pointer"
+                          >
+                            Ganti
+                          </button>
+                        </div>
+                      ) : (
+                        <label
+                          htmlFor="owner-ktp-input"
+                          className="border-2 border-dashed border-slate-300 hover:border-[#1683FF] rounded-xl p-4 text-center cursor-pointer transition bg-white block"
+                        >
+                          <Upload className="w-5 h-5 text-[#1683FF] mx-auto mb-1" />
+                          <div className="text-xs font-bold text-slate-900">
+                            Pilih File KTP Pemilik Toko
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            Format JPG, PNG (Maks 5 MB).
+                          </div>
+                          <input
+                            id="owner-ktp-input"
+                            type="file"
+                            accept="image/*"
+                            onChange={handleKtpPhotoUpload}
+                            className="hidden"
+                          />
+                        </label>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Bank Tujuan Payout
+                        </label>
+                        <select
+                          value={formData.bankName}
+                          onChange={(e) => setFormData({ ...formData, bankName: e.target.value })}
+                          className="w-full bg-white border border-slate-200 text-slate-900 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1683FF]"
+                        >
+                          <option value="BCA">Bank BCA</option>
+                          <option value="Mandiri">Bank Mandiri</option>
+                          <option value="BRI">Bank BRI</option>
+                          <option value="BNI">Bank BNI</option>
+                          <option value="BSI">Bank BSI</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Nomor Rekening Bank
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="Contoh: 8820192841"
+                          value={formData.accountNumber}
+                          onChange={(e) => setFormData({ ...formData, accountNumber: e.target.value })}
+                          className="w-full bg-white border border-slate-200 text-slate-900 placeholder-slate-400 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#1683FF]"
+                        />
+                      </div>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <div className="bg-blue-50 p-4 rounded-2xl border border-blue-200 flex items-start gap-3 text-xs text-slate-700">
                   <ShieldCheck className="w-5 h-5 text-[#1683FF] shrink-0 mt-0.5" />
                   <div>
-                    <div className="font-bold text-xs sm:text-sm text-slate-900">Proteksi Rekber Escrow &amp; Transfer Admin Bebas Biaya</div>
+                    <div className="font-bold text-xs sm:text-sm text-slate-900">Proteksi Transaksi &amp; Pembayaran Terverifikasi</div>
                     <div className="text-[11px] sm:text-xs text-slate-600 mt-0.5 leading-relaxed">
-                      Penyewa wajib menitipkan KTP fisik asli di toko Anda saat serah terima barang. Pencairan hak sewa ditransfer utuh oleh admin via m-Banking tanpa potongan biaya transfer (Rp0).
+                      Penyewa wajib menitipkan KTP fisik asli di toko Anda saat serah terima barang. Pencairan hak sewa ditransfer utuh oleh admin via perbankan resmi tanpa potongan biaya transfer (Rp0).
                     </div>
                   </div>
                 </div>

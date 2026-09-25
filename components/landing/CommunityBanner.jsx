@@ -1,5 +1,5 @@
 import React from "react";
-import { Heart, Users, Sparkles, ShieldCheck } from "lucide-react";
+import { Heart, Users, ShieldCheck } from "lucide-react";
 
 export default function CommunityBanner() {
   return (
@@ -35,8 +35,8 @@ export default function CommunityBanner() {
                 <span className="text-xs text-slate-400 mt-0.5">Bebas buat request</span>
               </div>
               <div className="flex flex-col items-center">
-                <span className="text-xl font-bold text-[#38bdf8]">Escrow Aman</span>
-                <span className="text-xs text-slate-400 mt-0.5">Xendit Payment Gateway</span>
+                <span className="text-xl font-bold text-[#38bdf8]">Rekening Bersama</span>
+                <span className="text-xs text-slate-400 mt-0.5">Proteksi Transaksi Pengguna</span>
               </div>
               <div className="flex flex-col items-center">
                 <span className="text-xl font-bold text-emerald-400">Titik Temu Aman</span>

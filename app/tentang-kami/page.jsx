@@ -42,7 +42,7 @@ export default function TentangKamiPage() {
               <ShieldCheck className="w-6 h-6 text-emerald-600 mb-2" />
               <h3 className="font-bold text-base text-[#102A43] mb-1">Prinsip Keamanan</h3>
               <p className="text-xs">
-                Perlindungan dana escrow resmi via Xendit dan safe meet-up Bantuin Point untuk memastikan transaksi bebas risiko penipuan.
+                Perlindungan pembayaran resmi terverifikasi dan safe meet-up Bantuin Point untuk memastikan transaksi bebas risiko penipuan.
               </p>
             </div>
           </div>

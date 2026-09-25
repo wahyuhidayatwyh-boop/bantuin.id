@@ -104,7 +104,7 @@ export default function FlashCommunitySection() {
                   PROTEKSI RESMI
                 </span>
                 <h4 className="font-extrabold text-base text-slate-900 mb-1">
-                  100% Escrow Xendit
+                  100% Rekening Bersama Aman
                 </h4>
                 <p className="text-xs text-slate-600 leading-relaxed mb-4">
                   Dana tertahan aman sampai tugas selesai & bukti foto terkonfirmasi.
@@ -173,7 +173,7 @@ export default function FlashCommunitySection() {
                   </div>
                 </div>
                 <p className="text-xs text-slate-600 italic leading-relaxed">
-                  &ldquo;Sangat membantu pas butuh sewa kamera Sony H-1 buat liputan wisuda. Pemiliknya ramah & aman pakai escrow.&rdquo;
+                  &ldquo;Sangat membantu pas butuh sewa kamera Sony H-1 buat liputan wisuda. Pemiliknya ramah &amp; aman pakai sistem Bantuin.&rdquo;
                 </p>
               </div>
 

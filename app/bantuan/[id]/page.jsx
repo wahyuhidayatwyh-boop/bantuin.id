@@ -23,7 +23,6 @@ import {
   Users,
   Check,
   Award,
-  Sparkles,
   ArrowRight,
   ExternalLink,
   CreditCard,
@@ -135,7 +134,7 @@ export default function RequestDetailPage() {
                 <span>•</span>
                 <span className="flex items-center gap-1 text-emerald-700 font-semibold">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Rekening Bersama Terlindungi</span>
+                  <span>Sistem Pembayaran Terverifikasi</span>
                 </span>
               </div>
 
@@ -237,7 +236,7 @@ export default function RequestDetailPage() {
                   <div className="text-base sm:text-lg font-black text-[#1683FF] mt-0.5">
                     {request.isVoluntary ? "Sukarela" : formatIDR(request.rewardAmount)}
                   </div>
-                  <div className="text-[11px] text-emerald-700 font-medium">Dana aman di rekening bersama</div>
+                  <div className="text-[11px] text-emerald-700 font-medium">Dana pembayaran terverifikasi aman</div>
                 </div>
               </div>
 
@@ -341,13 +340,13 @@ export default function RequestDetailPage() {
                   </div>
                 )}
 
-                {/* Trust & Escrow Guarantee */}
+                {/* Trust & Payment Guarantee */}
                 <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-start gap-2.5">
                   <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                   <div>
-                    <div className="text-xs font-bold text-slate-900">Garansi Rekening Bersama</div>
+                    <div className="text-xs font-bold text-slate-900">Garansi Pembayaran Terverifikasi</div>
                     <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
-                      Dana aman di rekening bersama sampai tugas selesai disetujui.
+                      Dana aman diproses resmi sampai tugas selesai disetujui.
                     </p>
                   </div>
                 </div>
@@ -367,7 +366,7 @@ export default function RequestDetailPage() {
                     </span>
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Pilih penawaran terbaik dan bayar via QRIS / VA / E-Wallet untuk mengunci dana di Escrow.
+                    Pilih penawaran terbaik dan selesaikan pembayaran via QRIS / VA / E-Wallet (Payment Gateway).
                   </p>
                 </div>
               </div>
@@ -505,7 +504,7 @@ export default function RequestDetailPage() {
                                   className="px-4 py-1.5 bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold rounded-xl shadow-xs transition active:scale-95 flex items-center gap-1.5 text-xs"
                                 >
                                   <CreditCard className="w-3.5 h-3.5" />
-                                  <span>Pilih & Bayar Escrow</span>
+                                  <span>Pilih &amp; Bayar Resmi</span>
                                 </Link>
                               ) : (
                                 <span className="text-xs text-slate-400 font-medium">Selesai/Diproses</span>

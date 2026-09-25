@@ -25,7 +25,6 @@ import {
   SlidersHorizontal, 
   Search, 
   ChevronDown, 
-  Sparkles,
   ExternalLink,
   Award,
   Filter,
@@ -86,35 +85,9 @@ export default function PelamarListPage() {
   const [previewDoc, setPreviewDoc] = useState(null);
 
   const request = requests.find((r) => r.id === id);
+  const offersList = useMemo(() => request?.offers || [], [request?.offers]);
 
-  if (!request) {
-    return (
-      <div className="min-h-screen flex flex-col bg-[#EEF2F6]">
-        <Navbar />
-        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-          <h2 className="text-xl font-black text-slate-900">Permintaan Bantuan Tidak Ditemukan</h2>
-          <p className="text-sm text-slate-500 mt-1 mb-4">Mungkin permintaan sudah ditutup atau diselesaikan.</p>
-          <Link href="/bantuan" className="px-5 py-2.5 bg-[#1683FF] text-white rounded-2xl text-xs font-bold shadow-md">
-            Kembali ke Daftar Bantuan
-          </Link>
-        </div>
-        <Footer />
-      </div>
-    );
-  }
-
-  const isOwner = currentUser?.id === request.requester?.id;
-  const offersList = request.offers || [];
-  const hasUserOffered = offersList.some((o) => o.helperId === currentUser?.id);
-
-  const distanceInfo = getDistanceToUser
-    ? getDistanceToUser(request.latitude, request.longitude, request.distanceMeters)
-    : null;
-  const distanceText = request.mode === "online"
-    ? "Online"
-    : (distanceInfo?.text || (request.distanceMeters ? `${request.distanceMeters} m` : "850 m"));
-
-  // Filter & Sort Applicants
+  // Filter & Sort Applicants (Declared unconditionally before any return)
   const filteredOffers = useMemo(() => {
     return offersList
       .filter((offer) => {
@@ -135,6 +108,32 @@ export default function PelamarListPage() {
         return (b.reliability || 95) - (a.reliability || 95); // 'recommended'
       });
   }, [offersList, searchFilter, sortBy, filterWithPortfolio, filterWithCV]);
+
+  if (!request) {
+    return (
+      <div className="min-h-screen flex flex-col bg-[#EEF2F6]">
+        <Navbar />
+        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+          <h2 className="text-xl font-black text-slate-900">Permintaan Bantuan Tidak Ditemukan</h2>
+          <p className="text-sm text-slate-500 mt-1 mb-4">Mungkin permintaan sudah ditutup atau diselesaikan.</p>
+          <Link href="/bantuan" className="px-5 py-2.5 bg-[#1683FF] text-white rounded-2xl text-xs font-bold shadow-md">
+            Kembali ke Daftar Bantuan
+          </Link>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
+
+  const isOwner = currentUser?.id === request.requester?.id;
+  const hasUserOffered = offersList.some((o) => o.helperId === currentUser?.id);
+
+  const distanceInfo = getDistanceToUser
+    ? getDistanceToUser(request.latitude, request.longitude, request.distanceMeters)
+    : null;
+  const distanceText = request.mode === "online"
+    ? "Online"
+    : (distanceInfo?.text || (request.distanceMeters ? `${request.distanceMeters} m` : "850 m"));
 
   // Average offered price
   const avgPrice = offersList.length > 0
@@ -248,7 +247,7 @@ export default function PelamarListPage() {
                 <span>•</span>
                 <span className="flex items-center gap-1 text-emerald-700 font-semibold">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Rekening Bersama Terlindungi</span>
+                  <span>Sistem Pembayaran Terverifikasi</span>
                 </span>
               </div>
 
@@ -310,7 +309,7 @@ export default function PelamarListPage() {
                   <div className="text-base sm:text-lg font-black text-[#1683FF] mt-0.5">
                     {request.isVoluntary ? "Sukarela" : formatIDR(request.rewardAmount)}
                   </div>
-                  <div className="text-[11px] text-emerald-700 font-medium">Dana aman di rekening bersama</div>
+                  <div className="text-[11px] text-emerald-700 font-medium">Dana pembayaran terverifikasi aman</div>
                 </div>
               </div>
 
@@ -367,13 +366,13 @@ export default function PelamarListPage() {
                   </div>
                 )}
 
-                {/* Trust & Escrow Guarantee */}
+                {/* Trust & Payment Guarantee */}
                 <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-start gap-2.5">
                   <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                   <div>
-                    <div className="text-xs font-bold text-slate-900">Garansi Rekening Bersama</div>
+                    <div className="text-xs font-bold text-slate-900">Garansi Pembayaran Terverifikasi</div>
                     <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
-                      Dana aman di rekening bersama sampai tugas selesai disetujui.
+                      Dana aman diproses resmi sampai tugas selesai disetujui.
                     </p>
                   </div>
                 </div>
@@ -395,7 +394,7 @@ export default function PelamarListPage() {
                     </span>
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Pilih penawaran terbaik dan bayar via QRIS / VA / E-Wallet untuk mengunci dana di Escrow.
+                    Pilih penawaran terbaik dan selesaikan pembayaran via QRIS / VA / E-Wallet (Payment Gateway).
                   </p>
                 </div>
 
@@ -561,7 +560,7 @@ export default function PelamarListPage() {
                             className="px-4 py-1.5 bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold rounded-xl shadow-xs transition active:scale-95 flex items-center gap-1.5 text-xs"
                           >
                             <CreditCard className="w-3.5 h-3.5" />
-                            <span>Pilih &amp; Bayar Escrow</span>
+                            <span>Pilih &amp; Bayar Resmi</span>
                           </Link>
                         ) : (
                           isMyOffer && (

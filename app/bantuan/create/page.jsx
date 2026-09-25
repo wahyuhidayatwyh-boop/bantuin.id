@@ -16,7 +16,6 @@ import {
   Calendar,
   FileText, 
   AlertCircle, 
-  Sparkles,
   ArrowRight,
   ArrowLeft,
   Eye,
@@ -34,6 +33,8 @@ import {
   Ban
 } from "lucide-react";
 import { detectProhibitedContent } from "@/lib/security";
+import CategoryIcon from "@/components/common/CategoryIcon";
+import { BANTUAN_CATEGORIES } from "@/lib/categories";
 
 function CreateRequestForm() {
   const router = useRouter();
@@ -158,17 +159,7 @@ function CreateRequestForm() {
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const categories = [
-    "Ambil Dokumen",
-    "Print & Fotokopi",
-    "Antar Barang",
-    "Titip Belanja",
-    "Bantu Pindahan",
-    "Bantu Event",
-    "Jasa Desain",
-    "Bantu Antri",
-    "Lainnya",
-  ];
+  const categories = BANTUAN_CATEGORIES.filter((c) => c.id !== "Semua").map((c) => c.label);
 
   const calculateDeadlineTimestamp = () => {
     const now = new Date();
@@ -938,8 +929,9 @@ function CreateRequestForm() {
 
                 <div className="p-4 rounded-2xl border border-slate-100 bg-slate-50/60 space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700">
-                      {category}
+                    <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700">
+                      <CategoryIcon category={category} className="w-3 h-3 text-[#1683FF] shrink-0" />
+                      <span>{category}</span>
                     </span>
                     <span className="text-[10px] text-slate-400">
                       {mode === "online" ? "Online" : "Tatap Muka"}
@@ -984,13 +976,13 @@ function CreateRequestForm() {
                 </div>
               </div>
 
-              {/* Escrow Guarantee Pill (Integrated) */}
+              {/* Guarantee Pill (Integrated) */}
               <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-start gap-3">
                 <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
                 <div>
-                  <div className="text-xs font-bold text-slate-900">Garansi Rekening Bersama (Escrow)</div>
+                  <div className="text-xs font-bold text-slate-900">Garansi Pembayaran Terverifikasi</div>
                   <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
-                    Dana imbalan Anda disimpan aman di rekening bersama resmi dan baru dicairkan setelah Anda menyetujui hasil kerja tenaga bantuan.
+                    Dana imbalan Anda diproses aman via Payment Gateway resmi dan hak bayar baru dapat dicairkan setelah Anda menyetujui hasil kerja tenaga bantuan.
                   </p>
                 </div>
               </div>

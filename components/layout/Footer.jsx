@@ -113,7 +113,7 @@ export default function Footer() {
               </li>
               <li>
                 <Link href="/keamanan" className="hover:text-[#1683FF] transition font-medium">
-                  Keamanan & Escrow
+                  Keamanan &amp; Transaksi
                 </Link>
               </li>
               <li>

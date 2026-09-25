@@ -36,6 +36,7 @@ import {
   FileText,
   ExternalLink
 } from "lucide-react";
+import VoucherPicker from "@/components/ui/VoucherPicker";
 
 function JasaPembayaranContent() {
   const { id } = useParams();
@@ -53,23 +54,29 @@ function JasaPembayaranContent() {
   const lngParam = searchParams.get("lng");
 
   const isDigitalMode = modeParam === "digital" || modeParam === "online";
+  const roomIdParam = searchParams.get("roomId");
+  const amountParam = searchParams.get("amount");
 
   const { 
     walletBalance = 250000, 
     addToast,
-    createJasaOrder
+    createJasaOrder,
+    updateOrderStatus,
+    sendChatMessage
   } = useApp() || {};
 
   const service = getCatalogServiceById(id);
 
   // Selected payment method
-  const [selectedMethod, setSelectedMethod] = useState("qris"); // 'qris', 'bca_va', 'mandiri_va', 'bri_va', 'bni_va', 'wallet'
+  const [selectedMethod, setSelectedMethod] = useState("qris");
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [createdRoomId, setCreatedRoomId] = useState(null);
   const [isCopiedVA, setIsCopiedVA] = useState(false);
   const [isCopiedNominal, setIsCopiedNominal] = useState(false);
   const [timeLeft, setTimeLeft] = useState(15 * 60);
+  const [appliedVoucher, setAppliedVoucher] = useState(null);
+  const [discountAmount, setDiscountAmount] = useState(0);
 
   // Timer countdown 15 menit
   useEffect(() => {
@@ -103,19 +110,24 @@ function JasaPembayaranContent() {
   }
 
   // Resolve selected package
-  const selectedPackage = service.packages?.find((p) => p.id === pkgParam) || {
-    id: "pkg-satuan",
-    name: "Layanan Standar (Satuan)",
-    tier: "Pilihan Dasar",
-    price: service.price,
+  const selectedPackage = service.packages?.find((p) => p.id === pkgParam || p.name === pkgParam) || {
+    id: "pkg-custom",
+    name: pkgParam || "Layanan Disepakati (Konsultasi)",
+    tier: "Pilihan Konsultasi",
+    price: amountParam ? Number(amountParam) : service.price,
     duration: "1 - 2 Hari Kerja"
   };
 
-  const servicePrice = selectedPackage.price;
+  const servicePrice = amountParam ? Number(amountParam) : selectedPackage.price;
   
   // Tagihan customer murni harga jasa (Gross Amount)
-  // gateway_fee dicatat di ledger sistem, bukan ditambahkan ke tagihan customer
   const totalAmount = servicePrice;
+  const finalAmount = Math.max(0, totalAmount - discountAmount);
+
+  const handleVoucherApply = (discount, voucher) => {
+    setDiscountAmount(discount);
+    setAppliedVoucher(voucher);
+  };
 
   // Rincian Potongan Platform Bantuin (8% dari biaya jasa, ditanggung mitra)
   const platformFee = Math.round(servicePrice * 0.08);
@@ -148,7 +160,18 @@ function JasaPembayaranContent() {
     setIsProcessing(true);
     setTimeout(() => {
       let targetRoomId = null;
-      if (createJasaOrder && service) {
+      if (roomIdParam && updateOrderStatus) {
+        updateOrderStatus(roomIdParam, "paid_escrow");
+        if (sendChatMessage) {
+          sendChatMessage(
+            roomIdParam,
+            `Dana sebesar ${formatIDR(totalAmount)} telah berhasil dibayar melalui metode ${selectedMethod.toUpperCase()} (Payment Gateway Resmi). Mitra dapat segera memulai pengerjaan tugas!`,
+            { isSystemAnnouncement: true }
+          );
+        }
+        targetRoomId = roomIdParam;
+        setCreatedRoomId(roomIdParam);
+      } else if (createJasaOrder && service) {
         const newOrder = createJasaOrder({
           serviceId: service.id,
           serviceTitle: service.title,
@@ -178,6 +201,12 @@ function JasaPembayaranContent() {
       }
       setIsProcessing(false);
       setIsSuccess(true);
+
+      if (roomIdParam) {
+        setTimeout(() => {
+          router.push(`/chat?room=${roomIdParam}`);
+        }, 1500);
+      }
     }, 1200);
   };
 
@@ -237,17 +266,17 @@ function JasaPembayaranContent() {
       <div className="bg-white border-b border-slate-200/80 shadow-2xs">
         <div className="max-w-[1400px] mx-auto px-4 sm:px-8 py-3 flex items-center justify-between">
           <Link
-            href={`/jasa/${service.id}`}
+            href={roomIdParam ? `/chat?room=${roomIdParam}` : `/jasa/${service.id}`}
             className="inline-flex items-center gap-2 text-xs sm:text-sm font-bold text-slate-600 hover:text-[#1683FF] transition cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>Kembali ke Detail Layanan</span>
+            <span>{roomIdParam ? "Kembali ke Obrolan" : "Kembali ke Detail Layanan"}</span>
           </Link>
 
           <div className="flex items-center gap-3">
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#1683FF] bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
               <Lock className="w-3.5 h-3.5 text-[#1683FF]" />
-              <span>Escrow Rekber Resmi</span>
+              <span>Sistem Pembayaran Terverifikasi</span>
             </span>
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50/70 border border-blue-100 text-slate-700 text-xs font-semibold">
               <Clock className="w-3.5 h-3.5 text-[#1683FF]" />
@@ -270,13 +299,13 @@ function JasaPembayaranContent() {
 
             <div>
               <span className="text-xs font-extrabold uppercase px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 inline-block mb-2">
-                Pembayaran Escrow Berhasil
+                Pembayaran Berhasil Terverifikasi
               </span>
               <h1 className="text-2xl font-black text-slate-900 tracking-tight">
-                Dana Berhasil Disetor ke Rekber!
+                Pembayaran Berhasil Dikonfirmasi!
               </h1>
               <p className="text-xs sm:text-sm text-slate-500 mt-1.5 leading-relaxed">
-                Pembayaran Anda sebesar <strong>{formatIDR(totalAmount)}</strong> telah aman tersimpan di Rekening Bersama Bantuin.
+                Pembayaran Anda sebesar <strong>{formatIDR(totalAmount)}</strong> telah berhasil diverifikasi melalui sistem pembayaran resmi Bantuin.
               </p>
             </div>
 
@@ -315,7 +344,7 @@ function JasaPembayaranContent() {
                 Pantau Status di Aktivitas
               </Link>
               <Link
-                href={createdRoomId ? `/chat?room=${createdRoomId}` : `/chat?partnerId=${service.provider.id}&serviceId=${service.id}`}
+                href={roomIdParam ? `/chat?room=${roomIdParam}` : createdRoomId ? `/chat?room=${createdRoomId}` : `/chat?partnerId=${service.provider.id}&serviceId=${service.id}`}
                 className="w-full py-3 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold text-xs transition text-center"
               >
                 Buka Ruang Kerja &amp; Chat
@@ -323,7 +352,7 @@ function JasaPembayaranContent() {
             </div>
           </div>
         ) : (
-          /* Tampilan Pembayaran Escrow (Bayar Dulu) */
+          /* Tampilan Pembayaran Gateway (Bayar Dulu) */
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
             
             {/* Left Column: Metode Pembayaran (7 Cols) */}
@@ -336,7 +365,7 @@ function JasaPembayaranContent() {
                       Pilih Metode Pembayaran
                     </h1>
                     <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-                      Pilih kanal bayar resmi untuk mengunci dana di Escrow Bantuin
+                      Pilih kanal bayar resmi terverifikasi Bantuin
                     </p>
                   </div>
                   <span className="text-xs text-[#1683FF] font-bold flex items-center gap-1.5 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
@@ -438,7 +467,7 @@ function JasaPembayaranContent() {
               {/* Bottom Security Notice */}
               <div className="pt-3 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-500">
                 <ShieldCheck className="w-4 h-4 text-[#1683FF] shrink-0" />
-                <span>Transaksi dilindungi Rekening Bersama Escrow resmi Bantuin.</span>
+                <span>Transaksi dilindungi Sistem Pembayaran Resmi &amp; Terverifikasi Bantuin.</span>
               </div>
             </div>
 
@@ -451,7 +480,7 @@ function JasaPembayaranContent() {
                     Rincian Tagihan
                   </h2>
                   <span className="text-xs font-bold text-[#1683FF] bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100">
-                    100% Proteksi Rekber
+                    100% Terverifikasi
                   </span>
                 </div>
 
@@ -569,7 +598,7 @@ function JasaPembayaranContent() {
                         <FileText className="w-3 h-3 text-[#1683FF]" /> Brief Kebutuhan Digital:
                       </span>
                       <p className="italic text-[11px] text-slate-700 whitespace-pre-line bg-white p-2.5 rounded-lg border border-slate-200/60 leading-relaxed">
-                        "{decodeURIComponent(briefParam)}"
+                        &ldquo;{decodeURIComponent(briefParam)}&rdquo;
                       </p>
                     </div>
                   )}
@@ -580,7 +609,7 @@ function JasaPembayaranContent() {
                         Catatan Tambahan:
                       </span>
                       <p className="italic text-[11px] line-clamp-2">
-                        "{decodeURIComponent(notesParam)}"
+                        &ldquo;{decodeURIComponent(notesParam)}&rdquo;
                       </p>
                     </div>
                   )}
@@ -599,7 +628,7 @@ function JasaPembayaranContent() {
                   </div>
 
                   <div className="flex items-center justify-between text-slate-500 text-[11px]">
-                    <span>Biaya Rekening Bersama (Escrow)</span>
+                    <span>Biaya Sistem Terverifikasi</span>
                     <span className="text-emerald-600 font-bold">Gratis (Rp 0)</span>
                   </div>
 
@@ -608,23 +637,45 @@ function JasaPembayaranContent() {
                     <span className="text-emerald-600 font-bold">Gratis (Ditanggung Platform)</span>
                   </div>
 
+                  {/* Baris diskon voucher */}
+                  {discountAmount > 0 && (
+                    <div className="flex items-center justify-between text-[11px] font-semibold text-emerald-600">
+                      <span>Diskon Voucher ({appliedVoucher?.code})</span>
+                      <span>-{formatIDR(discountAmount)}</span>
+                    </div>
+                  )}
+
                   {/* Total Tagihan */}
                   <div className="pt-3 border-t border-slate-200/90 flex items-baseline justify-between mt-1">
                     <div>
                       <span className="font-black text-xs sm:text-sm text-slate-900 block">Total Tagihan</span>
-                      <span className="text-[10px] text-slate-400 font-normal">Disetor ke Rekber Bantuin</span>
+                      <span className="text-[10px] text-slate-400 font-normal">Diproses via Payment Gateway Resmi</span>
                     </div>
-                    <span className="text-[#1683FF] text-xl sm:text-2xl font-black tracking-tight">
-                      {formatIDR(totalAmount)}
-                    </span>
+                    <div className="text-right">
+                      {discountAmount > 0 && (
+                        <span className="text-[10px] text-slate-400 line-through block">{formatIDR(totalAmount)}</span>
+                      )}
+                      <span className="text-[#1683FF] text-xl sm:text-2xl font-black tracking-tight">
+                        {formatIDR(finalAmount)}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
-                {/* Rekber Security Banner */}
+                {/* VoucherPicker */}
+                <VoucherPicker
+                  category="jasa"
+                  orderAmount={totalAmount}
+                  orderLocation={alamatParam || service?.city || service?.location || null}
+                  onApply={handleVoucherApply}
+                  appliedVoucher={appliedVoucher}
+                />
+
+                {/* Security Banner */}
                 <div className="p-3 rounded-2xl bg-emerald-50/60 border border-emerald-100 flex items-start gap-2.5 text-[11px] text-emerald-800 leading-snug">
                   <Lock className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                   <span>
-                    <strong>Rekber Aman Bantuin:</strong> Dana baru diteruskan ke mitra setelah pekerjaan selesai dan Anda konfirmasi puas.
+                    <strong>Pembayaran Aman Bantuin:</strong> Hak pembayaran mitra baru dapat dicairkan setelah pekerjaan selesai dan Anda konfirmasi puas.
                   </span>
                 </div>
               </div>
@@ -645,7 +696,7 @@ function JasaPembayaranContent() {
                   ) : (
                     <>
                       <ShieldCheck className="w-4 h-4" />
-                      <span>Saya Sudah Bayar (Konfirmasi Escrow)</span>
+                      <span>Saya Sudah Bayar (Konfirmasi Pembayaran)</span>
                     </>
                   )}
                 </button>

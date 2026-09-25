@@ -16,6 +16,7 @@ import {
   BantuinPayLogo 
 } from "@/components/ui/PaymentBankLogos";
 import QrisCodeCard from "@/components/ui/QrisCodeCard";
+import VoucherPicker from "@/components/ui/VoucherPicker";
 import { 
   ArrowLeft, 
   ShieldCheck, 
@@ -56,6 +57,8 @@ function RentalPembayaranContent() {
   const [isCopiedVA, setIsCopiedVA] = useState(false);
   const [isCopiedNominal, setIsCopiedNominal] = useState(false);
   const [timeLeft, setTimeLeft] = useState(15 * 60);
+  const [appliedVoucher, setAppliedVoucher] = useState(null);
+  const [discountAmount, setDiscountAmount] = useState(0);
 
   // Dates state with automatic calculation
   const todayStr = new Date().toISOString().split("T")[0];
@@ -125,6 +128,15 @@ function RentalPembayaranContent() {
   // Total tagihan murni yang dibayar penyewa ke payment gateway (Gross Amount)
   const totalAmount = rentalFee + depositFee;
 
+  // Voucher discount applies ONLY to rentalFee, NOT deposit
+  const finalRentalFee = Math.max(0, rentalFee - discountAmount);
+  const finalAmount = finalRentalFee + depositFee;
+
+  const handleVoucherApply = (discount, voucher) => {
+    setDiscountAmount(discount);
+    setAppliedVoucher(voucher);
+  };
+
   // Platform Fee (Potongan Platform Bantuin 8% dari Biaya Sewa, TIDAK MEMOTONG DEPOSIT)
   const platformFee = Math.round(rentalFee * 0.08);
   const storeNetPayout = rentalFee - platformFee;
@@ -177,7 +189,9 @@ function RentalPembayaranContent() {
             dailyPrice,
             rentalFee,
             depositFee,
-            totalAmount,
+            totalAmount: finalAmount,
+            discountAmount,
+            appliedVoucher: appliedVoucher?.code || null,
             conditionNotes: "Body mulus, sensor bersih, kabel & charger lengkap.",
             pickupLocation: rental.address || rental.location || "Alamat Toko Mitra",
             paymentMethod: selectedMethod,
@@ -257,7 +271,7 @@ function RentalPembayaranContent() {
           <div className="flex items-center gap-3">
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#1683FF] bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
               <Lock className="w-3.5 h-3.5 text-[#1683FF]" />
-              <span>Escrow Rekber Resmi</span>
+              <span>Sistem Pembayaran Terverifikasi</span>
             </span>
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50/70 border border-blue-100 text-slate-700 text-xs font-semibold">
               <Clock className="w-3.5 h-3.5 text-[#1683FF]" />
@@ -282,7 +296,7 @@ function RentalPembayaranContent() {
                     Pilih Metode Pembayaran
                   </h1>
                   <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-                    Pilih kanal bayar resmi untuk mengunci dana di Escrow Bantuin
+                    Pilih kanal bayar resmi berlisensi Bank Indonesia
                   </p>
                 </div>
                 <span className="text-xs text-[#1683FF] font-bold flex items-center gap-1.5 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
@@ -333,7 +347,7 @@ function RentalPembayaranContent() {
               <div className="mt-4 pt-4 border-t border-slate-100">
                 {selectedMethod === "qris" && (
                   <QrisCodeCard
-                    totalAmount={totalAmount}
+                    totalAmount={finalAmount}
                     formatIDR={formatIDR}
                     handleCopy={handleCopy}
                     isCopiedNominal={isCopiedNominal}
@@ -366,10 +380,10 @@ function RentalPembayaranContent() {
                     </div>
 
                     <div className="flex items-center justify-between text-xs text-slate-500 pt-1">
-                      <span>Total Tagihan: <strong className="text-slate-900 font-bold">{formatIDR(totalAmount)}</strong></span>
+                      <span>Total Tagihan: <strong className="text-slate-900 font-bold">{formatIDR(finalAmount)}</strong></span>
                       <button
                         type="button"
-                        onClick={() => handleCopy(totalAmount, "nominal")}
+                        onClick={() => handleCopy(finalAmount, "nominal")}
                         className="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-[#1683FF] border border-blue-100 text-xs font-bold rounded-md transition flex items-center gap-1 cursor-pointer"
                       >
                         <Copy className="w-3.5 h-3.5" />
@@ -384,7 +398,7 @@ function RentalPembayaranContent() {
             {/* Bottom Security Notice */}
             <div className="pt-3 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-500">
               <ShieldCheck className="w-4 h-4 text-[#1683FF] shrink-0" />
-              <span>Transaksi dilindungi Rekening Bersama Escrow resmi Bantuin.</span>
+              <span>Transaksi dilindungi Sistem Pembayaran Resmi &amp; Terverifikasi Bantuin.</span>
             </div>
           </div>
 
@@ -397,7 +411,7 @@ function RentalPembayaranContent() {
                   Rincian Tagihan
                 </h2>
                 <span className="text-xs font-bold text-[#1683FF] bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100">
-                  100% Proteksi Rekber
+                  100% Terverifikasi
                 </span>
               </div>
 
@@ -449,20 +463,41 @@ function RentalPembayaranContent() {
                   <span className="font-semibold text-emerald-600">Gratis (Ditanggung Platform)</span>
                 </div>
 
+                {discountAmount > 0 && (
+                  <div className="flex items-center justify-between text-xs font-semibold text-emerald-600">
+                    <span>Diskon Voucher ({appliedVoucher?.code})</span>
+                    <span>-{formatIDR(discountAmount)}</span>
+                  </div>
+                )}
+
                 {/* Total Row - Sleek high contrast summary */}
                 <div className="pt-3.5 border-t border-slate-200/90 flex items-baseline justify-between mt-1">
                   <div>
                     <span className="font-black text-xs sm:text-sm text-slate-900 block">Total Pembayaran</span>
-                    <span className="text-[11px] text-slate-500">Aman di Rekening Bersama Bantuin</span>
+                    <span className="text-[11px] text-slate-500">Diproses via Payment Gateway Resmi</span>
                   </div>
-                  <span className="font-black text-2xl text-[#1683FF] tracking-tight">{formatIDR(totalAmount)}</span>
+                  <div className="text-right">
+                    {discountAmount > 0 && (
+                      <span className="text-[10px] text-slate-400 line-through block">{formatIDR(totalAmount)}</span>
+                    )}
+                    <span className="font-black text-2xl text-[#1683FF] tracking-tight">{formatIDR(finalAmount)}</span>
+                  </div>
                 </div>
               </div>
+
+              {/* Voucher & Diskon Shopee-style */}
+              <VoucherPicker
+                category="sewa"
+                orderAmount={rentalFee}
+                orderLocation={rental.location || rental.address || "Sleman, Yogyakarta"}
+                onApply={handleVoucherApply}
+                appliedVoucher={appliedVoucher}
+              />
 
               {/* Trust Highlight - Sleek inline bar */}
               <div className="pt-2 border-t border-slate-100 flex items-center justify-around text-xs text-slate-600 font-semibold text-center">
                 <span className="flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5 text-[#1683FF]" /> Rekber Resmi
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#1683FF]" /> Pembayaran Terverifikasi
                 </span>
                 <span className="text-slate-300">•</span>
                 <span className="flex items-center gap-1.5">
@@ -498,7 +533,7 @@ function RentalPembayaranContent() {
                 ) : (
                   <>
                     <Lock className="w-5 h-5" />
-                    <span>Bayar Sekarang ({formatIDR(totalAmount)})</span>
+                    <span>Bayar Sekarang ({formatIDR(finalAmount)})</span>
                   </>
                 )}
               </button>

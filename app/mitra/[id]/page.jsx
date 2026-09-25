@@ -25,6 +25,7 @@ import {
   ExternalLink,
   Lock,
   ThumbsUp,
+  Camera,
   X
 } from "lucide-react";
 
@@ -33,17 +34,32 @@ export default function MitraStorePage() {
   const router = useRouter();
   const { activeKabupaten, createRentalOrder } = useApp();
 
+  const [currentStore, setCurrentStore] = useState(() => getMitraStoreById(id));
+
+  React.useEffect(() => {
+    const handleUpdate = () => {
+      setCurrentStore(getMitraStoreById(id));
+    };
+    window.addEventListener("bantuin_mitra_store_updated", handleUpdate);
+    window.addEventListener("storage", handleUpdate);
+    return () => {
+      window.removeEventListener("bantuin_mitra_store_updated", handleUpdate);
+      window.removeEventListener("storage", handleUpdate);
+    };
+  }, [id]);
+
+  const store = currentStore || getMitraStoreById(id);
+
   const [activeTab, setActiveTab] = useState("katalog"); // 'katalog' | 'ulasan' | 'kebijakan'
   const [categoryFilter, setCategoryFilter] = useState("semua");
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [selectedModalPhotoIndex, setSelectedModalPhotoIndex] = useState(0);
   const [bookingSuccess, setBookingSuccess] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [bookStartDate, setBookStartDate] = useState("2026-09-18");
   const [bookDurationDays, setBookDurationDays] = useState(1);
   const [bookNotes, setBookNotes] = useState("");
   const [createdRoomId, setCreatedRoomId] = useState(null);
-
-  const store = getMitraStoreById(id);
 
   if (!store) {
     return (
@@ -58,6 +74,7 @@ export default function MitraStorePage() {
             Toko mitra yang Anda cari tidak tersedia atau sedang dinonaktifkan sementara.
           </p>
           <Link
+            href="/"
             className="px-6 py-3 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-sm shadow-md transition"
           >
             Kembali ke Beranda
@@ -201,7 +218,7 @@ export default function MitraStorePage() {
                 </Link>
                 <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-medium">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                  <span>Rekber Escrow Terlindungi</span>
+                  <span>Pembayaran Terverifikasi</span>
                 </div>
               </div>
 
@@ -305,12 +322,12 @@ export default function MitraStorePage() {
                 </div>
               </div>
 
-              {/* Products Grid: 4 Cards per row on desktop (lg:grid-cols-4) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
+              {/* Products Grid: 2 Columns on Mobile, 4 on Desktop */}
+              <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4 md:gap-5">
                 {filteredCatalog.map((item) => (
                   <div
                     key={item.id}
-                    className="bg-white rounded-2xl sm:rounded-3xl overflow-hidden border border-slate-100 shadow-2xs hover:shadow-lg transition-all duration-300 flex flex-col group"
+                    className="bg-white rounded-xl sm:rounded-3xl overflow-hidden border border-slate-100 shadow-2xs hover:shadow-lg transition-all duration-300 flex flex-col group"
                   >
                     {/* Image Box */}
                     <div className="relative aspect-4/3 w-full bg-slate-100 overflow-hidden">
@@ -319,61 +336,79 @@ export default function MitraStorePage() {
                         alt={item.name}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                       />
-                      <div className="absolute top-2.5 left-2.5 flex flex-wrap gap-1">
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-white/90 text-[#1683FF] backdrop-blur-md shadow-2xs border border-white/60">
-                          Sewa Barang
+                      <div className="absolute top-2 left-2 sm:top-2.5 sm:left-2.5 flex flex-wrap gap-1">
+                        <span className="px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wider bg-white/90 text-[#1683FF] backdrop-blur-md shadow-2xs border border-white/60">
+                          Sewa
                         </span>
                         {item.tag && (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white shadow-2xs">
+                          <span className="hidden xs:inline-block px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-bold bg-amber-500 text-white shadow-2xs">
                             {item.tag}
                           </span>
                         )}
+                        {item.photos && item.photos.length > 1 && (
+                          <span className="px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-bold bg-white/95 text-slate-800 backdrop-blur-md shadow-2xs flex items-center gap-0.5 sm:gap-1 border border-white/60">
+                            <Camera className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-[#1683FF]" />
+                            <span>{item.photos.length}</span>
+                          </span>
+                        )}
                       </div>
-                      <div className="absolute bottom-2.5 right-2.5">
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500 text-white shadow-2xs flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3" />
-                          <span>{item.stockStatus}</span>
+                      <div className="absolute bottom-2 right-2 sm:bottom-2.5 sm:right-2.5">
+                        <span className="px-1.5 sm:px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-bold bg-emerald-500 text-white shadow-2xs flex items-center gap-0.5 sm:gap-1">
+                          <CheckCircle2 className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                          <span className="hidden xs:inline">{item.stockStatus}</span>
                         </span>
                       </div>
                     </div>
 
                     {/* Content Box */}
-                    <div className="p-4 flex-1 flex flex-col justify-between">
+                    <div className="p-2.5 sm:p-4 flex-1 flex flex-col justify-between">
                       <div>
-                        <div className="flex items-center justify-between text-[11px] text-slate-400 mb-1">
+                        <div className="flex items-center justify-between text-[10px] sm:text-[11px] text-slate-400 mb-1">
                           <span className="truncate">{item.category}</span>
-                          <div className="flex items-center gap-1 text-amber-500 font-bold shrink-0">
-                            <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                          <div className="flex items-center gap-0.5 sm:gap-1 text-amber-500 font-bold shrink-0">
+                            <Star className="w-2.5 h-2.5 sm:w-3 sm:h-3 fill-amber-400 text-amber-400" />
                             <span>{item.rating}</span>
                             <span className="text-slate-400 font-normal">({item.reviews})</span>
                           </div>
                         </div>
 
-                        <h3 className="text-sm font-bold text-slate-900 group-hover:text-[#1683FF] transition-colors line-clamp-2 leading-snug">
+                        <h3 className="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-[#1683FF] transition-colors line-clamp-2 leading-tight sm:leading-snug min-h-[32px] sm:min-h-[40px]">
                           {item.name}
                         </h3>
 
-                        <p className="text-[11px] text-slate-500 mt-1.5 line-clamp-2 leading-relaxed">
+                        <p className="hidden sm:block text-[11px] text-slate-500 mt-1.5 line-clamp-2 leading-relaxed">
                           {item.desc}
                         </p>
                       </div>
 
                       {/* Price & Action */}
-                      <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                      <div className="mt-2 sm:mt-4 pt-2 sm:pt-3 border-t border-slate-100 flex flex-col xs:flex-row xs:items-center justify-between gap-1.5 sm:gap-2">
                         <div>
-                          <div className="text-[10px] text-slate-400 font-medium">Harga Sewa</div>
-                          <div className="text-sm sm:text-base font-black text-[#1683FF]">
+                          <div className="text-[9px] sm:text-[10px] text-slate-400 font-medium">Harga Sewa</div>
+                          <div className="text-xs sm:text-base font-black text-[#1683FF]">
                             {formatIDR(item.price)}
-                            <span className="text-[10px] font-normal text-slate-500 ml-0.5">{item.unit}</span>
+                            <span className="text-[9px] sm:text-[10px] font-normal text-slate-500 ml-0.5">{item.unit}</span>
                           </div>
                         </div>
 
-                        <button
-                          onClick={() => setSelectedProduct(item)}
-                          className="px-3.5 py-2 rounded-xl bg-blue-50 hover:bg-[#1683FF] text-[#1683FF] hover:text-white font-bold text-xs transition active:scale-95 cursor-pointer shrink-0"
-                        >
-                          Sewa Sekarang
-                        </button>
+                        <div className="flex items-center gap-1 sm:gap-1.5 w-full xs:w-auto">
+                          <Link
+                            href={`/sewa/${item.id}`}
+                            className="flex-1 xs:flex-none text-center px-2 sm:px-2.5 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-[#1683FF] font-bold text-[10px] sm:text-xs transition active:scale-95 cursor-pointer shrink-0"
+                            title="Lihat Galeri Foto & Detail Unit"
+                          >
+                            Detail
+                          </Link>
+                          <button
+                            onClick={() => {
+                              setSelectedProduct(item);
+                              setSelectedModalPhotoIndex(0);
+                            }}
+                            className="flex-1 xs:flex-none text-center px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-[10px] sm:text-xs transition active:scale-95 cursor-pointer shrink-0"
+                          >
+                            Sewa
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -403,7 +438,7 @@ export default function MitraStorePage() {
                   <div>
                     <h3 className="text-xl font-bold text-slate-900">Ulasan Terverifikasi Pelanggan</h3>
                     <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-md">
-                      Semua ulasan berasal dari transaksi yang telah selesai diverifikasi secara resmi melalui sistem Escrow Rekber Bantuin.
+                      Semua ulasan berasal dari transaksi yang telah selesai diverifikasi secara resmi melalui sistem pembayaran resmi Bantuin.
                     </p>
                     <div className="flex items-center gap-2 mt-3 text-xs font-semibold text-emerald-600">
                       <ShieldCheck className="w-4 h-4" />
@@ -415,35 +450,35 @@ export default function MitraStorePage() {
                 {/* Rating Bar Breakdown */}
                 <div className="w-full md:w-72 space-y-2 text-xs font-medium">
                   <div className="flex items-center gap-2">
-                    <span className="w-8 text-slate-500">5 ★</span>
+                    <span className="w-10 text-slate-500 flex items-center gap-0.5">5 <Star className="w-3 h-3 fill-amber-400 text-amber-400 inline" /></span>
                     <div className="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
                       <div className="h-full bg-amber-400 rounded-full w-[90%]" />
                     </div>
                     <span className="w-8 text-right text-slate-600 font-bold">90%</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="w-8 text-slate-500">4 ★</span>
+                    <span className="w-10 text-slate-500 flex items-center gap-0.5">4 <Star className="w-3 h-3 fill-amber-400 text-amber-400 inline" /></span>
                     <div className="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
                       <div className="h-full bg-amber-400 rounded-full w-[8%]" />
                     </div>
                     <span className="w-8 text-right text-slate-600 font-bold">8%</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="w-8 text-slate-500">3 ★</span>
+                    <span className="w-10 text-slate-500 flex items-center gap-0.5">3 <Star className="w-3 h-3 fill-amber-400 text-amber-400 inline" /></span>
                     <div className="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
                       <div className="h-full bg-amber-400 rounded-full w-[2%]" />
                     </div>
                     <span className="w-8 text-right text-slate-600 font-bold">2%</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="w-8 text-slate-500">2 ★</span>
+                    <span className="w-10 text-slate-500 flex items-center gap-0.5">2 <Star className="w-3 h-3 fill-amber-400 text-amber-400 inline" /></span>
                     <div className="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
                       <div className="h-full bg-amber-400 rounded-full w-[0%]" />
                     </div>
                     <span className="w-8 text-right text-slate-600 font-bold">0%</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="w-8 text-slate-500">1 ★</span>
+                    <span className="w-10 text-slate-500 flex items-center gap-0.5">1 <Star className="w-3 h-3 fill-amber-400 text-amber-400 inline" /></span>
                     <div className="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
                       <div className="h-full bg-amber-400 rounded-full w-[0%]" />
                     </div>
@@ -493,12 +528,12 @@ export default function MitraStorePage() {
                     </div>
 
                     <p className="text-xs sm:text-sm text-slate-700 leading-relaxed mt-4">
-                      "{rev.comment}"
+                      &ldquo;{rev.comment}&rdquo;
                     </p>
 
                     <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-400">
                       <ThumbsUp className="w-3 h-3 text-[#1683FF]" />
-                      <span>Pengalaman transaksi aman via Rekber Bantuin</span>
+                      <span>Pengalaman transaksi aman via pembayaran resmi Bantuin</span>
                     </div>
                   </div>
                 ))}
@@ -528,10 +563,10 @@ export default function MitraStorePage() {
                 <div className="bg-blue-50/60 rounded-2xl p-4 border border-blue-100">
                   <div className="flex items-center gap-2 text-[#1683FF] font-bold text-sm mb-1">
                     <Lock className="w-4 h-4" />
-                    <span>Garansi Escrow Resmi</span>
+                    <span>Sistem Pembayaran Terverifikasi</span>
                   </div>
                   <p className="text-xs text-slate-600 leading-relaxed">
-                    Dana pembayaran ditahan dengan aman di rekening penampungan resmi Bantuin sampai barang diterima atau jasa selesai dikerjakan dengan memuaskan.
+                    Dana pembayaran diamankan melalui Payment Gateway resmi sampai barang diterima atau jasa selesai dikerjakan dengan memuaskan.
                   </p>
                 </div>
 
@@ -585,24 +620,56 @@ export default function MitraStorePage() {
                   </div>
                   <h4 className="text-lg font-bold text-slate-900">Permintaan Terkirim!</h4>
                   <p className="text-xs text-slate-500 max-w-xs mx-auto">
-                    Mengalihkan kamu ke chat toko {store.name} untuk konfirmasi jadwal & pembayaran escrow...
+                    Mengalihkan kamu ke chat toko {store.name} untuk konfirmasi jadwal &amp; pembayaran...
                   </p>
                 </div>
               ) : (
                 <>
-                  <div className="flex items-center gap-3.5 bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                    <img
-                      src={selectedProduct.image}
-                      alt={selectedProduct.name}
-                      className="w-16 h-16 rounded-xl object-cover"
-                    />
-                    <div>
-                      <div className="text-xs font-bold text-slate-900 line-clamp-1">{selectedProduct.name}</div>
-                      <div className="text-sm font-extrabold text-[#1683FF] mt-0.5">
-                        {formatIDR(selectedProduct.price)} {selectedProduct.unit}
+                  <div className="space-y-2.5 bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                    <div className="flex items-center gap-3.5">
+                      <img
+                        src={(selectedProduct.photos && selectedProduct.photos[selectedModalPhotoIndex]) || selectedProduct.image}
+                        alt={selectedProduct.name}
+                        className="w-16 h-16 rounded-xl object-cover border border-slate-200"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-bold text-slate-900 line-clamp-1">{selectedProduct.name}</div>
+                        <div className="text-sm font-extrabold text-[#1683FF] mt-0.5">
+                          {formatIDR(selectedProduct.price)} {selectedProduct.unit}
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">Vendor: {store.name}</div>
                       </div>
-                      <div className="text-[11px] text-slate-400 mt-0.5">Vendor: {store.name}</div>
                     </div>
+
+                    {/* Multi-Photo Gallery Selector in Modal */}
+                    {selectedProduct.photos && selectedProduct.photos.length > 1 && (
+                      <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 overflow-x-auto py-0.5">
+                          {selectedProduct.photos.map((ph, pIdx) => (
+                            <button
+                              key={pIdx}
+                              type="button"
+                              onClick={() => setSelectedModalPhotoIndex(pIdx)}
+                              className={`w-9 h-9 rounded-lg overflow-hidden shrink-0 border-2 transition cursor-pointer ${
+                                selectedModalPhotoIndex === pIdx
+                                  ? "border-[#1683FF] ring-2 ring-blue-100 shadow-xs"
+                                  : "border-slate-200 opacity-60 hover:opacity-100"
+                              }`}
+                            >
+                              <img src={ph} alt={`Thumb ${pIdx + 1}`} className="w-full h-full object-cover" />
+                            </button>
+                          ))}
+                        </div>
+                        <Link
+                          href={`/sewa/${selectedProduct.id}`}
+                          target="_blank"
+                          className="text-[11px] font-bold text-[#1683FF] hover:underline flex items-center gap-1 shrink-0 px-2 py-1 bg-white rounded-lg border border-slate-200 shadow-2xs"
+                        >
+                          <span>Galeri Penuh</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </Link>
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
@@ -653,7 +720,7 @@ export default function MitraStorePage() {
                       <span className="font-bold text-slate-900">{formatIDR(selectedProduct.price * bookDurationDays)}</span>
                     </div>
                     <div className="flex items-center justify-between text-slate-600">
-                      <span>Deposit Jaminan (Ditahan Escrow):</span>
+                      <span>Deposit Jaminan Sewa:</span>
                       <span className="font-bold text-slate-900">{formatIDR(Math.max(selectedProduct.price, 250000))}</span>
                     </div>
                     <div className="pt-2 border-t border-blue-200 flex items-center justify-between font-extrabold text-slate-900">
@@ -681,7 +748,7 @@ export default function MitraStorePage() {
                       type="submit"
                       className="w-2/3 py-3 rounded-xl bg-gradient-to-r from-[#1683FF] to-[#0F6FE5] hover:from-[#0F6FE5] hover:to-[#0b5ac4] text-white font-bold text-xs shadow-md transition cursor-pointer"
                     >
-                      Bayar Escrow &amp; Masuk Chat Toko
+                      Lanjut Pembayaran &amp; Chat Toko
                     </button>
                   </div>
                 </>

@@ -2,17 +2,45 @@
 
 @layer base {
   :root {
+    /* Brand Primary */
     --primary: #1683ff;
     --primary-hover: #0f6fe5;
+    --primary-active: #0c56b3;
+    --primary-soft: #eaf4ff;
+    --primary-foreground: #ffffff;
+
+    /* Background & Surface */
+    --background: #ffffff;
+    --surface: #ffffff;
+    --surface-elevated: #f8fafc;
+
+    /* Text Hierarchy */
+    --text-primary: #102a43;
+    --text-secondary: #61758a;
+    --text-muted: #9fb3c8;
+    --text-disabled: #cbd2d9;
+
+    /* Borders */
+    --border: #dceaf7;
+    --border-strong: #bcccdc;
+
+    /* Semantic Status Tokens */
+    --success: #22a06b;
+    --success-soft: #e3fcef;
+    --warning: #f5a623;
+    --warning-soft: #fff7e6;
+    --danger: #e12d39;
+    --danger-soft: #ffebe6;
+    --info: #1683ff;
+    --info-soft: #eaf4ff;
+
+    /* Aliases for backwards compatibility */
     --bg-light-blue: #eaf4ff;
     --bg-very-light-blue: #f5faff;
     --dark-navy: #102a43;
     --text-main: #102a43;
-    --text-secondary: #61758a;
     --border-color: #dceaf7;
-    --success: #22a06b;
-    --warning: #f5a623;
-    --rating: #f5b942;
+    --rating: #f5a623;
   }
 
   body {
@@ -103,4 +131,166 @@
 .animate-marquee:hover {
   animation-play-state: paused;
 }
+
+/* ─── Design System Component Tokens ───────────────────────────────────────── */
+/* Consistent Button Styles */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.75rem;
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--primary-hover);
+}
+.btn-primary:active:not(:disabled) {
+  background-color: var(--primary-active);
+  transform: scale(0.98);
+}
+.btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.75rem;
+  background-color: var(--primary-soft);
+  color: var(--primary);
+  border: 1px solid var(--border);
+  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+.btn-secondary:hover:not(:disabled) {
+  background-color: #dceaf7;
+  color: var(--primary-hover);
+}
+
+.btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.75rem;
+  background-color: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+.btn-outline:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+  background-color: var(--primary-soft);
+}
+
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.75rem;
+  background-color: var(--danger);
+  color: #ffffff;
+  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+}
+.btn-danger:hover:not(:disabled) {
+  background-color: #c9202c;
+}
+
+/* Consistent Badges */
+.badge-primary {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  background-color: var(--primary-soft);
+  color: var(--primary);
+  border: 1px solid #c7e0ff;
+}
+.badge-success {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  background-color: var(--success-soft);
+  color: var(--success);
+  border: 1px solid #bbf2d6;
+}
+.badge-warning {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  background-color: var(--warning-soft);
+  color: #c27d0e;
+  border: 1px solid #ffe3b3;
+}
+.badge-danger {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  background-color: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid #ffd4cb;
+}
+.badge-info {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  background-color: var(--info-soft);
+  color: var(--info);
+  border: 1px solid var(--border);
+}
+
+/* Skeleton Loading Shimmer */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(90deg, #f0f4f8 25%, #e1e8f0 50%, #f0f4f8 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
 

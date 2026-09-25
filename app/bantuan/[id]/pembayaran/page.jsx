@@ -25,6 +25,7 @@ import {
   Loader2,
   Clock
 } from "lucide-react";
+import VoucherPicker from "@/components/ui/VoucherPicker";
 
 function PembayaranContent() {
   const { id } = useParams();
@@ -40,12 +41,14 @@ function PembayaranContent() {
     addToast 
   } = useApp();
 
-  const [selectedMethod, setSelectedMethod] = useState("qris"); // 'qris', 'bca_va', 'mandiri_va', 'bri_va', 'bni_va', 'wallet'
+  const [selectedMethod, setSelectedMethod] = useState("qris");
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [isCopiedVA, setIsCopiedVA] = useState(false);
   const [isCopiedNominal, setIsCopiedNominal] = useState(false);
   const [timeLeft, setTimeLeft] = useState(15 * 60);
+  const [appliedVoucher, setAppliedVoucher] = useState(null);
+  const [discountAmount, setDiscountAmount] = useState(0);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -79,8 +82,13 @@ function PembayaranContent() {
   const helperNetPayout = helperProposedPrice - platformFee;
   
   // Tagihan customer murni imbalan jasa helper (Gross Amount)
-  // Biaya gateway/escrow dicatat internal dan ditanggung platform Bantuin.id
   const totalAmount = helperProposedPrice;
+  const finalAmount = Math.max(0, totalAmount - discountAmount);
+
+  const handleVoucherApply = (discount, voucher) => {
+    setDiscountAmount(discount);
+    setAppliedVoucher(voucher);
+  };
 
   // Virtual Account Numbers mapping
   const vaNumbers = {
@@ -189,7 +197,7 @@ function PembayaranContent() {
           <div className="flex items-center gap-3">
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#1683FF] bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
               <Lock className="w-3.5 h-3.5 text-[#1683FF]" />
-              <span>Escrow Rekber Resmi</span>
+              <span>Sistem Pembayaran Terverifikasi</span>
             </span>
             <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50/70 border border-blue-100 text-slate-700 text-xs font-semibold">
               <Clock className="w-3.5 h-3.5 text-[#1683FF]" />
@@ -214,7 +222,7 @@ function PembayaranContent() {
                     Pilih Metode Pembayaran
                   </h1>
                   <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-                    Dana dikunci aman di Rekening Bersama (Escrow) Bantuin
+                    Pembayaran terverifikasi resmi via Payment Gateway
                   </p>
                 </div>
                 <span className="text-xs text-[#1683FF] font-bold flex items-center gap-1.5 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
@@ -315,7 +323,7 @@ function PembayaranContent() {
 
             <div className="pt-3 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-500">
               <ShieldCheck className="w-4 h-4 text-[#1683FF] shrink-0" />
-              <span>Transaksi dilindungi Rekening Bersama Escrow resmi Bantuin.</span>
+              <span>Transaksi dilindungi Sistem Pembayaran Resmi &amp; Terverifikasi Bantuin.</span>
             </div>
           </div>
 
@@ -327,7 +335,7 @@ function PembayaranContent() {
                   Rincian Penugasan
                 </h2>
                 <span className="text-xs font-bold text-[#1683FF] bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100">
-                  100% Proteksi Rekber
+                  100% Terverifikasi
                 </span>
               </div>
 
@@ -361,23 +369,45 @@ function PembayaranContent() {
                 </div>
 
                 <div className="flex items-center justify-between text-slate-500 text-xs">
-                  <span>Biaya Rekber (Escrow)</span>
+                  <span>Biaya Transaksi Terverifikasi</span>
                   <span className="font-semibold text-emerald-600">Gratis (Ditanggung Platform)</span>
                 </div>
 
+                {/* Baris diskon voucher */}
+                {discountAmount > 0 && (
+                  <div className="flex items-center justify-between text-xs font-semibold text-emerald-600">
+                    <span>Diskon Voucher ({appliedVoucher?.code})</span>
+                    <span>-{formatIDR(discountAmount)}</span>
+                  </div>
+                )}
+
                 <div className="p-4 rounded-2xl bg-blue-50/50 border border-blue-100 flex items-center justify-between mt-3">
                   <div>
-                    <span className="font-bold text-xs sm:text-sm text-slate-900 block">Total Ditahan</span>
-                    <span className="text-[11px] text-slate-500">Aman di Rekening Bersama</span>
+                    <span className="font-bold text-xs sm:text-sm text-slate-900 block">Total Tagihan</span>
+                    <span className="text-[11px] text-slate-500">Diproses via Payment Gateway Resmi</span>
                   </div>
-                  <span className="font-black text-xl sm:text-2xl text-[#1683FF]">{formatIDR(totalAmount)}</span>
+                  <div className="text-right">
+                    {discountAmount > 0 && (
+                      <span className="text-[11px] text-slate-400 line-through block">{formatIDR(totalAmount)}</span>
+                    )}
+                    <span className="font-black text-xl sm:text-2xl text-[#1683FF]">{formatIDR(finalAmount)}</span>
+                  </div>
                 </div>
               </div>
+
+              {/* VoucherPicker */}
+              <VoucherPicker
+                category="bantuan"
+                orderAmount={totalAmount}
+                orderLocation={request?.location || request?.campus || null}
+                onApply={handleVoucherApply}
+                appliedVoucher={appliedVoucher}
+              />
 
               {/* Trust Highlight Bar (Senada with #1683FF accents) */}
               <div className="p-2.5 sm:p-3 rounded-xl bg-slate-50/80 border border-slate-200/80 flex items-center justify-around text-xs text-slate-700 font-medium text-center">
                 <span className="flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5 text-[#1683FF]" /> Rekber Resmi
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#1683FF]" /> Pembayaran Terverifikasi
                 </span>
                 <span className="text-slate-300">•</span>
                 <span className="flex items-center gap-1.5">
@@ -413,7 +443,7 @@ function PembayaranContent() {
                 ) : (
                   <>
                     <Lock className="w-5 h-5" />
-                    <span>Bayar Sekarang ({formatIDR(totalAmount)})</span>
+                    <span>Bayar Sekarang ({formatIDR(finalAmount)})</span>
                   </>
                 )}
               </button>

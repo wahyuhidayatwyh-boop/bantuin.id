@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { Zap } from "lucide-react";
 
 // =========================================================================
 // HIGH-FIDELITY SOFTWARE & APP ICONS (iOS / macOS App Icon Style)
@@ -213,7 +214,7 @@ export function ACInverterIcon({ className = "w-7 h-7" }) {
 export function PowerFlashIcon({ className = "w-7 h-7" }) {
   return (
     <div className={`relative rounded-xl bg-amber-500 border border-amber-300/50 flex items-center justify-center text-white font-bold shadow-2xs transition-transform group-hover/app:scale-110 select-none ${className}`}>
-      <span className="text-[11px] font-black">⚡</span>
+      <Zap className="w-3.5 h-3.5 fill-white text-white" />
     </div>
   );
 }

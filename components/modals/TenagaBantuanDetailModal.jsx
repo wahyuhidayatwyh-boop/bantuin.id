@@ -13,8 +13,9 @@ import {
   MessageSquare, 
   Send, 
   Bike,
-  Sparkles,
-  Award
+  Award,
+  Eye,
+  Check
 } from "lucide-react";
 
 export default function TenagaBantuanDetailModal({ isOpen, onClose, helper }) {
@@ -60,7 +61,7 @@ export default function TenagaBantuanDetailModal({ isOpen, onClose, helper }) {
           </button>
 
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 backdrop-blur-xs text-xs font-semibold text-blue-50 border border-white/20 mb-2">
-            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
             <span>Profil Tenaga Bantuan Terverifikasi</span>
           </div>
 
@@ -162,7 +163,7 @@ export default function TenagaBantuanDetailModal({ isOpen, onClose, helper }) {
                   key={skill}
                   className="text-xs font-semibold px-3 py-1 bg-blue-50 text-[#1683FF] rounded-lg border border-blue-100 flex items-center gap-1"
                 >
-                  <span>✓</span>
+                  <Check className="w-3 h-3 text-[#1683FF]" />
                   <span>{skill}</span>
                 </span>
               ))}
@@ -216,7 +217,7 @@ export default function TenagaBantuanDetailModal({ isOpen, onClose, helper }) {
                     </div>
                   </div>
                   <p className="text-slate-600 italic">
-                    "{rev.comment}"
+                    &ldquo;{rev.comment}&rdquo;
                   </p>
                 </div>
               ))}
@@ -227,21 +228,21 @@ export default function TenagaBantuanDetailModal({ isOpen, onClose, helper }) {
         {/* Footer Actions: Jelas & Langsung Beraksi */}
         <div className="p-4 sm:p-5 border-t border-slate-100 bg-white flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
           <Link
-            href={`/chat?room=order-room-rental-kamera`}
+            href={`/jasa/penyedia/${helper?.providerId || "bagus-wicaksono-helper"}`}
             onClick={onClose}
             className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold text-xs sm:text-sm transition active:scale-95"
           >
-            <MessageSquare className="w-4 h-4 text-slate-500" />
-            <span>Tanya Dulu via Chat</span>
+            <Eye className="w-4 h-4 text-[#1683FF]" />
+            <span>Lihat Profil & Katalog Lengkap</span>
           </Link>
 
           <Link
-            href={`/bantuan/create?helper=${encodeURIComponent(helper.name)}`}
+            href={`/bantuan/create?helper=${encodeURIComponent(helper?.name || "")}`}
             onClick={onClose}
             className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm shadow-md shadow-blue-500/20 transition active:scale-95 text-center"
           >
             <Send className="w-4 h-4" />
-            <span>Minta Bantuan ke {helper.name.split(" ")[0]}</span>
+            <span>Minta Bantuan ke {helper?.name?.split(" ")[0] || "Helper"}</span>
           </Link>
         </div>
       </div>

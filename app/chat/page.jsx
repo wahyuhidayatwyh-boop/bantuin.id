@@ -45,7 +45,6 @@ import {
   Car,
   Package,
   Wrench,
-  Sparkles,
   Layers,
   Tag,
   Phone,
@@ -300,7 +299,21 @@ function ChatWorkspaceContent() {
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all"); // 'all' | 'jasa' | 'sewa' | 'rental'
   const [statusFilter, setStatusFilter] = useState("all"); // 'all' | 'inquiry' | 'active'
-  const [activeRole, setActiveRole] = useState("requester"); // 'requester' | 'helper'
+  
+  // Deteksi role otomatis tanpa toggle manual (bisa override via ?role=helper atau ?role=requester)
+  const roleParam = searchParams?.get("role");
+  const activeRole = React.useMemo(() => {
+    if (roleParam === "helper" || roleParam === "mitra") return "helper";
+    if (roleParam === "requester" || roleParam === "client" || roleParam === "pemesan") return "requester";
+    if (currentUser?.id && selectedRoom?.helper?.id === currentUser.id) return "helper";
+    if (currentUser?.isPartner || currentUser?.role === "partner" || currentUser?.role === "helper") {
+      if (selectedRoom?.requester?.id && selectedRoom?.requester?.id !== currentUser?.id) {
+        return "helper";
+      }
+    }
+    return "requester";
+  }, [roleParam, currentUser, selectedRoom]);
+
   const [chatInput, setChatInput] = useState("");
   const [lightboxImage, setLightboxImage] = useState(null); // Preview full size image proof
   const [isVoiceCallOpen, setIsVoiceCallOpen] = useState(false); // Modal Telepon In-App
@@ -309,12 +322,6 @@ function ChatWorkspaceContent() {
   // Edit Message State
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [editingText, setEditingText] = useState("");
-
-  // Payment Checkout Modal for Inquiries
-  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState("qris");
-  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
-  const [isPaymentSuccess, setIsPaymentSuccess] = useState(false);
 
   // Deliverables Modal
   const [isProofModalOpen, setIsProofModalOpen] = useState(false);
@@ -389,8 +396,8 @@ function ChatWorkspaceContent() {
     const timeStr = `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 
     const messageText = durationSec > 0
-      ? `📞 Panggilan Suara In-App Selesai (${timeStr})`
-      : `📞 Panggilan Suara Tak Terjawab`;
+      ? `Panggilan Suara In-App Selesai (${timeStr})`
+      : `Panggilan Suara Tak Terjawab`;
 
     sendChatMessage(selectedRoom.id, messageText, {
       callRecord: {
@@ -429,13 +436,25 @@ function ChatWorkspaceContent() {
     const disCheck = detectDisintermediation(text);
     if (disCheck.flagged) {
       addToast?.(
-        "Peringatan Keamanan Escrow",
+        "Peringatan Keamanan Pembayaran",
         disCheck.reason,
         "warning"
       );
     }
 
-    sendChatMessage(selectedRoom.id, text);
+    const senderData = activeRole === "helper"
+      ? {
+          senderId: selectedRoom?.helper?.id || "user-hlp-1",
+          senderName: selectedRoom?.helper?.name || "Mitra",
+          senderAvatar: selectedRoom?.helper?.avatar
+        }
+      : {
+          senderId: selectedRoom?.requester?.id || currentUser?.id || "user-current-01",
+          senderName: selectedRoom?.requester?.name || currentUser?.fullName || "Pemesan",
+          senderAvatar: selectedRoom?.requester?.avatar || currentUser?.avatarUrl
+        };
+
+    sendChatMessage(selectedRoom.id, text, senderData);
     setChatInput("");
   };
 
@@ -480,10 +499,23 @@ function ChatWorkspaceContent() {
       const isImg = file.type.startsWith("image/");
       const fileSizeStr = file.size > 1024 * 1024 ? `${(file.size / (1024 * 1024)).toFixed(2)} MB` : `${(file.size / 1024).toFixed(1)} KB`;
 
+      const senderData = activeRole === "helper"
+        ? {
+            senderId: selectedRoom?.helper?.id || "user-hlp-1",
+            senderName: selectedRoom?.helper?.name || "Mitra",
+            senderAvatar: selectedRoom?.helper?.avatar
+          }
+        : {
+            senderId: selectedRoom?.requester?.id || currentUser?.id || "user-current-01",
+            senderName: selectedRoom?.requester?.name || currentUser?.fullName || "Pemesan",
+            senderAvatar: selectedRoom?.requester?.avatar || currentUser?.avatarUrl
+          };
+
       if (isImg) {
         const reader = new FileReader();
         reader.onload = (event) => {
           sendChatMessage(selectedRoom.id, `Foto terlampir: ${file.name}`, {
+            ...senderData,
             photos: [event.target.result],
             attachment: { name: file.name, size: fileSizeStr, dataUrl: event.target.result, isImage: true }
           });
@@ -492,6 +524,7 @@ function ChatWorkspaceContent() {
         reader.readAsDataURL(file);
       } else {
         sendChatMessage(selectedRoom.id, `[Lampiran Berkas]: ${file.name} (${fileSizeStr})`, {
+          ...senderData,
           attachment: { name: file.name, size: fileSizeStr, isImage: false }
         });
         addToast?.("Berkas Terkirim", `File "${file.name}" berhasil dikirim.`);
@@ -529,32 +562,7 @@ function ChatWorkspaceContent() {
     }
   };
 
-  // Process Escrow Payment for Pre-Transaction Inquiries
-  const handleProcessPayment = () => {
-    setIsProcessingPayment(true);
-    setTimeout(() => {
-      setIsProcessingPayment(false);
-      setIsPaymentSuccess(true);
-      setTimeout(() => {
-        setIsPaymentSuccess(false);
-        setIsPaymentModalOpen(false);
-        
-        // 1. Promote this room to active order
-        updateOrderStatus(selectedRoom.id, "room_created");
-        selectedRoom.stage = "active";
-        
-        // 2. Mark other candidate inquiry rooms for the same request as closed/not selected without deleting them
-        orderRooms.forEach((r) => {
-          if (r.id !== selectedRoom.id && r.requestId === selectedRoom.requestId && (r.stage === "inquiry" || r.orderStatus === "inquiry")) {
-            r.orderStatus = "not_selected";
-            r.isClosed = true;
-          }
-        });
-        
-        addToast?.("Transaksi Resmi Dibuka", "Dana telah dikunci di Rekening Escrow Xendit.");
-      }, 1000);
-    }, 1200);
-  };
+
 
   // Submit Proof / Completion
   const handleUploadProofSubmit = (e) => {
@@ -671,95 +679,13 @@ function ChatWorkspaceContent() {
             )}
           </button>
 
-          <div className="min-w-0 flex items-center gap-1.5 sm:gap-2">
-            {/* Category Badge with Icon */}
-            {selectedRoomMeta && (
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md shrink-0 flex items-center gap-1.5 border shadow-2xs ${selectedRoomMeta.badgeClass}`}>
-                <selectedRoomMeta.icon className="w-3 h-3 shrink-0" />
-                <span>{selectedRoomMeta.label}</span>
-                <span className="opacity-60 hidden sm:inline">&bull; {selectedRoom?.category || selectedRoomMeta.subLabel}</span>
-              </span>
-            )}
-
-            {isInquiry ? (
-              <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md shrink-0 flex items-center gap-1">
-                <Clock className="w-3 h-3 text-slate-500 shrink-0" />
-                <span className="hidden xs:inline">Diskusi</span>
-              </span>
-            ) : isNotSelected ? (
-              <span className="text-[10px] font-bold px-2 py-0.5 bg-slate-100 text-slate-500 rounded-md shrink-0 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3 text-slate-400 shrink-0" />
-                <span className="hidden xs:inline">Selesai</span>
-              </span>
-            ) : (
-              <span className="text-[10px] font-bold px-2 py-0.5 bg-blue-50 text-[#1683FF] border border-blue-200 rounded-md shrink-0 flex items-center gap-1">
-                <CheckCircle2 className="w-3 h-3 text-[#1683FF]" />
-                <span className="hidden xs:inline">Pesanan Aktif</span>
-              </span>
-            )}
-
-            <span className="text-slate-300 hidden xs:inline">•</span>
-            <h1 className="text-xs sm:text-sm font-bold text-slate-900 truncate max-w-[140px] xs:max-w-[200px] sm:max-w-[300px] md:max-w-md">
-              {selectedRoom?.requestTitle || "Ruang Obrolan"}
-            </h1>
-          </div>
+          <span className="font-bold text-sm sm:text-base text-slate-800 ml-1 truncate">
+            Obrolan
+          </span>
         </div>
 
-        {/* Right: Escrow Status, Role Switcher & Mobile Info Toggle */}
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-          <div className="hidden lg:flex items-center gap-1.5 px-3 py-1 bg-slate-100 rounded-lg text-xs font-semibold text-slate-700">
-            {isInquiry ? (
-              <>
-                <Clock className="w-3 h-3 text-[#1683FF]" />
-                <span>Dana Belum Dikunci (Tawaran: <strong>{formatIDR(selectedRoom?.lockedAmount)}</strong>)</span>
-              </>
-            ) : (
-              <>
-                <Lock className="w-3 h-3 text-[#1683FF]" />
-                <span>Escrow Terkunci: <strong>{formatIDR(selectedRoom?.lockedAmount)}</strong></span>
-              </>
-            )}
-          </div>
-
-          <div className="flex items-center gap-1 p-0.5 bg-slate-100 rounded-lg text-xs font-medium">
-            <button
-              type="button"
-              onClick={() => setActiveRole("requester")}
-              className={`px-2 sm:px-2.5 py-1 rounded-md text-[11px] sm:text-xs transition ${
-                activeRole === "requester"
-                  ? "bg-white text-slate-900 font-bold shadow-2xs"
-                  : "text-slate-500 hover:text-slate-900"
-              }`}
-            >
-              Pemesan
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveRole("helper")}
-              className={`px-2 sm:px-2.5 py-1 rounded-md text-[11px] sm:text-xs transition ${
-                activeRole === "helper"
-                  ? "bg-white text-[#1683FF] font-bold shadow-2xs"
-                  : "text-slate-500 hover:text-slate-900"
-              }`}
-            >
-              Helper
-            </button>
-          </div>
-
-          {/* Tombol Telepon In-App (Privasi Terjaga) */}
-          <button
-            type="button"
-            onClick={handleStartCall}
-            className="px-2 sm:px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-[#1683FF] border border-blue-200 transition flex items-center gap-1.5 cursor-pointer shadow-2xs group"
-            title="Telepon Panggilan Suara In-App (Tanpa Bagi Nomor HP Pribadi)"
-          >
-            <Phone className="w-3.5 h-3.5 text-[#1683FF] group-hover:scale-110 transition-transform" />
-            <span className="hidden sm:inline text-xs font-bold">
-              Telepon
-            </span>
-          </button>
-
-          {/* Toggle details drawer on Mobile / Tablet / Desktop */}
+        {/* Right: Rincian Toggle Button */}
+        <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={() => {
@@ -769,15 +695,15 @@ function ChatWorkspaceContent() {
                 setIsDetailsOpen(!isDetailsOpen);
               }
             }}
-            className={`p-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer ${
-              isDetailsOpen ? "bg-blue-50 text-[#1683FF]" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+            className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer text-xs font-bold ${
+              isDetailsOpen
+                ? "bg-blue-50 text-[#1683FF] border border-blue-200"
+                : "bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200/60"
             }`}
-            title={isDetailsOpen ? "Tutup Rincian (Perluas Ruang Chat)" : selectedRoomMeta?.type === "sewa" ? "Buka Rincian Sewa" : selectedRoomMeta?.type === "bantuan" ? "Buka Rincian Bantuan" : "Buka Rincian Jasa"}
+            title={isDetailsOpen ? "Tutup Panel Rincian" : "Buka Panel Rincian"}
           >
-            <Info className="w-4 h-4 text-[#1683FF]" />
-            <span className="hidden xl:inline text-xs font-semibold">
-              {isDetailsOpen ? "Tutup Info" : selectedRoomMeta?.type === "sewa" ? "Rincian Sewa" : selectedRoomMeta?.type === "bantuan" ? "Rincian Bantuan" : "Rincian Jasa"}
-            </span>
+            <Info className="w-3.5 h-3.5 text-[#1683FF]" />
+            <span>{isDetailsOpen ? "Tutup Rincian" : "Rincian"}</span>
           </button>
         </div>
 
@@ -1054,7 +980,9 @@ function ChatWorkspaceContent() {
               </span>
               <span className="text-slate-400 hidden xs:inline">•</span>
               <span className="text-slate-500 font-medium hidden sm:inline truncate">
-                {isInquiry ? "Tahap Diskusi Pra-Transaksi" : isNotSelected ? "Kandidat Tidak Terpilih" : "Helper Terverifikasi"}
+                {activeRole === "requester"
+                  ? (isInquiry ? "Mitra / Penyedia • Tahap Diskusi" : isNotSelected ? "Kandidat Tidak Terpilih" : "Mitra Terverifikasi")
+                  : (isInquiry ? "Calon Pemesan • Tahap Diskusi" : "Pemesan / Klien")}
               </span>
             </div>
 
@@ -1080,6 +1008,19 @@ function ChatWorkspaceContent() {
                     <span>Pilih &amp; Bayar</span>
                   </button>
                 )
+              )}
+
+              {/* In-App Voice Call CTA */}
+              {selectedRoom && (
+                <button
+                  type="button"
+                  onClick={handleStartCall}
+                  className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-[#1683FF] border border-blue-200 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-2xs group"
+                  title="Panggilan Suara In-App (Privasi Terjaga)"
+                >
+                  <Phone className="w-3 h-3 text-[#1683FF] group-hover:scale-110 transition-transform" />
+                  <span className="hidden sm:inline">Telepon In-App</span>
+                </button>
               )}
 
               {/* Report Notice and Takedown Action */}
@@ -1114,7 +1055,7 @@ function ChatWorkspaceContent() {
             <div className="flex items-center gap-2 min-w-0">
               <ShieldCheck className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
               <span className="truncate">
-                <strong>Terlindungi Escrow Xendit:</strong> Dilarang transaksi / transfer langsung di luar sistem demi garansi uang kembali.
+                <strong>Garansi Pembayaran Aman:</strong> Dilarang transaksi atau transfer di luar sistem Bantuin demi keamanan dana Anda.
               </span>
             </div>
             <Link
@@ -1129,7 +1070,7 @@ function ChatWorkspaceContent() {
 
           {/* Flow Tracker & Actions (Rental vs Jasa / Bantuan) */}
           {selectedRoom?.orderType === "rental" ? (
-            <RentalFlowTracker room={selectedRoom} />
+            <RentalFlowTracker room={selectedRoom} activeRole={activeRole} />
           ) : (
             selectedRoom && (
               <JasaFlowTracker room={selectedRoom} activeRole={activeRole} />
@@ -1139,8 +1080,10 @@ function ChatWorkspaceContent() {
           {/* Messages Area */}
           <div className="flex-1 overflow-y-auto p-3 sm:p-5 space-y-3 bg-[#F8FAFC]">
             {selectedRoom?.messages?.map((msg, index) => {
-              const isMe = msg.senderId === currentUser?.id || msg.senderName === currentUser?.fullName || msg.senderName === "Saya" || (activeRole === "requester" && index % 2 === 1);
-              const isBot = msg.senderName === "Bantuin Escrow Bot" || msg.senderId === "bot-system";
+              const isMe = activeRole === "helper"
+                ? (msg.senderId === selectedRoom?.helper?.id || msg.senderName === selectedRoom?.helper?.name)
+                : (msg.senderId === selectedRoom?.requester?.id || msg.senderName === selectedRoom?.requester?.name || msg.senderId === currentUser?.id || msg.senderName === currentUser?.fullName || msg.senderName === "Saya");
+              const isBot = msg.senderName === "Bantuin System" || msg.senderName === "Bantuin Escrow Bot" || msg.senderName === "Bantuin Bot" || msg.senderId === "bot-system" || msg.isSystem;
               const isEditingThisMsg = editingMessageId === msg.id;
 
               if (isBot) {
@@ -1159,7 +1102,7 @@ function ChatWorkspaceContent() {
                               Bukti Baseline Serah Terima Fisik
                             </h4>
                             <p className="text-[10px] text-slate-300 truncate">
-                              Dokumentasi tersimpan resmi di Rekening Bersama Escrow
+                              Dokumentasi tersimpan resmi di sistem transaksi Bantuin
                             </p>
                           </div>
                         </div>
@@ -1189,7 +1132,7 @@ function ChatWorkspaceContent() {
                             </span>
                           </div>
                           <div>
-                            <span className="text-slate-400 block text-[10px] uppercase font-bold">Deposit Jaminan Escrow</span>
+                            <span className="text-slate-400 block text-[10px] uppercase font-bold">Deposit Jaminan Sewa</span>
                             <span className="font-bold text-slate-900">{formatIDR(proof.depositHeld)} (100% Refundable)</span>
                           </div>
                         </div>
@@ -1198,7 +1141,7 @@ function ChatWorkspaceContent() {
                         {proof.notes && (
                           <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-700">
                             <span className="font-bold text-slate-900 block mb-0.5">Catatan Pemeriksaan Fisik:</span>
-                            <p className="italic text-slate-600">"{proof.notes}"</p>
+                            <p className="italic text-slate-600">&ldquo;{proof.notes}&rdquo;</p>
                           </div>
                         )}
 
@@ -1240,7 +1183,7 @@ function ChatWorkspaceContent() {
                         <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex items-start gap-2 text-[10px] text-slate-500 leading-relaxed">
                           <ShieldCheck className="w-4 h-4 text-[#1683FF] shrink-0 mt-0.5" />
                           <span>
-                            Dokumentasi foto ini tersimpan permanen di riwayat transaksi Escrow Bantuin. Kondisi fisik alat saat pengembalian akan dicocokkan dengan foto ini sebelum deposit jaminan dikembalikan utuh.
+                            Dokumentasi foto ini tersimpan permanen di riwayat transaksi Bantuin. Kondisi fisik alat saat pengembalian akan dicocokkan dengan foto ini sebelum deposit jaminan dikembalikan utuh.
                           </span>
                         </div>
                       </div>
@@ -1290,7 +1233,7 @@ function ChatWorkspaceContent() {
                             <span>{proof.idReturned}</span>
                           </div>
                           {proof.notes && (
-                            <p className="text-slate-600 italic pl-5">"{proof.notes}"</p>
+                            <p className="text-slate-600 italic pl-5">&ldquo;{proof.notes}&rdquo;</p>
                           )}
                         </div>
                       </div>
@@ -1389,14 +1332,14 @@ function ChatWorkspaceContent() {
                         {proof.notes && (
                           <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px]">
                             <span className="font-bold text-slate-900 block mb-0.5">Catatan dari Mitra:</span>
-                            <p className="italic text-slate-700">"{proof.notes}"</p>
+                            <p className="italic text-slate-700">&ldquo;{proof.notes}&rdquo;</p>
                           </div>
                         )}
 
                         <div className="p-2.5 bg-blue-50/40 rounded-xl border border-blue-100 flex items-start gap-2 text-[10px] text-slate-600 leading-relaxed">
                           <ShieldCheck className="w-4 h-4 text-[#1683FF] shrink-0 mt-0.5" />
                           <span>
-                            Dana imbalan Anda tetap aman 100% di Rekening Bersama Escrow Bantuin hingga Anda memeriksa dan menyetujui hasil pekerjaan di atas.
+                            Dana imbalan Anda tetap aman terverifikasi di sistem Bantuin hingga Anda memeriksa dan menyetujui hasil pekerjaan di atas.
                           </span>
                         </div>
                       </div>
@@ -1451,7 +1394,7 @@ function ChatWorkspaceContent() {
                             <span className="font-extrabold text-slate-900 ml-1.5">{comp.rating}.0 / 5.0</span>
                           </div>
                           {comp.feedback && (
-                            <p className="italic text-slate-600 text-[11px] mt-1">"{comp.feedback}"</p>
+                            <p className="italic text-slate-600 text-[11px] mt-1">&ldquo;{comp.feedback}&rdquo;</p>
                           )}
                         </div>
                       </div>
@@ -1541,7 +1484,7 @@ function ChatWorkspaceContent() {
                               : "bg-white border border-slate-200 text-slate-800 rounded-bl-xs shadow-2xs"
                           }`}
                         >
-                          {msg.callRecord || msg.message?.startsWith?.("📞") ? (
+                          {msg.callRecord || msg.message?.includes?.("Panggilan Suara") ? (
                             <div className="flex items-center gap-2.5 py-0.5">
                               <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
                                 isMe ? "bg-white/20 text-white" : "bg-blue-50 text-[#1683FF] border border-blue-200"
@@ -1646,7 +1589,7 @@ function ChatWorkspaceContent() {
                           "Kondisi fisik & fungsi normal 100%?",
                           "Sudah include baterai & tas unit?",
                           "Bisa ambil di toko jam berapa hari ini?",
-                          "Siap, saya bayar via Rekber Escrow!"
+                          "Siap, saya proses pembayaran sekarang!"
                         ]
                       : [
                           activeRole === "helper" ? "Unit alat sudah siap diambil di toko ya kak" : "Halo, saya otw ambil unit ke toko ya",
@@ -1678,7 +1621,7 @@ function ChatWorkspaceContent() {
                   "Apakah siap sesuai spesifikasi brief?",
                   "Bisa request revisi minor jika diperlukan?",
                   "Saya setuju dengan penawaran layanan ini.",
-                  "Siap, saya proses pembayaran Escrow sekarang!"
+                  "Siap, saya proses pembayaran sekarang!"
                 ]
               : isOnline
               ? [
@@ -1705,23 +1648,12 @@ function ChatWorkspaceContent() {
             ))}
           </div>
 
-          {/* Privacy & In-App Calling Protection Banner */}
-          <div className="px-3 py-1.5 bg-blue-50/70 border-t border-blue-100 flex items-center justify-between text-[11px] text-slate-600">
-            <div className="flex items-center gap-1.5 truncate pr-2 font-medium">
-              <ShieldCheck className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
-              <span className="truncate">
-                Proteksi Rekber: Dilarang bertukar kontak pribadi (HP/WA) di luar platform.
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={handleStartCall}
-              className="text-[#1683FF] hover:underline font-bold shrink-0 flex items-center gap-1 cursor-pointer transition text-[11px]"
-              title="Pengguna lambat merespon? Hubungi via Panggilan Suara In-App"
-            >
-              <Phone className="w-3 h-3" />
-              <span>Telepon In-App</span>
-            </button>
+          {/* Privacy Banner */}
+          <div className="px-3 sm:px-4 py-1.5 bg-blue-50/70 border-t border-blue-100 flex items-center gap-1.5 text-[11px] text-slate-600 shrink-0">
+            <ShieldCheck className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
+            <span className="truncate font-medium">
+              Privasi Terjaga: Dilarang bertukar kontak pribadi di luar sistem Bantuin.
+            </span>
           </div>
 
           {/* Chat Input Bar */}
@@ -1802,25 +1734,37 @@ function ChatWorkspaceContent() {
             </button>
           </div>
 
-          {/* Partner Simple Card */}
-          <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
-            <img
-              src={
-                activeRole === "requester"
-                  ? (selectedRoom?.helper?.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80")
-                  : (selectedRoom?.requester?.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80")
-              }
-              alt="Partner"
-              className="w-10 h-10 rounded-full object-cover border border-slate-200"
-            />
-            <div>
-              <h3 className="font-bold text-xs sm:text-sm text-slate-900">
-                {activeRole === "requester" ? selectedRoom?.helper?.name : selectedRoom?.requester?.name}
-              </h3>
-              <p className="text-[11px] text-slate-400">
-                {isInquiry ? "Kandidat Diskusi" : isNotSelected ? "Kandidat Tidak Terpilih" : "Mitra Terverifikasi"}
-              </p>
+          {/* Partner Simple Card with Direct Call Action */}
+          <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200/80 rounded-2xl gap-2">
+            <div className="flex items-center gap-3 min-w-0">
+              <img
+                src={
+                  activeRole === "requester"
+                    ? (selectedRoom?.helper?.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80")
+                    : (selectedRoom?.requester?.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80")
+                }
+                alt="Partner"
+                className="w-10 h-10 rounded-full object-cover border border-slate-200 shrink-0"
+              />
+              <div className="min-w-0">
+                <h3 className="font-bold text-xs sm:text-sm text-slate-900 truncate">
+                  {activeRole === "requester" ? selectedRoom?.helper?.name : selectedRoom?.requester?.name}
+                </h3>
+                <p className="text-[11px] text-slate-400 truncate">
+                  {isInquiry ? "Kandidat Diskusi" : isNotSelected ? "Kandidat Tidak Terpilih" : "Mitra Terverifikasi"}
+                </p>
+              </div>
             </div>
+
+            <button
+              type="button"
+              onClick={handleStartCall}
+              className="px-2.5 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#1683FF] border border-blue-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs shrink-0"
+              title="Telepon Panggilan Suara In-App"
+            >
+              <Phone className="w-3.5 h-3.5 text-[#1683FF]" />
+              <span>Telepon</span>
+            </button>
           </div>
 
           {/* JIKA PESANAN SEWA (ALAT MULTIMEDIA / KENDARAAN) */}
@@ -1867,7 +1811,7 @@ function ChatWorkspaceContent() {
                     <span className="font-bold text-slate-900">{formatIDR(selectedRoom.depositAmount || 100000)}</span>
                   </div>
                   <div className="pt-2 border-t border-blue-200 flex items-center justify-between font-extrabold text-slate-900">
-                    <span>Total Escrow Diamankan:</span>
+                    <span>Total Pembayaran Diamankan:</span>
                     <span className="text-[#1683FF] text-sm">{formatIDR(selectedRoom.lockedAmount || 280000)}</span>
                   </div>
                 </div>
@@ -1886,18 +1830,12 @@ function ChatWorkspaceContent() {
                       <span className="text-[10px] text-slate-500 block">Koordinasi Langsung Mitra</span>
                       <span className="font-bold text-slate-800 text-[11px] flex items-center gap-1">
                         <Lock className="w-3 h-3 text-[#1683FF]" />
-                        <span>Nomor HP Terproteksi</span>
+                        <span>Chat &amp; Panggilan Terproteksi</span>
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleStartCall}
-                      className="px-2.5 py-1.5 rounded-lg bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-[11px] font-bold flex items-center gap-1 transition shadow-2xs cursor-pointer shrink-0"
-                      title="Panggil mitra sewa via telepon suara in-app"
-                    >
-                      <Phone className="w-3 h-3" />
-                      <span>Telepon Mitra</span>
-                    </button>
+                    <span className="px-2 py-0.5 rounded-md bg-white text-[#1683FF] text-[10px] font-bold border border-blue-200">
+                      Aktif
+                    </span>
                   </div>
                 </div>
 
@@ -1925,7 +1863,7 @@ function ChatWorkspaceContent() {
               <div className="pt-3 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-500">
                 <ShieldCheck className="w-4 h-4 text-[#1683FF] shrink-0" />
                 <span className="text-[11px] leading-snug">
-                  Sewa alat &amp; kendaraan terlindungi Escrow Bantuin.
+                  Sewa alat &amp; kendaraan terlindungi sistem pembayaran Bantuin.
                 </span>
               </div>
             </div>
@@ -1985,7 +1923,7 @@ function ChatWorkspaceContent() {
                     <span className="font-bold text-slate-900">{formatIDR(selectedRoom.platformFee || 2000)}</span>
                   </div>
                   <div className="pt-2 border-t border-blue-200 flex items-center justify-between font-extrabold text-slate-900">
-                    <span>Total Escrow Terkunci:</span>
+                    <span>Total Pembayaran Terverifikasi:</span>
                     <span className="text-[#1683FF] text-sm">{formatIDR(selectedRoom.lockedAmount || 35000)}</span>
                   </div>
                 </div>
@@ -2019,11 +1957,11 @@ function ChatWorkspaceContent() {
                   </div>
                 </div>
 
-                {/* Escrow Guarantee Note */}
+                {/* Payment Guarantee Note */}
                 <div className="p-3 rounded-2xl bg-blue-50/70 border border-blue-100 text-xs flex items-start gap-2">
                   <ShieldCheck className="w-4 h-4 text-[#1683FF] shrink-0 mt-0.5" />
                   <span className="text-[11px] text-slate-800 leading-snug">
-                    Dana aman di Rekber Bantuin sampai tugas selesai dan Anda mengonfirmasi serah terima.
+                    Dana aman di sistem Bantuin sampai tugas selesai dan Anda mengonfirmasi serah terima.
                   </span>
                 </div>
 
@@ -2033,7 +1971,7 @@ function ChatWorkspaceContent() {
               <div className="pt-3 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-500">
                 <ShieldCheck className="w-4 h-4 text-[#1683FF] shrink-0" />
                 <span className="text-[11px] leading-snug">
-                  Tugas komunitas terlindungi Escrow Bantuin.
+                  Tugas komunitas terlindungi sistem pembayaran Bantuin.
                 </span>
               </div>
             </div>
@@ -2085,16 +2023,16 @@ function ChatWorkspaceContent() {
                     <span className="text-slate-500 font-semibold">Ditanggung Mitra</span>
                   </div>
                   <div className="pt-2 border-t border-blue-200 flex items-center justify-between font-extrabold text-slate-900">
-                    <span>Total Escrow Diamankan:</span>
+                    <span>Total Tagihan Terverifikasi:</span>
                     <span className="text-[#1683FF] text-sm">
                       {formatIDR(selectedRoom?.lockedAmount || selectedRoom?.serviceDetails?.totalAmount || 150000)}
                     </span>
                   </div>
                   <div className="pt-1 flex items-center justify-between text-[10px]">
-                    <span className="text-slate-500">Status Rekber:</span>
+                    <span className="text-slate-500">Status Pembayaran:</span>
                     <span className="font-bold text-[#1683FF] flex items-center gap-1">
                       <ShieldCheck className="w-3.5 h-3.5 text-[#1683FF]" />
-                      {isInquiry ? "Menunggu Penguncian" : selectedRoom?.orderStatus === "completed" ? "Dana Dicairkan" : "Terkunci Aman di Escrow"}
+                      {isInquiry ? "Menunggu Pembayaran" : selectedRoom?.orderStatus === "completed" ? "Dana Dicairkan" : "Terverifikasi Aman"}
                     </span>
                   </div>
                 </div>
@@ -2174,26 +2112,20 @@ function ChatWorkspaceContent() {
                       <span className="text-[10px] text-slate-500 block">Koordinasi Jasa Langsung</span>
                       <span className="font-bold text-slate-800 text-[11px] flex items-center gap-1">
                         <Lock className="w-3 h-3 text-[#1683FF]" />
-                        <span>Nomor HP Pribadi Terproteksi</span>
+                        <span>Chat &amp; Panggilan Terproteksi</span>
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleStartCall}
-                      className="px-2.5 py-1.5 rounded-lg bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-[11px] font-bold flex items-center gap-1 transition shadow-2xs cursor-pointer shrink-0"
-                      title="Panggil mitra jasa via telepon suara in-app"
-                    >
-                      <Phone className="w-3 h-3" />
-                      <span>Telepon Mitra</span>
-                    </button>
+                    <span className="px-2 py-0.5 rounded-md bg-white text-[#1683FF] text-[10px] font-bold border border-blue-200">
+                      Aktif
+                    </span>
                   </div>
                 </div>
 
-                {/* 5. Escrow Guarantee Note */}
+                {/* 5. Payment Guarantee Note */}
                 <div className="p-3 rounded-2xl bg-blue-50/70 border border-blue-100 text-xs flex items-start gap-2">
                   <ShieldCheck className="w-4 h-4 text-[#1683FF] shrink-0 mt-0.5" />
                   <span className="text-[11px] text-slate-800 leading-snug">
-                    Dana <strong>{formatIDR(selectedRoom?.lockedAmount || 150000)}</strong> aman 100% di Rekber Bantuin. Mitra baru dapat mencairkan dana setelah Anda menyetujui hasil kerja.
+                    Dana <strong>{formatIDR(selectedRoom?.lockedAmount || 150000)}</strong> aman 100% di sistem Bantuin. Hak bayar mitra baru dapat dicairkan setelah Anda menyetujui hasil kerja.
                   </span>
                 </div>
 
@@ -2203,7 +2135,7 @@ function ChatWorkspaceContent() {
               <div className="pt-3 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-500">
                 <ShieldCheck className="w-4 h-4 text-[#1683FF] shrink-0" />
                 <span className="text-[11px] leading-snug">
-                  Transaksi dilindungi Rekening Bersama Escrow Bantuin.
+                  Transaksi dilindungi Sistem Pembayaran Resmi Bantuin.
                 </span>
               </div>
             </div>
@@ -2213,96 +2145,7 @@ function ChatWorkspaceContent() {
 
       </div>
 
-      {/* MODAL CHECKOUT ESCROW PAYMENT */}
-      {isPaymentModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-2xs flex items-center justify-center p-4 animate-in fade-in duration-100">
-          <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-xl border border-slate-200">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
-              <div>
-                <span className="text-[10px] font-bold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
-                  Escrow Payment
-                </span>
-                <h3 className="font-bold text-sm text-slate-900 mt-1">Pilih Helper & Kunci Dana</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsPaymentModalOpen(false)}
-                className="w-6 h-6 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-700"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
 
-            {isProcessingPayment ? (
-              <div className="py-8 text-center space-y-2">
-                <Loader2 className="w-8 h-8 text-[#1683FF] animate-spin mx-auto" />
-                <div className="font-bold text-xs text-slate-800">Mengamankan Saldo di Escrow...</div>
-              </div>
-            ) : isPaymentSuccess ? (
-              <div className="py-6 text-center space-y-2">
-                <div className="w-10 h-10 rounded-full bg-blue-50 text-[#1683FF] flex items-center justify-center mx-auto">
-                  <Check className="w-6 h-6" />
-                </div>
-                <div className="font-bold text-xs text-slate-800">Pembayaran Berhasil</div>
-                <p className="text-[11px] text-slate-500">Order resmi telah dibuka.</p>
-              </div>
-            ) : (
-              <div className="space-y-3 text-xs">
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
-                  <div>
-                    <div className="font-bold text-slate-900">{selectedRoom?.helper?.name}</div>
-                    <div className="text-[11px] text-slate-500">Imbalan Jasa Disepakati</div>
-                  </div>
-                  <div className="font-black text-[#1683FF] text-sm">{formatIDR(selectedRoom?.lockedAmount)}</div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="font-bold text-slate-700">Metode Pembayaran:</label>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setPaymentMethod("qris")}
-                      className={`p-2.5 rounded-lg border text-left font-semibold transition flex items-center gap-2 ${
-                        paymentMethod === "qris" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-white border-slate-200 text-slate-700"
-                      }`}
-                    >
-                      <QrCode className="w-4 h-4" />
-                      <span>QRIS Instan</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPaymentMethod("wallet")}
-                      className={`p-2.5 rounded-lg border text-left font-semibold transition flex items-center gap-2 ${
-                        paymentMethod === "wallet" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-white border-slate-200 text-slate-700"
-                      }`}
-                    >
-                      <Wallet className="w-4 h-4" />
-                      <span>Saldo Akun</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="pt-2 flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsPaymentModalOpen(false)}
-                    className="px-3 py-2 font-semibold text-slate-600 rounded-lg hover:bg-slate-100"
-                  >
-                    Batal
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleProcessPayment}
-                    className="px-4 py-2 bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold rounded-lg shadow-xs"
-                  >
-                    Bayar & Buka Order
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* MODAL PENYERAHAN TUGAS */}
       {isProofModalOpen && (
@@ -2455,11 +2298,11 @@ function ChatWorkspaceContent() {
                 ))}
               </div>
               <div className="text-xs font-black text-amber-600">
-                {ratingValue === 5 && "⭐ 5.0 - Sangat Memuaskan & Sempurna!"}
-                {ratingValue === 4 && "⭐ 4.0 - Bagus & Sesuai Ekspektasi"}
-                {ratingValue === 3 && "⭐ 3.0 - Cukup Baik"}
-                {ratingValue === 2 && "⭐ 2.0 - Kurang Maksimal"}
-                {ratingValue === 1 && "⭐ 1.0 - Tidak Memuaskan"}
+                {ratingValue === 5 && "5.0 - Sangat Memuaskan & Sempurna!"}
+                {ratingValue === 4 && "4.0 - Bagus & Sesuai Ekspektasi"}
+                {ratingValue === 3 && "3.0 - Cukup Baik"}
+                {ratingValue === 2 && "2.0 - Kurang Maksimal"}
+                {ratingValue === 1 && "1.0 - Tidak Memuaskan"}
               </div>
             </div>
 
@@ -2552,7 +2395,7 @@ function ChatWorkspaceContent() {
               <div className="flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-blue-400" />
                 <span className="text-xs font-bold tracking-tight">
-                  Bukti Baseline Serah Terima Fisik (Escrow Record)
+                  Bukti Baseline Serah Terima Fisik
                 </span>
               </div>
               <button
@@ -2574,7 +2417,7 @@ function ChatWorkspaceContent() {
             </div>
 
             <div className="pt-2 px-2 text-center text-[11px] text-white/70 flex items-center justify-between">
-              <span>🔒 Tersimpan permanen di server Rekber Bantuin</span>
+              <span className="flex items-center gap-1.5"><Lock className="w-3 h-3 text-white/70" /> Tersimpan permanen di server aman Bantuin</span>
               <a
                 href={lightboxImage}
                 target="_blank"

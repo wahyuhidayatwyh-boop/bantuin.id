@@ -49,7 +49,7 @@ export default function TermsPage() {
             <span>Prinsip Utama Tata Kelola Sistem Elektronik Bantuin</span>
           </div>
           <p className="text-xs sm:text-sm text-[#486581] leading-relaxed">
-            Bantuin.id beroperasi sebagai Penyelenggara Sistem Elektronik (PSE) Lingkup Privat yang memfasilitasi interaksi dan transaksi antar pengguna. Berdasarkan <strong>PP No. 71 Tahun 2019</strong> dan <strong>Permenkominfo No. 5 Tahun 2020</strong>, Bantuin.id menyelenggarakan sistem elektronik yang andal, aman, dan bertanggung jawab, menyediakan mekanisme pelaporan pelanggaran (<em>Notice and Takedown</em>), serta memfasilitasi perlindungan hak pengguna melalui rekening bersama (Escrow).
+            Bantuin.id beroperasi sebagai Penyelenggara Sistem Elektronik (PSE) Lingkup Privat yang memfasilitasi interaksi dan transaksi antar pengguna. Berdasarkan <strong>PP No. 71 Tahun 2019</strong> dan <strong>Permenkominfo No. 5 Tahun 2020</strong>, Bantuin.id menyelenggarakan sistem elektronik yang andal, aman, dan bertanggung jawab, menyediakan mekanisme pelaporan pelanggaran (<em>Notice and Takedown</em>), serta memfasilitasi perlindungan hak pengguna melalui Sistem Pembayaran Terverifikasi Payment Gateway resmi berizin Bank Indonesia.
           </p>
         </div>
 
@@ -95,7 +95,7 @@ export default function TermsPage() {
                   <span>B. Layanan Jasa Keahlian</span>
                 </div>
                 <p className="text-[11px] text-slate-600 leading-relaxed">
-                  <strong>Mitra Penyedia Jasa</strong> bertanggung jawab atas orisinalitas dan kualitas hasil pekerjaan sesuai brief kesepakatan. <strong>Pemesan Jasa</strong> bertanggung jawab memberikan arahan yang jelas dan melunasi pembayaran melalui escrow.
+                  <strong>Mitra Penyedia Jasa</strong> bertanggung jawab atas orisinalitas dan kualitas hasil pekerjaan sesuai brief kesepakatan. <strong>Pemesan Jasa</strong> bertanggung jawab memberikan arahan yang jelas dan melunasi pembayaran melalui sistem pembayaran resmi Bantuin.
                 </p>
               </div>
 
@@ -115,7 +115,7 @@ export default function TermsPage() {
                   <span>D. Tanggung Jawab Platform Bantuin</span>
                 </div>
                 <p className="text-[11px] text-blue-800 leading-relaxed">
-                  Menyediakan sistem aplikasi yang andal, mengelola penahanan pembayaran escrow Xendit, memfasilitasi pelaporan pelanggaran (<em>Notice and Takedown</em>), mencatat audit log transaksi, dan memediasi sengketa antar pihak.
+                  Menyediakan sistem aplikasi yang andal, mengelola verifikasi penerimaan pembayaran resmi melalui Payment Gateway resmi, memfasilitasi pelaporan pelanggaran (<em>Notice and Takedown</em>), mencatat audit log transaksi, dan memediasi sengketa antar pihak.
                 </p>
               </div>
             </div>
@@ -186,14 +186,14 @@ export default function TermsPage() {
             </div>
           </section>
 
-          {/* Section 6: Pembayaran Escrow & Anti-Disintermediasi */}
+          {/* Section 6: Pembayaran Terverifikasi & Anti-Disintermediasi */}
           <section className="space-y-3">
             <div className="flex items-center gap-2.5 text-[#102A43] font-bold text-base border-b border-slate-100 pb-2">
               <Lock className="w-4 h-4 text-[#1683FF]" />
-              <h2>6. Pembayaran Escrow &amp; Ketentuan Anti-Disintermediasi</h2>
+              <h2>6. Pembayaran Terverifikasi &amp; Ketentuan Anti-Disintermediasi</h2>
             </div>
             <p>
-              Seluruh pembayaran diproses melalui fasilitas rekening bersama (Escrow) yang terintegrasi dengan Payment Gateway berizin resmi (Xendit).
+              Seluruh pembayaran diproses melalui Payment Gateway berizin resmi Bank Indonesia dan sistem pencatatan hak bayar terverifikasi Bantuin.
             </p>
             <p>
               Pengguna sangat diimbau tidak melakukan transfer langsung ke rekening pribadi di luar sistem sebelum pesanan disepakati secara sah. Segala risiko kerugian atas transaksi di luar sistem menjadi tanggung jawab pribadi pengguna dan tidak tercakup dalam perlindungan dana platform Bantuin.
@@ -207,7 +207,7 @@ export default function TermsPage() {
               <h2>7. Mekanisme Pelaporan &amp; Moderasi Konten (Notice &amp; Takedown)</h2>
             </div>
             <p>
-              Sebagai wujud kepatuhan terhadap <strong>Permenkominfo No. 5 Tahun 2020</strong>, Bantuin menyediakan fitur <strong>🚩 Laporkan Masalah</strong> di setiap ruang obrolan dan transaksi. Pengguna dapat melaporkan indikasi penipuan, muatan ilegal, atau pelanggaran etika. Laporan akan ditinjau oleh tim moderasi dengan tahapan status: <em>Diterima (Open)</em> &rarr; <em>Sedang Ditinjau (Under Review)</em> &rarr; <em>Selesai / Ditindak (Resolved)</em>.
+              Sebagai wujud kepatuhan terhadap <strong>Permenkominfo No. 5 Tahun 2020</strong>, Bantuin menyediakan fitur <strong>Laporkan Masalah</strong> di setiap ruang obrolan dan transaksi. Pengguna dapat melaporkan indikasi penipuan, muatan ilegal, atau pelanggaran etika. Laporan akan ditinjau oleh tim moderasi dengan tahapan status: <em>Diterima (Open)</em> &rarr; <em>Sedang Ditinjau (Under Review)</em> &rarr; <em>Selesai / Ditindak (Resolved)</em>.
             </p>
           </section>
 

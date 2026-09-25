@@ -52,7 +52,7 @@ export default function PrivacyPage() {
             <ul className="list-disc pl-5 space-y-1.5 text-[11px] sm:text-xs">
               <li><strong>Data Identitas &amp; Akun:</strong> Nama lengkap, alamat email institusi kampus (@ac.id) atau email pribadi, nomor telepon WhatsApp, dan foto profil.</li>
               <li><strong>Data Verifikasi Keamanan (KYC):</strong> Foto Kartu Tanda Mahasiswa (KTM), foto Kartu Tanda Penduduk (KTP/NIK), dan swafoto (selfie) verifikasi untuk akun penyewa barang bernilai atau helper tugas tatap muka.</li>
-              <li><strong>Data Finansial &amp; Pencairan:</strong> Nomor rekening bank mitra, nama pemilik rekening, dan riwayat transaksi escrow untuk kebutuhan pencairan dana melalui payment gateway.</li>
+              <li><strong>Data Finansial &amp; Pencairan:</strong> Nomor rekening bank mitra, nama pemilik rekening, dan riwayat transaksi pembayaran serta pencairan hak bayar melalui payment gateway.</li>
               <li><strong>Data Transaksi &amp; Bukti Fisik:</strong> Nomor seri (Serial Number) gadget sewa, foto kondisi barang sebelum/sesudah serah terima, foto paket tampak luar, dan rekaman percakapan dalam ruang transaksi.</li>
               <li><strong>Data Lokasi &amp; Teknis:</strong> Titik koordinat GPS saat menggunakan fitur pencarian terdekat atau tombol darurat, log alamat IP, dan waktu akses sistem.</li>
             </ul>
@@ -68,7 +68,7 @@ export default function PrivacyPage() {
             <ul className="list-disc pl-5 space-y-1.5 text-[11px] sm:text-xs">
               <li>Memverifikasi identitas pengguna guna mencegah akun palsu, penipuan, dan tindak penggelapan rental.</li>
               <li>Memfasilitasi pencocokan tugas (*matching*) antara pemohon dan penyedia bantuan di sekitar lokasi kampus.</li>
-              <li>Memproses pembayaran rekening bersama (Escrow) dan pencairan dana ke rekening mitra melalui mitra berizin resmi (Xendit).</li>
+              <li>Memproses penerimaan pembayaran melalui Payment Gateway resmi dan pencairan dana ke rekening mitra melalui perbankan resmi berizin Bank Indonesia.</li>
               <li>Menyediakan rekam jejak audit (*Audit Trail*) untuk investigasi laporan pelanggaran atau penyelesaian sengketa (Dispute).</li>
             </ul>
           </section>
@@ -94,7 +94,7 @@ export default function PrivacyPage() {
               Bantuin.id <strong>tidak pernah memperjualbelikan</strong> data pribadi kepada pihak mana pun. Data hanya dibagikan dalam kondisi terbatas berikut:
             </p>
             <ul className="list-disc pl-5 space-y-1.5 text-[11px] sm:text-xs">
-              <li><strong>Penyelenggara Gateway Pembayaran:</strong> Data nomor rekening dan nominal transaksi dibagikan ke Xendit untuk pemrosesan settlement resmi berizin Bank Indonesia.</li>
+              <li><strong>Penyelenggara Gateway Pembayaran:</strong> Data nomor rekening dan nominal transaksi diproses secara terenkripsi melalui mitra payment gateway resmi berizin Bank Indonesia.</li>
               <li><strong>Aparat Penegak Hukum:</strong> Data identitas dan log transaksi dapat dibuka kepada Kepolisian Republik Indonesia atau instansi kejaksaan hanya berdasarkan surat perintah penyidikan resmi terkait tindak pidana.</li>
               <li><strong>Institusi Kampus Terkait:</strong> Dalam kasus penipuan atau penggelapan yang melibatkan mahasiswa terverifikasi, data dapat diteruskan ke dekanat/rektorat untuk penegakan kode etik akademik.</li>
             </ul>

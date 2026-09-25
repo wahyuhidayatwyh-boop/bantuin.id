@@ -137,7 +137,7 @@ export default function QrisCodeCard({
         {/* Bottom Details of QR Card */}
         <div className="w-full pt-3 mt-3 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-500 font-semibold">
           <span className="tracking-tight">NMID: ID1020039281729</span>
-          <span className="text-[#1683FF] font-bold">Bantuin Escrow</span>
+          <span className="text-[#1683FF] font-bold">Bantuin Pay</span>
         </div>
       </div>
 

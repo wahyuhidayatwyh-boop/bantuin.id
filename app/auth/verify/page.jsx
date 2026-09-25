@@ -58,7 +58,7 @@ export default function VerifyPage() {
             Verifikasi Identitas KTP (KYC)
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-md mx-auto">
-            Unggah foto fisik KTP asli Anda dari perangkat lokal untuk mengaktifkan akun terpercaya penuh dan transaksi escrow aman.
+            Unggah foto fisik KTP asli Anda dari perangkat lokal untuk mengaktifkan akun terpercaya penuh dan transaksi pembayaran terverifikasi aman.
           </p>
         </div>
 

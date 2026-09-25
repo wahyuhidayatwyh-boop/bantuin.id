@@ -11,7 +11,7 @@ import {
   ChevronDown,
   Wrench,
   Printer,
-  Sparkles,
+  Video,
   ShoppingBag,
   Clock,
   Laptop,
@@ -55,7 +55,7 @@ export default function ExploreCategories() {
   const allOtherCategories = [
     { name: "Teknisi & Servis Laptop", desc: "Cuci AC, Servis PC & Hardware", icon: Wrench, href: "/jasa" },
     { name: "Print & Jilid Kilat", desc: "Dokumen, Skripsi & Proposal", icon: Printer, href: "/bantuan" },
-    { name: "Fotografer & Video Event", desc: "Wedding, Wisuda & Profil", icon: Sparkles, href: "/jasa" },
+    { name: "Fotografer & Video Event", desc: "Wedding, Wisuda & Profil", icon: Video, href: "/jasa" },
     { name: "Titip Belanja & Apotek", desc: "Tebus Obat & Supermarket", icon: ShoppingBag, href: "/bantuan" },
     { name: "Bantu Antri Layanan", desc: "Samsat, Tiket & Loket", icon: Clock, href: "/bantuan" },
     { name: "Penerjemah & Copywriter", desc: "Translate Dokumen & Artikel", icon: FileText, href: "/jasa" },

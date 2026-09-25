@@ -7,21 +7,17 @@ import Footer from "@/components/layout/Footer";
 import ProductProfileCard from "@/components/cards/ProductProfileCard";
 import MapComponent from "@/components/map/MapComponent";
 import { useApp } from "@/lib/context/AppContext";
-import { MITRA_STORES } from "@/lib/mock/mitraData";
+import { MITRA_STORES, getAllMitraStores } from "@/lib/mock/mitraData";
+import CategoryIcon from "@/components/common/CategoryIcon";
+import { SEWA_CATEGORIES, resolveIcon, matchesCategory } from "@/lib/categories";
 import { 
-  Camera, 
   Search, 
-  Headphones, 
-  Sparkles, 
-  Layers, 
-  Video, 
-  Radio, 
-  Wrench, 
-  Tv, 
   X,
   Map,
   MapPin,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Check,
   ShieldCheck,
   Star,
@@ -57,8 +53,17 @@ export default function SewaPage() {
 
   const ITEMS_PER_PAGE = 16;
 
-  // List of verified rental stores
-  const storeList = useMemo(() => Object.values(MITRA_STORES), []);
+  // List of verified rental stores (reaktif terhadap pembaruan dashboard mitra)
+  const [storeList, setStoreList] = useState(() => Object.values(MITRA_STORES));
+
+  useEffect(() => {
+    setStoreList(getAllMitraStores());
+    const handleMitraUpdate = () => {
+      setStoreList(getAllMitraStores());
+    };
+    window.addEventListener("bantuin_mitra_store_updated", handleMitraUpdate);
+    return () => window.removeEventListener("bantuin_mitra_store_updated", handleMitraUpdate);
+  }, []);
 
   // Smart Search: Temukan toko rental yang cocok dengan pencarian pengguna secara otomatis
   const matchedStores = useMemo(() => {
@@ -78,20 +83,11 @@ export default function SewaPage() {
     });
   }, [searchQuery, storeList]);
 
-  // Categories for dropdown
-  const categories = [
-    { id: "Semua", name: "Semua Kategori", icon: Layers },
-    { id: "Kamera", name: "Kamera & Lensa", icon: Camera },
-    { id: "Audio", name: "Audio & Mic", icon: Headphones },
-    { id: "Proyektor", name: "Proyektor & Layar", icon: Video },
-    { id: "Drone", name: "Drone & Action Cam", icon: Radio },
-    { id: "Lighting", name: "Lighting Studio", icon: Sparkles },
-    { id: "Perkakas", name: "Alat Perkakas", icon: Wrench },
-    { id: "Display", name: "TV & Layar Expo", icon: Tv },
-  ];
+  // Ambil dari sumber kebenaran tunggal — tambah kategori di lib/categories.js
+  const categories = SEWA_CATEGORIES;
 
   const currentCat = categories.find((c) => c.id === selectedCategory) || categories[0];
-  const CurrentCatIcon = currentCat.icon;
+  const currentCatName = currentCat?.name || currentCat?.label || "Semua Kategori";
 
   const filteredRentals = useMemo(() => {
     return rentals.filter((item) => {
@@ -106,16 +102,7 @@ export default function SewaPage() {
         item.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (item.description && item.description.toLowerCase().includes(searchQuery.toLowerCase()));
 
-      const matchCategory =
-        selectedCategory === "Semua" ||
-        item.category.toLowerCase().includes(selectedCategory.toLowerCase()) ||
-        (selectedCategory === "Kamera" && item.category.toLowerCase().includes("kamera")) ||
-        (selectedCategory === "Audio" && item.category.toLowerCase().includes("audio")) ||
-        (selectedCategory === "Proyektor" && item.category.toLowerCase().includes("proyektor")) ||
-        (selectedCategory === "Drone" && (item.category.toLowerCase().includes("drone") || item.category.toLowerCase().includes("action"))) ||
-        (selectedCategory === "Lighting" && (item.category.toLowerCase().includes("light") || item.category.toLowerCase().includes("studio"))) ||
-        (selectedCategory === "Perkakas" && (item.category.toLowerCase().includes("perkakas") || item.category.toLowerCase().includes("bor"))) ||
-        (selectedCategory === "Display" && (item.category.toLowerCase().includes("display") || item.category.toLowerCase().includes("tv")));
+      const matchCategory = matchesCategory(item, selectedCategory, "sewa");
 
       return matchQuery && matchCategory;
     });
@@ -126,15 +113,17 @@ export default function SewaPage() {
     setCurrentPage(1);
   }, [searchQuery, selectedCategory, filterByKabupaten]);
 
-  const totalPages = Math.ceil(filteredRentals.length / ITEMS_PER_PAGE);
-  const paginatedRentals = filteredRentals.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE
-  );
+  const totalPages = Math.ceil(filteredRentals.length / ITEMS_PER_PAGE) || 1;
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (safeCurrentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, filteredRentals.length);
+  const paginatedRentals = filteredRentals.slice(startIndex, endIndex);
 
-  const goToPage = (page) => {
+  const handlePageChange = (page) => {
     setCurrentPage(page);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 180, behavior: "smooth" });
+    }
   };
 
   return (
@@ -198,9 +187,9 @@ export default function SewaPage() {
                   }`}
                 >
                   <div className="flex items-center gap-2 truncate">
-                    <CurrentCatIcon className={`w-4 h-4 shrink-0 ${selectedCategory !== "Semua" ? "text-[#1683FF]" : "text-slate-400"}`} />
+                    <CategoryIcon category={currentCat} className={`w-4 h-4 shrink-0 ${selectedCategory !== "Semua" ? "text-[#1683FF]" : "text-slate-400"}`} />
                     <span className="truncate max-w-[130px] sm:max-w-[150px]">
-                      {selectedCategory === "Semua" ? "Semua Kategori" : currentCat.name}
+                      {selectedCategory === "Semua" ? "Semua Kategori" : currentCatName}
                     </span>
                   </div>
                   <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform ${isCategoryOpen ? "rotate-180 text-[#1683FF]" : "text-slate-400"}`} />
@@ -214,8 +203,8 @@ export default function SewaPage() {
                     </div>
                     <div className="space-y-0.5 max-h-64 overflow-y-auto">
                       {categories.map((cat) => {
-                        const Icon = cat.icon;
                         const isSelected = selectedCategory === cat.id;
+                        const catDisplayName = cat.name || cat.label;
                         return (
                           <button
                             key={cat.id}
@@ -232,8 +221,8 @@ export default function SewaPage() {
                             }`}
                           >
                             <div className="flex items-center gap-2.5 truncate">
-                              <Icon className={`w-3.5 h-3.5 shrink-0 ${isSelected ? "text-[#1683FF]" : "text-slate-400"}`} />
-                              <span className="truncate">{cat.name}</span>
+                              <CategoryIcon category={cat} className={`w-3.5 h-3.5 shrink-0 ${isSelected ? "text-[#1683FF]" : "text-slate-400"}`} />
+                              <span className="truncate">{catDisplayName}</span>
                             </div>
                             {isSelected && <Check className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />}
                           </button>
@@ -379,7 +368,7 @@ export default function SewaPage() {
                           {st.rating} ({st.reviewCount} ulasan)
                         </span>
                         <span className="text-slate-300">•</span>
-                        <span className="text-slate-500 font-medium">{st.catalog.length} unit sewa</span>
+                        <span className="text-slate-500 font-medium">{st.catalog?.length || 0} unit sewa</span>
                         <span className="text-slate-300">•</span>
                         <span className="text-slate-500 font-medium">{st.address}</span>
                       </div>
@@ -420,8 +409,8 @@ export default function SewaPage() {
           )}
         </div>
 
-        {/* Catalog 4-Column Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        {/* Catalog 4-Column Grid (2 Columns on Mobile) */}
+        <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4 md:gap-5">
           {paginatedRentals.map((rental) => (
             <ProductProfileCard key={rental.id} item={rental} type="rental" />
           ))}
@@ -474,66 +463,86 @@ export default function SewaPage() {
           </div>
         )}
 
-        {/* Pagination Controls */}
+        {/* Pagination Navigasi Halaman */}
         {totalPages > 1 && (
-          <div className="mt-8 flex items-center justify-center gap-1.5">
-            {/* Prev */}
-            <button
-              type="button"
-              onClick={() => goToPage(currentPage - 1)}
-              disabled={currentPage === 1}
-              className="px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed bg-white hover:bg-slate-50 text-slate-700 border-slate-200"
-            >
-              ← Sebelumnya
-            </button>
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-8 pt-6 border-t border-slate-200/80">
+            {/* Info Jumlah */}
+            <div className="text-xs text-slate-500 font-medium order-2 sm:order-1">
+              Menampilkan <span className="font-bold text-slate-800">{startIndex + 1}</span> - <span className="font-bold text-slate-800">{endIndex}</span> dari <span className="font-bold text-slate-800">{filteredRentals.length}</span> barang sewa
+            </div>
 
-            {/* Page Numbers */}
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
-              // Show first, last, current ±1, and ellipsis
-              const showPage =
-                page === 1 ||
-                page === totalPages ||
-                Math.abs(page - currentPage) <= 1;
+            {/* Kontrol Halaman */}
+            <div className="flex items-center gap-1.5 order-1 sm:order-2">
+              {/* Tombol Sebelumnya */}
+              <button
+                type="button"
+                onClick={() => handlePageChange(safeCurrentPage - 1)}
+                disabled={safeCurrentPage === 1}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 border shadow-2xs ${
+                  safeCurrentPage === 1
+                    ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                    : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-slate-900 cursor-pointer"
+                }`}
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Sebelumnya</span>
+              </button>
 
-              if (!showPage) {
-                // Show ellipsis only once per gap
-                const prevShown =
-                  page - 1 === 1 ||
-                  page - 1 === totalPages ||
-                  Math.abs(page - 1 - currentPage) <= 1;
-                if (!prevShown) return null;
-                return (
-                  <span key={`ellipsis-${page}`} className="px-1 text-slate-400 text-xs">
-                    …
-                  </span>
-                );
-              }
+              {/* Tombol Angka Halaman */}
+              <div className="flex items-center gap-1">
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => {
+                  if (
+                    totalPages > 6 &&
+                    pageNum !== 1 &&
+                    pageNum !== totalPages &&
+                    Math.abs(pageNum - safeCurrentPage) > 1
+                  ) {
+                    if (
+                      (pageNum === 2 && safeCurrentPage > 3) ||
+                      (pageNum === totalPages - 1 && safeCurrentPage < totalPages - 2)
+                    ) {
+                      return (
+                        <span key={pageNum} className="px-1.5 text-xs text-slate-400 font-bold">
+                          ...
+                        </span>
+                      );
+                    }
+                    return null;
+                  }
 
-              return (
-                <button
-                  key={page}
-                  type="button"
-                  onClick={() => goToPage(page)}
-                  className={`w-9 h-9 rounded-xl text-xs font-bold transition cursor-pointer ${
-                    page === currentPage
-                      ? "bg-[#1683FF] text-white shadow-2xs"
-                      : "bg-white hover:bg-slate-50 text-slate-700 border border-slate-200"
-                  }`}
-                >
-                  {page}
-                </button>
-              );
-            })}
+                  const isActive = pageNum === safeCurrentPage;
+                  return (
+                    <button
+                      key={pageNum}
+                      type="button"
+                      onClick={() => handlePageChange(pageNum)}
+                      className={`w-8 h-8 rounded-xl text-xs font-bold transition flex items-center justify-center cursor-pointer ${
+                        isActive
+                          ? "bg-[#1683FF] text-white shadow-2xs ring-2 ring-[#1683FF]/20"
+                          : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:text-slate-900"
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+              </div>
 
-            {/* Next */}
-            <button
-              type="button"
-              onClick={() => goToPage(currentPage + 1)}
-              disabled={currentPage === totalPages}
-              className="px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed bg-white hover:bg-slate-50 text-slate-700 border-slate-200"
-            >
-              Berikutnya →
-            </button>
+              {/* Tombol Berikutnya */}
+              <button
+                type="button"
+                onClick={() => handlePageChange(safeCurrentPage + 1)}
+                disabled={safeCurrentPage === totalPages}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 border shadow-2xs ${
+                  safeCurrentPage === totalPages
+                    ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                    : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-slate-900 cursor-pointer"
+                }`}
+              >
+                <span className="hidden sm:inline">Berikutnya</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         )}
 

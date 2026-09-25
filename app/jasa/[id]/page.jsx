@@ -10,6 +10,7 @@ import { reverseGeocodeCoordinates } from "@/lib/services/gpsService";
 import { useApp } from "@/lib/context/AppContext";
 import { formatIDR } from "@/lib/utils";
 import { getCatalogServiceById } from "@/lib/mock/providersData";
+import CategoryIcon from "@/components/common/CategoryIcon";
 import { 
   ArrowLeft, 
   Star, 
@@ -238,8 +239,9 @@ export default function JasaCheckoutDetailPage() {
                     className="w-full h-full object-cover transition-all duration-300"
                   />
                   <div className="absolute top-3 left-3">
-                    <span className="text-xs font-extrabold px-3 py-1 rounded-lg bg-black/60 text-white backdrop-blur-xs shadow-xs">
-                      {service.category}
+                    <span className="inline-flex items-center gap-1.5 text-xs font-extrabold px-3 py-1 rounded-lg bg-black/60 text-white backdrop-blur-xs shadow-xs">
+                      <CategoryIcon category={service.category} className="w-3.5 h-3.5 text-white shrink-0" />
+                      <span>{service.category}</span>
                     </span>
                   </div>
                 </div>
@@ -316,15 +318,17 @@ export default function JasaCheckoutDetailPage() {
                 </div>
               )}
               
-              <div className="p-5 sm:p-6 -mt-8 relative z-10 space-y-3">
+              <div className="px-5 sm:px-6 pb-5 sm:pb-6 pt-3 sm:pt-4 relative z-10 space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
                   <div className="flex items-center gap-3.5 min-w-0">
-                    <img
-                      src={service.provider.avatar}
-                      alt={service.provider.name}
-                      className="w-16 h-16 rounded-2xl object-cover border-3 border-white shadow-md shrink-0 bg-white"
-                    />
-                    <div className="min-w-0 pt-3 sm:pt-0">
+                    <div className={service.provider.coverBanner ? "-mt-8 sm:-mt-10 relative shrink-0" : "relative shrink-0"}>
+                      <img
+                        src={service.provider.avatar}
+                        alt={service.provider.name}
+                        className="w-16 h-16 rounded-2xl object-cover border-3 border-white shadow-md bg-white"
+                      />
+                    </div>
+                    <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <h4 className="font-black text-sm sm:text-base text-slate-900 truncate">
                           {service.provider.name}
@@ -533,7 +537,7 @@ export default function JasaCheckoutDetailPage() {
                   Checkout Pesanan Jasa
                 </h3>
                 <span className="text-[11px] font-bold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
-                  Rekber Aktif
+                  Pembayaran Terverifikasi
                 </span>
               </div>
 
@@ -801,13 +805,13 @@ export default function JasaCheckoutDetailPage() {
                       <span className="text-slate-700 font-medium">-{formatIDR(platformFee)} (ditanggung mitra)</span>
                     </div>
                     <div className="flex items-center justify-between text-slate-500 text-[11px]">
-                      <span>Biaya Rekening Bersama (Escrow)</span>
+                      <span>Biaya Sistem Terverifikasi</span>
                       <span className="text-emerald-600 font-bold">Gratis (Rp 0)</span>
                     </div>
                     <div className="pt-2.5 border-t border-slate-200/90 flex items-baseline justify-between mt-1">
                       <div>
                         <span className="font-black text-xs sm:text-sm text-slate-900 block">Total Pembayaran</span>
-                        <span className="text-[10px] text-slate-400 font-normal">Wajib bayar dulu ke Rekber Bantuin</span>
+                        <span className="text-[10px] text-slate-400 font-normal">Diproses via Payment Gateway Resmi</span>
                       </div>
                       <span className="text-[#1683FF] text-xl sm:text-2xl font-black tracking-tight">
                         {formatIDR(activePkg.price)}
@@ -815,11 +819,11 @@ export default function JasaCheckoutDetailPage() {
                     </div>
                   </div>
 
-                  {/* Jaminan Rekber */}
+                  {/* Jaminan Pembayaran */}
                   <div className="p-3 rounded-2xl bg-emerald-50/60 border border-emerald-100 flex items-start gap-2.5 text-[11px] text-emerald-800 leading-snug">
                     <Lock className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                     <span>
-                      <strong>Rekber Aman Bantuin:</strong> Bayar dulu ke rekening bersama kami. Dana baru dicairkan ke mitra setelah pekerjaan selesai diverifikasi.
+                      <strong>Pembayaran Terverifikasi:</strong> Hak pembayaran mitra baru dapat dicairkan setelah pekerjaan selesai dan Anda konfirmasi tuntas.
                     </span>
                   </div>
 

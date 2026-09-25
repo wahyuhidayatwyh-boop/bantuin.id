@@ -6,8 +6,8 @@ import { HelpCircle, ChevronRight } from "lucide-react";
 export default function FaqPage() {
   const faqs = [
     {
-      q: "Bagaimana cara kerja pembayaran dan escrow di Bantuin?",
-      a: "Bantuin bermitra dengan Xendit sebagai Payment Gateway resmi. Ketika kamu memilih helper atau merental barang, dana pembayaran akan ditahan di rekening escrow Xendit. Dana baru akan dicairkan ke helper setelah kamu mengonfirmasi bahwa tugas telah selesai dengan baik.",
+      q: "Bagaimana cara kerja sistem pembayaran di Bantuin?",
+      a: "Bantuin terintegrasi dengan Payment Gateway berizin resmi Bank Indonesia. Ketika kamu membayar pesanan jasa atau sewa, pembayaran terverifikasi secara instan dan diamankan oleh sistem. Hak pembayaran mitra baru dapat dicairkan setelah kamu mengonfirmasi bahwa pesanan telah selesai dengan baik.",
     },
     {
       q: "Apakah satu akun bisa menjadi pembutuh bantuan sekaligus helper?",

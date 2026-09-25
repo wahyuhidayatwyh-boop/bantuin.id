@@ -87,7 +87,7 @@ export default function FeaturedServices() {
           {/* Right subtitle & arrow controls */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-4 md:gap-6">
             <p className="text-xs sm:text-sm text-slate-500 max-w-xs leading-relaxed">
-              Dari bantuan kilat, sewa alat, hingga jasa profesional — terlindungi sistem escrow resmi.
+              Dari bantuan kilat, sewa alat, hingga jasa profesional — terlindungi sistem pembayaran resmi.
             </p>
 
             <div className="flex items-center gap-2 shrink-0">

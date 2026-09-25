@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Navbar from "@/components/layout/Navbar";
@@ -23,7 +23,8 @@ import {
   ChevronRight as BreadcrumbSeparator
 } from "lucide-react";
 import { getNavigationUrl } from "@/lib/services/gpsService";
-import { getMitraStoreById } from "@/lib/mock/mitraData";
+import { getMitraStoreById, getAllMitraStores } from "@/lib/mock/mitraData";
+import CategoryIcon from "@/components/common/CategoryIcon";
 
 export default function RentalDetailPage() {
   const { id } = useParams();
@@ -53,14 +54,53 @@ export default function RentalDetailPage() {
     }
   }, [startDate, endDate]);
 
-  const rental = rentals.find((r) => r.id === id) || rentals[0];
+  // Cari unit dari AppContext rentals atau dari katalog seluruh toko mitra
+  const rental = useMemo(() => {
+    const found = rentals.find((r) => r.id === id);
+    if (found) return found;
+
+    const allStores = getAllMitraStores();
+    for (const st of allStores) {
+      const catItem = st.catalog?.find((c) => c.id === id);
+      if (catItem) {
+        return {
+          id: catItem.id,
+          title: catItem.name,
+          category: catItem.category,
+          dailyPrice: catItem.price,
+          depositAmount: catItem.depositAmount || 200000,
+          photoUrl: catItem.image,
+          photos: (catItem.photos && catItem.photos.length > 0) ? catItem.photos : [catItem.image],
+          stock: catItem.stockCount || 3,
+          description: catItem.desc,
+          ratingAvg: catItem.rating || 4.95,
+          ratingCount: catItem.reviews || 38,
+          totalRentedCount: 52,
+          isVerifiedPartner: true,
+          isSafeEscrow: true,
+          storeId: st.id,
+          ownerName: st.name,
+          owner: {
+            id: st.id,
+            name: st.name,
+            avatar: st.avatar,
+            rating: st.rating,
+            completedOrders: st.completedOrders,
+          },
+          location: st.address,
+          address: st.address,
+        };
+      }
+    }
+    return rentals[0];
+  }, [rentals, id]);
 
   // Resolve store data from mock mitra
   const storeId = rental?.storeId || 
     (rental?.owner?.id?.startsWith("mitra-") ? rental.owner.id : "mitra-kamera");
   const storeData = getMitraStoreById(storeId);
 
-  // Photos gallery
+  // Photos gallery (mendukung multi-foto dari form katalog mitra)
   const productPhotos = (rental?.photos && rental.photos.length > 0)
     ? rental.photos
     : [
@@ -70,6 +110,13 @@ export default function RentalDetailPage() {
         "https://images.unsplash.com/photo-1512790182412-b19e6d62bc39?auto=format&fit=crop&w=800&q=80"
       ];
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
+
+  // Reset active photo index if it exceeds available photos
+  useEffect(() => {
+    if (activePhotoIndex >= productPhotos.length) {
+      setActivePhotoIndex(0);
+    }
+  }, [productPhotos.length, activePhotoIndex]);
 
   const availableStock = typeof rental?.stock === "number" ? rental.stock : 3;
   const isOutOfStock = availableStock <= 0;
@@ -106,7 +153,7 @@ export default function RentalDetailPage() {
               rating: 5,
               date: "1 minggu yang lalu",
               item: rental?.title || "Unit Kamera & Lensa",
-              comment: "Sangat terbantu buat sewa kamera wisuda teman seangkatan. Rekber Bantuin bikin tenang gak takut uang hilang. Tokonya amanah dan tepat waktu!",
+              comment: "Sangat terbantu buat sewa kamera wisuda teman seangkatan. Sistem pembayaran Bantuin bikin tenang gak takut uang hilang. Tokonya amanah dan tepat waktu!",
             },
             {
               id: "rev-3",
@@ -234,8 +281,9 @@ export default function RentalDetailPage() {
                 {/* Badges Bar: Konsisten Slate & Brand Blue */}
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-semibold px-2.5 py-1 bg-slate-100 text-slate-700 rounded-md">
-                      {rental.category}
+                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 bg-slate-100 text-slate-700 rounded-md">
+                      <CategoryIcon category={rental.category} className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
+                      <span>{rental.category}</span>
                     </span>
                     {rental.isVerifiedPartner && (
                       <span className="text-xs font-semibold text-[#1683FF] bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-md flex items-center gap-1">
@@ -401,7 +449,10 @@ export default function RentalDetailPage() {
                 </div>
                 <div className="py-1 border-t sm:border-t-0 sm:border-l border-slate-200">
                   <span className="text-[11px] text-slate-400 block font-medium">Rating Toko</span>
-                  <div className="text-sm font-bold text-amber-500 mt-0.5">★ {storeData?.rating || ratingAvg}</div>
+                  <div className="text-sm font-bold text-slate-800 mt-0.5 flex items-center gap-1">
+                    <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                    <span>{storeData?.rating || ratingAvg}</span>
+                  </div>
                 </div>
               </div>
 
@@ -453,7 +504,7 @@ export default function RentalDetailPage() {
                     </div>
                     <div>
                       <div className="font-bold text-slate-900 text-xs">Booking &amp; Bayar</div>
-                      <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">Pilih tanggal sewa. Dana aman di Rekber Bantuin.</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">Pilih tanggal sewa. Dana aman terverifikasi.</p>
                     </div>
                   </div>
                   <div className="flex items-start gap-2.5">
@@ -735,10 +786,10 @@ export default function RentalDetailPage() {
               <div className="pt-3 border-t border-slate-100 space-y-1 text-center">
                 <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-700">
                   <ShieldCheck className="w-4 h-4 text-[#1683FF]" />
-                  <span>Bantuin Escrow Protection</span>
+                  <span>Sistem Pembayaran Terverifikasi</span>
                 </div>
                 <div className="flex items-center justify-center gap-2 text-[11px] font-medium text-slate-500">
-                  <span>✓ Rekber Resmi</span>
+                  <span>Payment Gateway Resmi</span>
                   <span>•</span>
                   <span>Jaminan Uang Kembali</span>
                   <span>•</span>
@@ -772,50 +823,51 @@ export default function RentalDetailPage() {
             </Link>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4 md:gap-5">
             {relatedRentals.map((item) => (
               <Link
                 key={item.id}
                 href={`/sewa/${item.id}`}
-                className="group bg-white rounded-2xl border border-slate-200/90 overflow-hidden hover:shadow-md hover:border-blue-200 transition flex flex-col justify-between"
+                className="group bg-white rounded-xl sm:rounded-2xl border border-slate-200/90 overflow-hidden hover:shadow-md hover:border-blue-200 transition flex flex-col justify-between"
               >
                 <div>
-                  <div className="relative aspect-[4/3] w-full overflow-hidden bg-slate-100">
+                  <div className="relative aspect-[16/10] sm:aspect-[4/3] w-full overflow-hidden bg-slate-100">
                     <img
                       src={item.photoUrl}
                       alt={item.title}
                       className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                     />
-                    <span className="absolute top-2.5 left-2.5 px-2.5 py-1 bg-white/95 backdrop-blur-md text-[10px] font-bold rounded-full text-slate-800 border border-slate-200/60 shadow-2xs">
+                    <span className="absolute top-2 left-2 sm:top-2.5 sm:left-2.5 px-2 sm:px-2.5 py-0.5 sm:py-1 bg-white/95 backdrop-blur-md text-[9px] sm:text-[10px] font-bold rounded-md sm:rounded-full text-slate-800 border border-slate-200/60 shadow-2xs">
                       {item.category}
                     </span>
                   </div>
 
-                  <div className="p-4 space-y-2">
-                    <h3 className="font-bold text-slate-900 text-xs sm:text-sm line-clamp-2 group-hover:text-[#1683FF] transition leading-snug">
+                  <div className="p-2.5 sm:p-4 space-y-1 sm:space-y-2">
+                    <h3 className="font-bold text-slate-900 text-xs sm:text-sm line-clamp-2 group-hover:text-[#1683FF] transition leading-tight sm:leading-snug min-h-[32px] sm:min-h-[40px]">
                       {item.title}
                     </h3>
                     
-                    <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
-                      <span className="truncate max-w-[130px] font-medium">{item.ownerName || "Mitra Resmi"}</span>
-                      <span className="font-bold text-amber-500 flex items-center gap-0.5">
-                        ★ {item.ratingAvg}
+                    <div className="flex items-center justify-between text-[10px] sm:text-[11px] text-slate-500 pt-1">
+                      <span className="truncate max-w-[80px] xs:max-w-[110px] sm:max-w-[130px] font-medium">{item.ownerName || "Mitra Resmi"}</span>
+                      <span className="font-bold text-slate-700 flex items-center gap-1 shrink-0">
+                        <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                        <span>{item.ratingAvg}</span>
                       </span>
                     </div>
                   </div>
                 </div>
 
-                <div className="p-4 pt-0 border-t border-slate-50 flex items-center justify-between mt-2">
+                <div className="p-2.5 sm:p-4 pt-0 border-t border-slate-50 flex items-center justify-between mt-1 sm:mt-2">
                   <div>
-                    <span className="text-[10px] text-slate-400 block">Tarif</span>
+                    <span className="text-[9px] sm:text-[10px] text-slate-400 block">Tarif</span>
                     <span className="text-xs sm:text-sm font-black text-[#1683FF]">
                       {formatIDR(item.dailyPrice)}
-                      <span className="text-[10px] font-medium text-slate-400">/hari</span>
+                      <span className="text-[9px] sm:text-[10px] font-medium text-slate-400">/hari</span>
                     </span>
                   </div>
 
-                  <span className="px-2.5 py-1 bg-blue-50 text-[#1683FF] rounded-lg text-[10px] font-bold group-hover:bg-[#1683FF] group-hover:text-white transition">
-                    Lihat Unit &rarr;
+                  <span className="text-[10px] sm:text-xs font-bold text-[#1683FF] group-hover:translate-x-0.5 transition-transform">
+                    Detail &rarr;
                   </span>
                 </div>
               </Link>

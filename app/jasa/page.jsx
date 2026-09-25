@@ -11,6 +11,8 @@ import {
   getStartingPrice, 
   getAllCatalogServices 
 } from "@/lib/mock/providersData";
+import CategoryIcon from "@/components/common/CategoryIcon";
+import { JASA_CATEGORIES, resolveIcon, matchesCategory } from "@/lib/categories";
 import { 
   Palette, 
   Search, 
@@ -25,6 +27,7 @@ import {
   MapPin, 
   CheckCircle2, 
   Star,
+  ChevronLeft,
   ChevronRight,
   Filter,
   Check,
@@ -34,17 +37,9 @@ import {
   Globe
 } from "lucide-react";
 
-// Kategori dengan Icon 3D Biru Glossy
-const CATEGORY_ICONS = [
-  { id: "Semua", name: "Semua Jasa", icon: Layers },
-  { id: "Helper", name: "Bantuan Tenaga", icon: Hammer },
-  { id: "Desain", name: "Desain Grafis", icon: Palette },
-  { id: "Teknisi", name: "Teknisi AC", icon: Wrench },
-  { id: "Fotografi", name: "Fotografi", icon: Camera },
-  { id: "Komputer", name: "Servis Laptop", icon: Laptop },
-  { id: "Web & IT", name: "Web & IT", icon: Video },
-  { id: "Bahasa", name: "Penerjemah", icon: FileText },
-];
+// Kategori ikon dari sumber kebenaran tunggal (lib/categories.js)
+// Untuk menambah kategori baru, cukup edit JASA_CATEGORIES di lib/categories.js
+const CATEGORY_ICONS = JASA_CATEGORIES;
 
 // Sub-Kategori Cepat untuk Filter Jasa
 const SUB_CATEGORIES = {
@@ -255,16 +250,26 @@ export default function JasaPage() {
     });
   }, [allProvidersList, selectedCategory, searchQuery, filterByKabupaten, isItemInCurrentKabupaten]);
 
-  // Pagination for catalog
-  const totalPages = Math.ceil(filteredCatalog.length / ITEMS_PER_PAGE);
-  const paginatedCatalog = filteredCatalog.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE
-  );
+  // Reset page when search or filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedCategory, selectedSubCategory, filterByKabupaten]);
 
-  const goToPage = (page) => {
+  // Pagination for catalog & providers
+  const isProviderTab = selectedCategory === "Penyedia";
+  const activeItemsCount = isProviderTab ? filteredProviders.length : filteredCatalog.length;
+  const totalPages = Math.ceil(activeItemsCount / ITEMS_PER_PAGE) || 1;
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (safeCurrentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, activeItemsCount);
+  const paginatedCatalog = filteredCatalog.slice(startIndex, endIndex);
+  const paginatedProviders = filteredProviders.slice(startIndex, endIndex);
+
+  const handlePageChange = (page) => {
     setCurrentPage(page);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 220, behavior: "smooth" });
+    }
   };
 
   return (
@@ -381,8 +386,8 @@ export default function JasaPage() {
           {/* Baris 2: Icon Kategori */}
           <div className="flex items-center justify-between gap-2 overflow-x-auto no-scrollbar pb-1">
             {CATEGORY_ICONS.map((cat) => {
-              const Icon = cat.icon;
               const isSelected = selectedCategory === cat.id;
+              const displayName = cat.name || cat.label;
 
               return (
                 <button
@@ -406,7 +411,8 @@ export default function JasaPage() {
                     {isSelected && (
                       <div className="absolute top-0.5 left-1 right-1 h-2.5 bg-gradient-to-b from-white/70 via-white/20 to-transparent rounded-t-lg pointer-events-none" />
                     )}
-                    <Icon
+                    <CategoryIcon
+                      category={cat}
                       className={`w-5 h-5 sm:w-5.5 sm:h-5.5 stroke-[2.2] transition-colors ${
                         isSelected
                           ? "text-white drop-shadow-[0_1px_2px_rgba(0,30,80,0.4)]"
@@ -421,7 +427,7 @@ export default function JasaPage() {
                       isSelected ? "text-[#1683FF]" : "text-slate-700 group-hover:text-slate-900"
                     }`}
                   >
-                    {cat.name}
+                    {displayName}
                   </span>
                 </button>
               );
@@ -464,16 +470,16 @@ export default function JasaPage() {
         {selectedCategory !== "Penyedia" && (
           <div className="space-y-6">
             
-            {/* Grid Produk Jasa Langsung */}
+            {/* Grid Produk Jasa Langsung (2 Kolom di Mobile) */}
             {filteredCatalog.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-4 md:gap-5">
                 {paginatedCatalog.map((item) => {
                   const isDigital = isOnlineOrDigitalService(item);
                   return (
                     <Link
                       key={item.id}
                       href={`/jasa/${item.id}`}
-                      className="group bg-white rounded-3xl border border-slate-200/90 hover:border-[#1683FF]/40 shadow-2xs hover:shadow-lg transition-all duration-300 flex flex-col justify-between overflow-hidden cursor-pointer"
+                      className="group bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 hover:border-[#1683FF]/40 shadow-2xs hover:shadow-lg transition-all duration-300 flex flex-col justify-between overflow-hidden cursor-pointer"
                     >
                       <div>
                         {/* Foto Layanan (Aspect Ratio 16:10) */}
@@ -484,64 +490,64 @@ export default function JasaPage() {
                             loading="lazy"
                             className="w-full h-full object-cover group-hover:scale-106 transition-transform duration-500 ease-out"
                           />
-                          <div className="absolute top-3 left-3 flex items-center gap-1.5">
-                            <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-black/60 text-white backdrop-blur-xs shadow-xs">
+                          <div className="absolute top-2 left-2 sm:top-3 sm:left-3 flex items-center gap-1.5">
+                            <span className="text-[9px] sm:text-[11px] font-bold px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-md sm:rounded-lg bg-black/60 text-white backdrop-blur-xs shadow-xs">
                               {item.category}
                             </span>
                           </div>
                           
                           {/* Badge Digital vs Datang ke Lokasi */}
-                          <div className="absolute top-3 right-3">
+                          <div className="absolute top-2 right-2 sm:top-3 sm:right-3">
                             {isDigital ? (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-600 text-white shadow-xs flex items-center gap-1">
+                              <span className="text-[8px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-md bg-blue-600 text-white shadow-xs flex items-center gap-0.5 sm:gap-1">
                                 <Globe className="w-2.5 h-2.5" />
                                 <span>Digital</span>
                               </span>
                             ) : (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-900/80 backdrop-blur-xs text-white shadow-xs flex items-center gap-1">
+                              <span className="text-[8px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-md bg-slate-900/80 backdrop-blur-xs text-white shadow-xs flex items-center gap-0.5 sm:gap-1">
                                 <MapPin className="w-2.5 h-2.5 text-amber-300" />
-                                <span>Datang ke Lokasi</span>
+                                <span className="hidden xs:inline">Lokasi</span>
                               </span>
                             )}
                           </div>
                         </div>
 
                         {/* Detail Judul & Deskripsi */}
-                        <div className="p-4 sm:p-5 space-y-2.5">
-                          <h3 className="font-bold text-sm sm:text-base text-slate-900 group-hover:text-[#1683FF] transition-colors line-clamp-2 leading-snug">
+                        <div className="p-2.5 sm:p-4 sm:p-5 space-y-1 sm:space-y-2.5">
+                          <h3 className="font-bold text-xs sm:text-base text-slate-900 group-hover:text-[#1683FF] transition-colors line-clamp-2 leading-tight sm:leading-snug min-h-[32px] sm:min-h-[44px]">
                             {item.title}
                           </h3>
 
-                          <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">
+                          <p className="hidden sm:line-clamp-2 text-xs text-slate-500 leading-relaxed">
                             {item.desc}
                           </p>
 
                           {/* Mitra Penyedia Info */}
-                          <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
-                            <div className="flex items-center gap-2 min-w-0">
+                          <div className="pt-1.5 sm:pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] sm:text-xs">
+                            <div className="flex items-center gap-1.5 min-w-0">
                               <img
                                 src={item.provider.avatar}
                                 alt={item.provider.name}
-                                className="w-6 h-6 rounded-full object-cover border border-slate-200 shrink-0"
+                                className="w-4 h-4 sm:w-6 sm:h-6 rounded-full object-cover border border-slate-200 shrink-0"
                               />
-                              <span className="truncate font-semibold text-slate-700">
+                              <span className="truncate font-semibold text-slate-700 max-w-[80px] sm:max-w-none">
                                 {item.provider.name}
                               </span>
                               {item.provider.isVerified && (
-                                <CheckCircle2 className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
+                                <CheckCircle2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#1683FF] shrink-0" />
                               )}
                             </div>
 
-                            <div className="flex items-center gap-1 font-bold text-amber-500 shrink-0">
-                              <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                            <div className="flex items-center gap-0.5 sm:gap-1 font-bold text-amber-500 shrink-0">
+                              <Star className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-amber-400 text-amber-400" />
                               <span>{item.provider.rating}</span>
                             </div>
                           </div>
 
                           {/* Lokasi / Layanan Area */}
-                          <div className="flex items-center text-[11px] text-slate-400 pt-0.5">
+                          <div className="flex items-center text-[10px] sm:text-[11px] text-slate-400 pt-0.5">
                             <span className="flex items-center gap-1 truncate">
-                              <MapPin className="w-3 h-3 text-[#1683FF] shrink-0" />
+                              <MapPin className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-[#1683FF] shrink-0" />
                               <span className="truncate">{item.provider.location}</span>
                             </span>
                           </div>
@@ -549,26 +555,25 @@ export default function JasaPage() {
                       </div>
 
                       {/* Footer Harga & Tombol Pesan */}
-                      <div className="px-4 sm:px-5 py-3 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between gap-2">
+                      <div className="px-2.5 sm:px-5 py-2 sm:py-3 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between gap-1 sm:gap-2">
                         <div>
-                          <span className="text-[10px] uppercase font-bold text-slate-400 block leading-tight">
-                            Tarif Mulai:
+                          <span className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 block leading-tight">
+                            Mulai:
                           </span>
-                          <div className="flex items-baseline gap-1">
-                            <span className="text-sm sm:text-base font-black text-[#1683FF]">
+                          <div className="flex items-baseline gap-0.5 sm:gap-1">
+                            <span className="text-xs sm:text-base font-black text-[#1683FF]">
                               {formatIDR(item.price)}
                             </span>
                             {item.unit && (
-                              <span className="text-[10px] font-semibold text-slate-400">
+                              <span className="text-[9px] sm:text-[10px] font-semibold text-slate-400 hidden xs:inline">
                                 {item.unit}
                               </span>
                             )}
                           </div>
                         </div>
 
-                        <span className="px-3 py-1.5 rounded-xl bg-[#1683FF] text-white text-xs font-bold group-hover:bg-[#0F6FE5] transition shadow-2xs flex items-center gap-1">
-                          <span>Pesan</span>
-                          <ChevronRight className="w-3.5 h-3.5" />
+                        <span className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl bg-[#1683FF] text-white text-[10px] sm:text-xs font-bold group-hover:bg-[#0F6FE5] transition shrink-0 shadow-2xs">
+                          Pesan
                         </span>
                       </div>
                     </Link>
@@ -615,27 +620,86 @@ export default function JasaPage() {
               </div>
             )}
 
-            {/* Pagination jika lebih dari 1 halaman */}
+            {/* Pagination Navigasi Halaman */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-center gap-2 pt-4">
-                {[...Array(totalPages)].map((_, idx) => {
-                  const pNum = idx + 1;
-                  const isActive = currentPage === pNum;
-                  return (
-                    <button
-                      key={pNum}
-                      type="button"
-                      onClick={() => goToPage(pNum)}
-                      className={`w-9 h-9 rounded-xl text-xs font-bold transition cursor-pointer ${
-                        isActive
-                          ? "bg-[#1683FF] text-white shadow-xs"
-                          : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
-                      }`}
-                    >
-                      {pNum}
-                    </button>
-                  );
-                })}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-8 pt-6 border-t border-slate-200/80">
+                {/* Info Jumlah */}
+                <div className="text-xs text-slate-500 font-medium order-2 sm:order-1">
+                  Menampilkan <span className="font-bold text-slate-800">{startIndex + 1}</span> - <span className="font-bold text-slate-800">{endIndex}</span> dari <span className="font-bold text-slate-800">{filteredCatalog.length}</span> layanan
+                </div>
+
+                {/* Kontrol Halaman */}
+                <div className="flex items-center gap-1.5 order-1 sm:order-2">
+                  {/* Tombol Sebelumnya */}
+                  <button
+                    type="button"
+                    onClick={() => handlePageChange(safeCurrentPage - 1)}
+                    disabled={safeCurrentPage === 1}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 border shadow-2xs ${
+                      safeCurrentPage === 1
+                        ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                        : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-slate-900 cursor-pointer"
+                    }`}
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Sebelumnya</span>
+                  </button>
+
+                  {/* Tombol Angka Halaman */}
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => {
+                      if (
+                        totalPages > 6 &&
+                        pageNum !== 1 &&
+                        pageNum !== totalPages &&
+                        Math.abs(pageNum - safeCurrentPage) > 1
+                      ) {
+                        if (
+                          (pageNum === 2 && safeCurrentPage > 3) ||
+                          (pageNum === totalPages - 1 && safeCurrentPage < totalPages - 2)
+                        ) {
+                          return (
+                            <span key={pageNum} className="px-1.5 text-xs text-slate-400 font-bold">
+                              ...
+                            </span>
+                          );
+                        }
+                        return null;
+                      }
+
+                      const isActive = pageNum === safeCurrentPage;
+                      return (
+                        <button
+                          key={pageNum}
+                          type="button"
+                          onClick={() => handlePageChange(pageNum)}
+                          className={`w-8 h-8 rounded-xl text-xs font-bold transition flex items-center justify-center cursor-pointer ${
+                            isActive
+                              ? "bg-[#1683FF] text-white shadow-2xs ring-2 ring-[#1683FF]/20"
+                              : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:text-slate-900"
+                          }`}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Tombol Berikutnya */}
+                  <button
+                    type="button"
+                    onClick={() => handlePageChange(safeCurrentPage + 1)}
+                    disabled={safeCurrentPage === totalPages}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 border shadow-2xs ${
+                      safeCurrentPage === totalPages
+                        ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                        : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-slate-900 cursor-pointer"
+                    }`}
+                  >
+                    <span className="hidden sm:inline">Berikutnya</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             )}
 
@@ -664,7 +728,7 @@ export default function JasaPage() {
 
             {/* Grid Penyedia Jasa */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {filteredProviders.map((provider) => {
+              {paginatedProviders.map((provider) => {
                 const startingPrice = getStartingPrice(provider);
                 return (
                   <div
@@ -772,6 +836,89 @@ export default function JasaPage() {
                 );
               })}
             </div>
+
+            {/* Pagination Navigasi Halaman Penyedia */}
+            {totalPages > 1 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-8 pt-6 border-t border-slate-200/80">
+                {/* Info Jumlah */}
+                <div className="text-xs text-slate-500 font-medium order-2 sm:order-1">
+                  Menampilkan <span className="font-bold text-slate-800">{startIndex + 1}</span> - <span className="font-bold text-slate-800">{endIndex}</span> dari <span className="font-bold text-slate-800">{filteredProviders.length}</span> mitra penyedia
+                </div>
+
+                {/* Kontrol Halaman */}
+                <div className="flex items-center gap-1.5 order-1 sm:order-2">
+                  {/* Tombol Sebelumnya */}
+                  <button
+                    type="button"
+                    onClick={() => handlePageChange(safeCurrentPage - 1)}
+                    disabled={safeCurrentPage === 1}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 border shadow-2xs ${
+                      safeCurrentPage === 1
+                        ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                        : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-slate-900 cursor-pointer"
+                    }`}
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Sebelumnya</span>
+                  </button>
+
+                  {/* Tombol Angka Halaman */}
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => {
+                      if (
+                        totalPages > 6 &&
+                        pageNum !== 1 &&
+                        pageNum !== totalPages &&
+                        Math.abs(pageNum - safeCurrentPage) > 1
+                      ) {
+                        if (
+                          (pageNum === 2 && safeCurrentPage > 3) ||
+                          (pageNum === totalPages - 1 && safeCurrentPage < totalPages - 2)
+                        ) {
+                          return (
+                            <span key={pageNum} className="px-1.5 text-xs text-slate-400 font-bold">
+                              ...
+                            </span>
+                          );
+                        }
+                        return null;
+                      }
+
+                      const isActive = pageNum === safeCurrentPage;
+                      return (
+                        <button
+                          key={pageNum}
+                          type="button"
+                          onClick={() => handlePageChange(pageNum)}
+                          className={`w-8 h-8 rounded-xl text-xs font-bold transition flex items-center justify-center cursor-pointer ${
+                            isActive
+                              ? "bg-[#1683FF] text-white shadow-2xs ring-2 ring-[#1683FF]/20"
+                              : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:text-slate-900"
+                          }`}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Tombol Berikutnya */}
+                  <button
+                    type="button"
+                    onClick={() => handlePageChange(safeCurrentPage + 1)}
+                    disabled={safeCurrentPage === totalPages}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1 border shadow-2xs ${
+                      safeCurrentPage === totalPages
+                        ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                        : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-slate-900 cursor-pointer"
+                    }`}
+                  >
+                    <span className="hidden sm:inline">Berikutnya</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
 
           </div>
         )}

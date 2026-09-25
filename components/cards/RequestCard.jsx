@@ -4,6 +4,7 @@ import React from "react";
 import Link from "next/link";
 import { formatIDR } from "@/lib/utils";
 import { useApp } from "@/lib/context/AppContext";
+import CategoryIcon from "@/components/common/CategoryIcon";
 import { 
   MapPin, 
   Clock, 
@@ -14,15 +15,16 @@ import {
 
 function formatShortDeadline(deadline, deadlineText) {
   if (deadlineText) {
-    const timeMatch = deadlineText.match(/(\d{1,2}[.:]\d{2})/);
+    const timeMatch = String(deadlineText).match(/(\d{1,2}[.:]\d{2})/);
     if (timeMatch) {
       return `Batas: ${timeMatch[1]} WIB`;
     }
-    return deadlineText.replace(/^Hari ini\s*[•·]\s*/i, "Hari ini, ");
+    return String(deadlineText).replace(/^Hari ini\s*[•·]\s*/i, "Hari ini, ");
   }
   if (!deadline) return "Hari ini";
   try {
     const d = new Date(deadline);
+    if (!d || isNaN(d.getTime())) return "Hari ini";
     const h = String(d.getHours()).padStart(2, "0");
     const m = String(d.getMinutes()).padStart(2, "0");
     return `Batas: ${h}.${m} WIB`;
@@ -46,12 +48,14 @@ export default function RequestCard({ request }) {
   const offersCount = request.offers?.length || 0;
 
   const distanceInfo = getDistanceToUser
-    ? getDistanceToUser(request.latitude, request.longitude, request.distanceMeters)
+    ? getDistanceToUser(request.latitude, request.longitude)
     : null;
 
   const distanceText = request.mode === "online" 
     ? "Online / Remote" 
-    : (distanceInfo?.text || (request.distanceMeters ? `${request.distanceMeters} m` : "Lokasi"));
+    : (distanceInfo?.isRealtime && distanceInfo?.text
+        ? distanceInfo.text
+        : (request.location || request.city || "Atur lokasi untuk melihat jarak"));
 
   const shortDeadline = formatShortDeadline(request.deadline, request.deadlineText);
   const hasPhotos = Array.isArray(request.photos) && request.photos.length > 0;
@@ -89,8 +93,9 @@ export default function RequestCard({ request }) {
                 <Star className="w-3 h-3 fill-emerald-600" /> Milik Saya
               </span>
             ) : (
-              <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-md bg-blue-50 text-[#1683FF] border border-blue-100">
-                {request.category || "Bantuan"}
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-md bg-blue-50 text-[#1683FF] border border-blue-100">
+                <CategoryIcon category={request.category} className="w-3 h-3 text-[#1683FF] shrink-0" />
+                <span>{request.category || "Bantuan"}</span>
               </span>
             )}
 

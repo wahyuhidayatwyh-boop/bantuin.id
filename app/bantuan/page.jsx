@@ -9,6 +9,8 @@ import RequestCard from "@/components/cards/RequestCard";
 import MapComponent from "@/components/map/MapComponent";
 import { useApp } from "@/lib/context/AppContext";
 import { formatIDR, formatDeadlineWithHour } from "@/lib/utils";
+import CategoryIcon from "@/components/common/CategoryIcon";
+import { BANTUAN_CATEGORIES } from "@/lib/categories";
 import { 
   Search, 
   Map, 
@@ -87,18 +89,8 @@ function BantuanContent() {
     return requests.filter((r) => r.requester?.id === currentUser?.id).length;
   }, [requests, currentUser]);
 
-  // Unified categories for dropdown
-  const categories = [
-    { id: "Semua", name: "Semua Kategori", icon: Layers },
-    { id: "Ambil Dokumen", name: "Ambil Dokumen", icon: FileText },
-    { id: "Print & Fotokopi", name: "Print & Jilid", icon: Printer },
-    { id: "Antar Barang", name: "Antar Barang", icon: Package },
-    { id: "Bantu Pindahan", name: "Pindahan", icon: Truck },
-    { id: "Titip Belanja", name: "Titip Belanja", icon: ShoppingCart },
-    { id: "Bantu Antri", name: "Bantu Antri RS & Tiket", icon: Clock },
-    { id: "Bantuan Darurat", name: "Aki Motor & Tambal Ban", icon: Zap },
-    { id: "Bantu Event", name: "Penjaga Stand & Acara", icon: AlertTriangle },
-  ];
+  // Unified categories for dropdown from canonical source of truth
+  const categories = BANTUAN_CATEGORIES;
 
   // Filtered Requests Logic
   const filteredRequests = useMemo(() => {
@@ -143,7 +135,7 @@ function BantuanContent() {
   }, [requests, currentUser, scopeFilter, searchQuery, selectedCategory, filterByKabupaten, isItemInCurrentKabupaten]);
 
   const currentCat = categories.find((c) => c.id === selectedCategory) || categories[0];
-  const CurrentCatIcon = currentCat.icon;
+  const currentCatName = currentCat?.name || currentCat?.label || "Semua Kategori";
 
   // Pagination Logic (Maksimal 10 bantuan per halaman)
   const totalPages = Math.ceil(filteredRequests.length / ITEMS_PER_PAGE) || 1;
@@ -283,9 +275,9 @@ function BantuanContent() {
                   }`}
                 >
                   <div className="flex items-center gap-2 truncate">
-                    <CurrentCatIcon className={`w-4 h-4 shrink-0 ${selectedCategory !== "Semua" ? "text-[#1683FF]" : "text-slate-400"}`} />
+                    <CategoryIcon category={currentCat} className={`w-4 h-4 shrink-0 ${selectedCategory !== "Semua" ? "text-[#1683FF]" : "text-slate-400"}`} />
                     <span className="truncate max-w-[130px] sm:max-w-[150px]">
-                      {selectedCategory === "Semua" ? "Semua Kategori" : currentCat.name}
+                      {selectedCategory === "Semua" ? "Semua Kategori" : currentCatName}
                     </span>
                   </div>
                   <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform ${isCategoryOpen ? "rotate-180 text-[#1683FF]" : "text-slate-400"}`} />
@@ -299,8 +291,8 @@ function BantuanContent() {
                     </div>
                     <div className="space-y-0.5 max-h-64 overflow-y-auto">
                       {categories.map((cat) => {
-                        const Icon = cat.icon;
                         const isSelected = selectedCategory === cat.id;
+                        const catDisplayName = cat.name || cat.label;
                         return (
                           <button
                             key={cat.id}
@@ -317,8 +309,8 @@ function BantuanContent() {
                             }`}
                           >
                             <div className="flex items-center gap-2.5 truncate">
-                              <Icon className={`w-3.5 h-3.5 shrink-0 ${isSelected ? "text-[#1683FF]" : "text-slate-400"}`} />
-                              <span className="truncate">{cat.name}</span>
+                              <CategoryIcon category={cat} className={`w-3.5 h-3.5 shrink-0 ${isSelected ? "text-[#1683FF]" : "text-slate-400"}`} />
+                              <span className="truncate">{catDisplayName}</span>
                             </div>
                             {isSelected && <Check className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />}
                           </button>

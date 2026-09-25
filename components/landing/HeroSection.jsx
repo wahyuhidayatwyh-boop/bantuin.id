@@ -59,7 +59,7 @@ export default function HeroSection() {
       bg: "bg-purple-50",
       border: "border-purple-100",
       title: "Bayar Aman",
-      desc: "Transaksi escrow transparan",
+      desc: "Sistem pembayaran transparan",
     },
   ];
 
@@ -197,7 +197,7 @@ export default function HeroSection() {
                 <div className="flex items-center justify-between text-[11px] text-slate-500">
                   <span className="flex items-center gap-1">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Escrow Xendit</span>
+                    <span>Rekening Bersama</span>
                   </span>
                   <span className="text-emerald-600 font-semibold">100% Aman</span>
                 </div>

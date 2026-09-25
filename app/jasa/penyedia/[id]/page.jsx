@@ -17,14 +17,14 @@ import {
   MessageCircle,
   Share2,
   CheckCircle2,
-  Sparkles,
   ChevronRight,
   Layers,
   Image as ImageIcon,
   UserCheck,
   Award,
   Package,
-  Lock
+  Lock,
+  X
 } from "lucide-react";
 
 export default function ProviderDetailPage() {
@@ -231,7 +231,7 @@ export default function ProviderDetailPage() {
             <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-500">
               <ShieldCheck className="w-4 h-4 text-[#1683FF] shrink-0" />
               <span>
-                <strong>Jaminan Rekber Bantuin:</strong> Pembayaran Anda aman dan baru diteruskan setelah pekerjaan disetujui.
+                <strong>Jaminan Pembayaran Bantuin:</strong> Pembayaran Anda aman dan baru diteruskan setelah pekerjaan disetujui.
               </span>
             </div>
           </div>
@@ -323,11 +323,11 @@ export default function ProviderDetailPage() {
               </div>
 
               {/* Grid Card Jasa (Foto + Judul + Deskripsi + Harga Satuan) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
+              <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4 md:gap-5">
                 {provider.catalog?.map((item) => (
                   <div
                     key={item.id}
-                    className="bg-white rounded-2xl sm:rounded-3xl overflow-hidden border border-slate-200/90 shadow-2xs hover:shadow-lg transition-all duration-300 flex flex-col justify-between group"
+                    className="bg-white rounded-xl sm:rounded-3xl overflow-hidden border border-slate-200/90 shadow-2xs hover:shadow-lg transition-all duration-300 flex flex-col justify-between group"
                   >
                     {/* Foto Jasa */}
                     <div>
@@ -338,40 +338,40 @@ export default function ProviderDetailPage() {
                           loading="lazy"
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                         />
-                        <div className="absolute top-2.5 left-2.5">
-                          <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold uppercase bg-black/60 text-white backdrop-blur-xs">
+                        <div className="absolute top-2 left-2 sm:top-2.5 sm:left-2.5">
+                          <span className="px-1.5 sm:px-2 py-0.5 rounded-md text-[9px] sm:text-[10px] font-extrabold uppercase bg-black/60 text-white backdrop-blur-xs">
                             {item.category}
                           </span>
                         </div>
                       </div>
 
                       {/* Info Jasa */}
-                      <div className="p-4 space-y-1.5">
-                        <h3 className="text-sm font-black text-slate-900 group-hover:text-[#1683FF] transition line-clamp-2 leading-snug">
+                      <div className="p-2.5 sm:p-4 space-y-1 sm:space-y-1.5">
+                        <h3 className="text-xs sm:text-sm font-black text-slate-900 group-hover:text-[#1683FF] transition line-clamp-2 leading-snug min-h-[32px] sm:min-h-0">
                           {item.title}
                         </h3>
-                        <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">
+                        <p className="hidden sm:block text-xs text-slate-500 line-clamp-2 leading-relaxed">
                           {item.desc}
                         </p>
                       </div>
                     </div>
 
                     {/* Harga & Tombol Pesan Jasa */}
-                    <div className="p-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                    <div className="p-2.5 sm:p-4 pt-2 sm:pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-2">
                       <div>
-                        <span className="text-[10px] text-slate-400 block font-medium">Tarif:</span>
-                        <div className="text-sm sm:text-base font-black text-[#1683FF]">
+                        <span className="text-[9px] sm:text-[10px] text-slate-400 block font-medium">Tarif:</span>
+                        <div className="text-xs sm:text-base font-black text-[#1683FF]">
                           {formatIDR(item.price)}
-                          <span className="text-[10px] font-normal text-slate-500 ml-0.5">{item.unit}</span>
+                          <span className="text-[9px] sm:text-[10px] font-normal text-slate-500 ml-0.5">{item.unit}</span>
                         </div>
                       </div>
 
                       <Link
                         href={`/jasa/${item.id}`}
-                        className="px-3.5 py-2 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs transition shadow-2xs cursor-pointer shrink-0 inline-flex items-center gap-1"
+                        className="w-full sm:w-auto justify-center px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-[11px] sm:text-xs transition shadow-2xs cursor-pointer shrink-0 inline-flex items-center gap-1"
                       >
-                        <span>Pesan Jasa</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
+                        <span>Pesan</span>
+                        <ChevronRight className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                       </Link>
                     </div>
                   </div>
@@ -402,12 +402,12 @@ export default function ProviderDetailPage() {
               </div>
 
               {/* Grid Foto */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 sm:gap-5">
                 {provider.portfolioPhotos.map((photo, idx) => (
                   <div
                     key={idx}
                     onClick={() => setSelectedPhoto(photo)}
-                    className="group bg-white rounded-2xl overflow-hidden border border-slate-200/80 shadow-2xs hover:shadow-md transition-all duration-300 cursor-pointer flex flex-col"
+                    className="group bg-white rounded-xl sm:rounded-2xl overflow-hidden border border-slate-200/80 shadow-2xs hover:shadow-md transition-all duration-300 cursor-pointer flex flex-col"
                   >
                     <div className="relative aspect-16/10 overflow-hidden bg-slate-900">
                       <img
@@ -416,26 +416,26 @@ export default function ProviderDetailPage() {
                         loading="lazy"
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                       />
-                      <div className="absolute top-3 left-3">
-                        <span className="px-2.5 py-0.5 rounded-md bg-black/60 backdrop-blur-md text-white text-[10px] font-bold">
+                      <div className="absolute top-2 left-2 sm:top-3 sm:left-3">
+                        <span className="px-1.5 sm:px-2.5 py-0.5 rounded-md bg-black/60 backdrop-blur-md text-white text-[9px] sm:text-[10px] font-bold">
                           {photo.category}
                         </span>
                       </div>
                     </div>
 
-                    <div className="p-4 flex-1 flex flex-col justify-between">
+                    <div className="p-2.5 sm:p-4 flex-1 flex flex-col justify-between">
                       <div>
-                        <h4 className="font-bold text-sm text-slate-900 group-hover:text-[#1683FF] transition">
+                        <h4 className="font-bold text-xs sm:text-sm text-slate-900 group-hover:text-[#1683FF] transition line-clamp-1 sm:line-clamp-2">
                           {photo.title}
                         </h4>
-                        <p className="text-xs text-slate-500 mt-1 line-clamp-2">
+                        <p className="hidden sm:block text-xs text-slate-500 mt-1 line-clamp-2">
                           {photo.description}
                         </p>
                       </div>
 
-                      <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-[#1683FF] font-bold">
-                        <span>Lihat Foto Penuh</span>
-                        <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+                      <div className="mt-2 sm:mt-3 pt-2 sm:pt-2.5 border-t border-slate-100 flex items-center justify-between text-[10px] sm:text-[11px] text-[#1683FF] font-bold">
+                        <span>Lihat Foto</span>
+                        <ChevronRight className="w-3 h-3 sm:w-3.5 sm:h-3.5 group-hover:translate-x-0.5 transition-transform" />
                       </div>
                     </div>
                   </div>
@@ -516,7 +516,7 @@ export default function ProviderDetailPage() {
                     </div>
 
                     <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
-                      "{rev.comment}"
+                      &ldquo;{rev.comment}&rdquo;
                     </p>
                   </div>
                 ))}
@@ -613,7 +613,7 @@ export default function ProviderDetailPage() {
                 Penyedia Jasa &amp; Helper Lainnya di {activeKabupaten}
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Spesialis dan tenaga bantuan terpercaya dengan jaminan Escrow.
+                Spesialis dan tenaga bantuan terpercaya dengan transaksi terverifikasi.
               </p>
             </div>
             <Link
