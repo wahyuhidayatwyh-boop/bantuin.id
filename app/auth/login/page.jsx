@@ -100,12 +100,12 @@ export default function LoginPage() {
       <div className="absolute inset-0 bg-slate-900/5 -z-10" />
 
       {/* Main Content Area */}
-      <div className="w-full max-w-7xl mx-auto flex-1 flex flex-col lg:flex-row items-start justify-between gap-8 py-2 sm:py-6">
+      <div className="w-full max-w-7xl mx-auto flex-1 flex flex-col lg:flex-row items-start justify-between gap-8 pt-6 sm:pt-12 lg:pt-16 pb-6">
         
         {/* ============================================================ */}
         {/* TOP-LEFT: LOGO & SHORT PERSUASIVE TEXT (CLEAN & SNUG TO LEFT)*/}
         {/* ============================================================ */}
-        <div className="space-y-3.5 max-w-sm sm:max-w-md pt-1 sm:pt-4 text-left">
+        <div className="space-y-3.5 max-w-sm sm:max-w-md pt-2 sm:pt-4 text-left">
           <Link href="/" className="inline-block">
             <Image
               src={logoImg}
@@ -143,7 +143,7 @@ export default function LoginPage() {
         {/* ============================================================ */}
         {/* RIGHT: CLEAN & ELEVATED LOGIN CARD                           */}
         {/* ============================================================ */}
-        <div className="w-full max-w-md mx-auto lg:ml-auto lg:mr-0">
+        <div className="w-full max-w-md mx-auto lg:ml-auto lg:mr-0 pt-0 sm:pt-2 lg:pt-4">
           <div className="bg-white/95 backdrop-blur-md py-7 sm:py-9 px-6 sm:px-8 shadow-[0_20px_50px_rgba(16,42,67,0.12)] border border-white/80 rounded-3xl space-y-5">
             
             <div>
