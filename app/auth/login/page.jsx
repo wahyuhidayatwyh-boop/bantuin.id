@@ -103,9 +103,9 @@ export default function LoginPage() {
       <div className="w-full max-w-7xl mx-auto flex-1 flex flex-col lg:flex-row items-start justify-between gap-8 py-2 sm:py-6">
         
         {/* ============================================================ */}
-        {/* TOP-LEFT: LOGO & SHORT PERSUASIVE TEXT (CLEAN & UNOBSTRUCTED) */}
+        {/* TOP-LEFT: LOGO & SHORT PERSUASIVE TEXT (CLEAN & SNUG TO LEFT)*/}
         {/* ============================================================ */}
-        <div className="space-y-3 max-w-md pt-1 sm:pt-4">
+        <div className="space-y-3.5 max-w-sm sm:max-w-md pt-1 sm:pt-4 text-left">
           <Link href="/" className="inline-block">
             <Image
               src={logoImg}
@@ -120,14 +120,14 @@ export default function LoginPage() {
             <span className="text-[#1683FF]">Urusan &amp; Kebutuhanmu</span>
           </h1>
 
-          <p className="text-xs sm:text-sm text-slate-600 font-medium leading-relaxed max-w-sm">
+          <p className="text-xs sm:text-sm text-slate-600 font-medium leading-relaxed">
             Bantuan tugas harian, jasa freelance terverifikasi, dan rental perlengkapan resmi dengan jaminan transaksi 100% aman.
           </p>
 
-          <div className="hidden sm:flex items-center gap-4 text-xs font-bold text-slate-700 pt-1">
+          <div className="flex flex-wrap items-center gap-3.5 text-xs font-bold text-slate-700 pt-1">
             <div className="flex items-center gap-1.5">
               <CheckCircle2 className="w-4 h-4 text-[#1683FF]" />
-              <span>Rekening Bersama</span>
+              <span>Sistem Pembayaran Aman</span>
             </div>
             <div className="flex items-center gap-1.5">
               <CheckCircle2 className="w-4 h-4 text-[#1683FF]" />
@@ -135,7 +135,7 @@ export default function LoginPage() {
             </div>
             <div className="flex items-center gap-1.5">
               <CheckCircle2 className="w-4 h-4 text-[#1683FF]" />
-              <span>Bebas Admin Awal</span>
+              <span>Bebas Biaya Awal</span>
             </div>
           </div>
         </div>

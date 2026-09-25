@@ -350,7 +350,7 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen relative flex flex-col justify-between p-4 sm:p-6 lg:p-10 overflow-x-hidden font-sans">
+    <div className="min-h-screen relative flex flex-col items-center justify-between p-4 sm:p-6 lg:p-8 overflow-x-hidden font-sans">
       {/* Background Image */}
       <Image
         src={bgLoginImg}
@@ -360,95 +360,62 @@ export default function RegisterPage() {
         className="object-cover object-center -z-10"
       />
       {/* Subtle overlay */}
-      <div className="absolute inset-0 bg-slate-900/5 -z-10" />
+      <div className="absolute inset-0 bg-slate-900/10 -z-10" />
 
-      {/* Main Content Area */}
-      <div className="w-full max-w-7xl mx-auto flex-1 flex flex-col lg:flex-row items-start justify-between gap-8 py-2 sm:py-6">
-        
-        {/* ============================================================ */}
-        {/* TOP-LEFT: LOGO & SHORT PERSUASIVE TEXT                       */}
-        {/* Sits at the top-left open space, leaving the photo of the    */}
-        {/* two people below 100% visible and unblocked                  */}
-        {/* ============================================================ */}
-        <div className="space-y-3 max-w-md pt-1 sm:pt-4">
-          <Link href="/" className="inline-block">
-            <Image
-              src={logoImg}
-              alt="Bantuin.id"
-              height={42}
-              className="h-9 sm:h-10 w-auto object-contain mix-blend-multiply"
-            />
-          </Link>
+      {/* Top Brand Logo Centered */}
+      <div className="w-full max-w-2xl mx-auto pt-2 pb-2 flex justify-center">
+        <Link href="/" className="inline-block">
+          <Image
+            src={logoImg}
+            alt="Bantuin.id"
+            height={44}
+            className="h-9 sm:h-11 w-auto object-contain mix-blend-multiply"
+          />
+        </Link>
+      </div>
 
-          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight leading-snug">
-            Mulai Peluang Nyata <br className="hidden sm:inline" />
-            <span className="text-[#1683FF]">Bersama Komunitas Bantuin</span>
-          </h1>
-
-          <p className="text-xs sm:text-sm text-slate-600 font-medium leading-relaxed max-w-sm">
-            Satu akun untuk cari bantuan tugas, tawarkan keahlian jasa, atau sewakan perlengkapan dengan sistem pembayaran resmi dan terverifikasi.
-          </p>
-
-          <div className="hidden sm:flex items-center gap-4 text-xs font-bold text-slate-700 pt-1">
-            <div className="flex items-center gap-1.5">
-              <CheckCircle2 className="w-4 h-4 text-[#1683FF]" />
-              <span>Bebas Biaya Registrasi</span>
+      {/* Centered Main Card */}
+      <div className="w-full max-w-2xl mx-auto my-auto">
+        <div className="bg-white/95 backdrop-blur-md rounded-3xl border border-white/80 p-5 sm:p-8 shadow-[0_20px_50px_rgba(16,42,67,0.12)]">
+          
+          {/* Header: Step Indicator & Login Link Inside Card */}
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-1 rounded-full bg-[#1683FF]/10 text-[#1683FF] text-[11px] font-extrabold uppercase tracking-wider">
+                Langkah {step} dari 4
+              </span>
+              <span className="text-xs font-semibold text-slate-500 hidden sm:inline">
+                • {
+                  step === 1 ? "Pilih Peran Akun" :
+                  step === 2 ? "Informasi Akun & Kontak" :
+                  step === 3 ? (
+                    formData.accountType === "provider" 
+                      ? "Domisili & Keahlian Jasa" 
+                      : formData.accountType === "mitra"
+                      ? "Domisili & Lokasi Outlet"
+                      : "Domisili & Wilayah"
+                  ) :
+                  "Konfirmasi & Ketentuan"
+                }
+              </span>
             </div>
-            <div className="flex items-center gap-1.5">
-              <CheckCircle2 className="w-4 h-4 text-[#1683FF]" />
-              <span>Mitra Terverifikasi</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <CheckCircle2 className="w-4 h-4 text-[#1683FF]" />
-              <span>Pembayaran Aman</span>
-            </div>
+            <Link
+              href="/auth/login"
+              className="text-xs font-bold text-slate-600 hover:text-[#1683FF] transition"
+            >
+              Sudah punya akun? <span className="text-[#1683FF] font-extrabold underline">Masuk</span>
+            </Link>
           </div>
-        </div>
 
-        {/* ============================================================ */}
-        {/* RIGHT: ONE UNIFIED, SLEEK MULTI-STEP CARD                    */}
-        {/* ============================================================ */}
-        <div className="w-full max-w-xl lg:max-w-2xl mx-auto lg:ml-auto lg:mr-0">
-          <div className="bg-white/95 backdrop-blur-md rounded-3xl border border-white/80 p-5 sm:p-8 shadow-[0_20px_50px_rgba(16,42,67,0.12)]">
-            
-            {/* Header: Step Indicator & Login Link Inside Card */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <span className="px-2.5 py-1 rounded-full bg-[#1683FF]/10 text-[#1683FF] text-[11px] font-extrabold uppercase tracking-wider">
-                  Langkah {step} dari 4
-                </span>
-                <span className="text-xs font-semibold text-slate-500 hidden sm:inline">
-                  • {
-                    step === 1 ? "Pilih Peran Akun" :
-                    step === 2 ? "Informasi Akun & Kontak" :
-                    step === 3 ? (
-                      formData.accountType === "provider" 
-                        ? "Domisili & Keahlian Jasa" 
-                        : formData.accountType === "mitra"
-                        ? "Domisili & Lokasi Outlet"
-                        : "Domisili & Wilayah"
-                    ) :
-                    "Konfirmasi & Ketentuan"
-                  }
-                </span>
-              </div>
-              <Link
-                href="/auth/login"
-                className="text-xs font-bold text-slate-600 hover:text-[#1683FF] transition"
-              >
-                Sudah punya akun? <span className="text-[#1683FF] font-extrabold underline">Masuk</span>
-              </Link>
-            </div>
+          {/* Slim, Integrated Progress Bar */}
+          <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mt-3 mb-6">
+            <div 
+              className="h-full bg-[#1683FF] transition-all duration-300 rounded-full"
+              style={{ width: `${step * 25}%` }}
+            />
+          </div>
 
-            {/* Slim, Integrated Progress Bar */}
-            <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mt-3 mb-6">
-              <div 
-                className="h-full bg-[#1683FF] transition-all duration-300 rounded-full"
-                style={{ width: `${step * 25}%` }}
-              />
-            </div>
-
-            <form onSubmit={handleNext} className="space-y-4 sm:space-y-5">
+          <form onSubmit={handleNext} className="space-y-4 sm:space-y-5">
             
             {/* ============================================================ */}
             {/* STEP 1: LANGSUNG 3 CARD PILIHAN PERAN (BERSIH & KONSISTEN)    */}
@@ -1242,13 +1209,11 @@ export default function RegisterPage() {
             </div>
 
             </form>
-          </div>
         </div>
-
       </div>
 
       {/* Subtle Bottom Footer */}
-      <div className="w-full max-w-7xl mx-auto text-left text-[11px] text-slate-500 font-medium pt-4 pointer-events-none">
+      <div className="w-full max-w-2xl mx-auto text-center text-[11px] text-slate-600 font-medium py-3 drop-shadow-2xs">
         &copy; {new Date().getFullYear()} Bantuin.id &middot; Platform Bantuan, Jasa &amp; Sewa Komunitas
       </div>
     </div>
