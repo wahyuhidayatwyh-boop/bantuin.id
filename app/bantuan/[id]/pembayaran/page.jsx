@@ -185,22 +185,22 @@ function PembayaranContent() {
 
       {/* Breadcrumb / Top Bar */}
       <div className="bg-white border-b border-slate-200/80 shadow-2xs">
-        <div className="max-w-[1400px] mx-auto px-4 sm:px-8 py-3 flex items-center justify-between">
+        <div className="max-w-[1400px] mx-auto px-4 sm:px-8 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-2.5">
           <Link
             href={`/bantuan/${request.id}`}
-            className="inline-flex items-center gap-2 text-xs sm:text-sm font-bold text-slate-600 hover:text-[#1683FF] transition cursor-pointer"
+            className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-slate-600 hover:text-[#1683FF] transition cursor-pointer shrink-0"
           >
             <ArrowLeft className="w-4 h-4" />
             <span>Kembali ke Detail Bantuan</span>
           </Link>
 
-          <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#1683FF] bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
-              <Lock className="w-3.5 h-3.5 text-[#1683FF]" />
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <span className="inline-flex items-center gap-1.5 text-[11px] sm:text-xs font-semibold text-[#1683FF] bg-blue-50 px-2.5 sm:px-3 py-1 rounded-full border border-blue-100">
+              <Lock className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
               <span>Sistem Pembayaran Terverifikasi</span>
             </span>
-            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50/70 border border-blue-100 text-slate-700 text-xs font-semibold">
-              <Clock className="w-3.5 h-3.5 text-[#1683FF]" />
+            <div className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full bg-blue-50/70 border border-blue-100 text-slate-700 text-[11px] sm:text-xs font-semibold shrink-0">
+              <Clock className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
               <span>Selesaikan dalam:</span>
               <span className="font-mono font-black text-[#1683FF]">{formatTimer(timeLeft)}</span>
             </div>
@@ -209,30 +209,30 @@ function PembayaranContent() {
       </div>
 
       {/* Main Container - Expansive, clean, and fills space naturally */}
-      <main className="flex-1 max-w-[1400px] w-full mx-auto px-4 sm:px-8 py-5 sm:py-7">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
+      <main className="flex-1 max-w-[1400px] w-full mx-auto px-4 sm:px-8 py-4 sm:py-7">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 lg:gap-8 items-start">
           
           {/* Left Column: Metode Pembayaran (7 Cols) */}
-          <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200/90 p-6 sm:p-7 shadow-xs flex flex-col justify-between space-y-5">
+          <div className="lg:col-span-7 bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 p-4 sm:p-7 shadow-xs flex flex-col justify-between space-y-4 sm:space-y-5 min-w-0">
             <div>
               {/* Header Title */}
-              <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
-                <div>
-                  <h1 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
+                <div className="min-w-0">
+                  <h1 className="text-base sm:text-xl font-black text-slate-900 tracking-tight">
                     Pilih Metode Pembayaran
                   </h1>
                   <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
                     Pembayaran terverifikasi resmi via Payment Gateway
                   </p>
                 </div>
-                <span className="text-xs text-[#1683FF] font-bold flex items-center gap-1.5 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-[#1683FF]" />
+                <span className="text-[11px] sm:text-xs text-[#1683FF] font-bold flex items-center gap-1.5 bg-blue-50 px-2.5 sm:px-3 py-1 rounded-full border border-blue-100 shrink-0">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
                   Verifikasi Otomatis
                 </span>
               </div>
 
-              {/* Payment Channel Selector Grid (Senada & Unified Logo Containers) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mt-4">
+              {/* Payment Channel Selector List - Consistent Visual Structure */}
+              <div className="flex flex-col gap-2 mt-3 sm:mt-4">
                 {paymentChannels.map((channel) => {
                   const isSelected = selectedMethod === channel.id;
                   return (
@@ -240,37 +240,51 @@ function PembayaranContent() {
                       key={channel.id}
                       type="button"
                       onClick={() => setSelectedMethod(channel.id)}
-                      className={`p-3.5 rounded-2xl border text-left transition flex items-center gap-3.5 cursor-pointer relative ${
+                      className={`w-full p-3 sm:p-3.5 rounded-2xl border text-left transition flex items-center gap-3 cursor-pointer relative ${
                         isSelected
                           ? "border-[#1683FF] bg-blue-50/40 shadow-xs ring-1.5 ring-[#1683FF]"
                           : "border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50/80"
                       }`}
                     >
-                      <div className="w-16 h-10 px-2 rounded-xl border border-slate-200/80 bg-white flex items-center justify-center shrink-0 overflow-hidden shadow-2xs">
+                      {/* [Logo] */}
+                      <div className="w-14 sm:w-16 h-10 px-2 rounded-xl border border-slate-200/80 bg-white flex items-center justify-center shrink-0 overflow-hidden shadow-2xs">
                         {channel.logo}
                       </div>
+
+                      {/* Nama Metode & Informasi/Subtext */}
                       <div className="min-w-0 flex-1">
-                        <div className="text-xs sm:text-sm font-bold text-slate-900 truncate leading-snug">
-                          {channel.name}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs sm:text-sm font-bold text-slate-900 leading-snug">
+                            {channel.name}
+                          </span>
+                          {channel.badge && (
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border hidden xs:inline ${channel.badgeColor}`}>
+                              {channel.badge}
+                            </span>
+                          )}
                         </div>
-                        <div className="text-[11px] sm:text-xs text-slate-500 truncate mt-0.5">
-                          {channel.feeText}
+                        <div className="text-[11px] sm:text-xs text-slate-500 leading-snug mt-0.5 break-words">
+                          {channel.description ? `${channel.description} • ${channel.feeText}` : channel.feeText}
                         </div>
                       </div>
-                      {isSelected ? (
-                        <div className="w-5 h-5 rounded-full bg-[#1683FF] text-white flex items-center justify-center shrink-0 shadow-2xs">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                        </div>
-                      ) : (
-                        <div className="w-4 h-4 rounded-full border-2 border-slate-300 shrink-0" />
-                      )}
+
+                      {/* [Radio/Check] */}
+                      <div className="shrink-0 pl-1">
+                        {isSelected ? (
+                          <div className="w-5 h-5 rounded-full bg-[#1683FF] text-white flex items-center justify-center shadow-2xs">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          </div>
+                        ) : (
+                          <div className="w-4 h-4 sm:w-5 sm:h-5 rounded-full border-2 border-slate-300" />
+                        )}
+                      </div>
                     </button>
                   );
                 })}
               </div>
 
               {/* Active Channel Action Area */}
-              <div className="mt-4 pt-4 border-t border-slate-100">
+              <div className="mt-3.5 sm:mt-4 pt-3.5 sm:pt-4 border-t border-slate-100">
                 {selectedMethod === "qris" && (
                   <QrisCodeCard
                     totalAmount={totalAmount}
@@ -281,36 +295,36 @@ function PembayaranContent() {
                 )}
 
                 {selectedMethod.endsWith("_va") && (
-                  <div className="p-5 bg-slate-50/80 rounded-2xl border border-slate-200/80 space-y-3.5">
-                    <div className="flex items-center justify-between text-xs sm:text-sm">
-                      <span className="text-slate-700 font-semibold">
+                  <div className="p-3.5 sm:p-5 bg-slate-50/80 rounded-2xl border border-slate-200/80 space-y-3 sm:space-y-3.5">
+                    <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs sm:text-sm">
+                      <span className="text-slate-700 font-semibold min-w-0">
                         Nomor Virtual Account {selectedMethod.split("_")[0].toUpperCase()}:
                       </span>
-                      <span className="text-xs font-bold text-[#1683FF] bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100">
+                      <span className="text-[10px] sm:text-xs font-bold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100 shrink-0">
                         Otomatis Terverifikasi
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between gap-3 p-3.5 sm:p-4 bg-white rounded-xl border border-slate-200 shadow-2xs">
-                      <span className="font-mono text-lg sm:text-2xl font-black text-slate-900 tracking-wider select-all">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 p-3 sm:p-4 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                      <span className="font-mono text-base sm:text-2xl font-black text-slate-900 tracking-wider select-all break-all text-center sm:text-left">
                         {vaNumbers[selectedMethod]}
                       </span>
                       <button
                         type="button"
                         onClick={() => handleCopy(vaNumbers[selectedMethod], "va")}
-                        className="px-4 py-2 bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs sm:text-sm font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
+                        className="w-full sm:w-auto px-4 py-2 bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs sm:text-sm font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
                       >
                         <Copy className="w-4 h-4" />
                         <span>{isCopiedVA ? "Tersalin" : "Salin No VA"}</span>
                       </button>
                     </div>
 
-                    <div className="flex items-center justify-between text-xs text-slate-500 pt-1">
-                      <span>Total Tagihan: <strong className="text-slate-900 font-bold">{formatIDR(totalAmount)}</strong></span>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs text-slate-500 pt-1">
+                      <span className="break-words">Total Tagihan: <strong className="text-slate-900 font-bold">{formatIDR(totalAmount)}</strong></span>
                       <button
                         type="button"
                         onClick={() => handleCopy(totalAmount, "nominal")}
-                        className="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-[#1683FF] border border-blue-100 text-xs font-bold rounded-md transition flex items-center gap-1 cursor-pointer"
+                        className="self-start sm:self-auto px-2.5 sm:px-3 py-1 bg-blue-50 hover:bg-blue-100 text-[#1683FF] border border-blue-100 text-xs font-bold rounded-md transition flex items-center gap-1 cursor-pointer"
                       >
                         <Copy className="w-3.5 h-3.5" />
                         <span>{isCopiedNominal ? "Tersalin" : "Salin Nominal"}</span>
@@ -321,76 +335,76 @@ function PembayaranContent() {
               </div>
             </div>
 
-            <div className="pt-3 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-500">
+            <div className="pt-3 border-t border-slate-100 flex items-center gap-2 text-[11px] sm:text-xs text-slate-500">
               <ShieldCheck className="w-4 h-4 text-[#1683FF] shrink-0" />
-              <span>Transaksi dilindungi Sistem Pembayaran Resmi &amp; Terverifikasi Bantuin.</span>
+              <span className="min-w-0 break-words">Transaksi dilindungi Sistem Pembayaran Resmi &amp; Terverifikasi Bantuin.</span>
             </div>
           </div>
 
           {/* Right Column: Rincian Penugasan & Tagihan (5 Cols) */}
-          <div className="lg:col-span-5 bg-white rounded-3xl border border-slate-200/90 p-6 sm:p-7 shadow-xs flex flex-col justify-between space-y-5">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div className="lg:col-span-5 bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 p-4 sm:p-7 shadow-xs flex flex-col justify-between space-y-4 sm:space-y-5 min-w-0">
+            <div className="space-y-3.5 sm:space-y-4">
+              <div className="flex items-center justify-between gap-2 pb-2.5 sm:pb-3 border-b border-slate-100">
                 <h2 className="text-base sm:text-lg font-extrabold text-slate-900">
                   Rincian Penugasan
                 </h2>
-                <span className="text-xs font-bold text-[#1683FF] bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100">
+                <span className="text-[11px] sm:text-xs font-bold text-[#1683FF] bg-blue-50 px-2.5 py-0.5 sm:py-1 rounded-full border border-blue-100 shrink-0">
                   100% Terverifikasi
                 </span>
               </div>
 
               {/* Helper & Task Card */}
-              <div className="p-3.5 rounded-2xl bg-slate-50/70 border border-slate-200/80 flex items-center gap-3.5">
+              <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-50/70 border border-slate-200/80 flex items-start sm:items-center gap-3">
                 <img
                   src={targetOffer.helperAvatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80"}
                   alt={targetOffer.helperName}
-                  className="w-14 h-14 rounded-full object-cover shrink-0 border border-slate-200"
+                  className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover shrink-0 border border-slate-200"
                 />
                 <div className="min-w-0 flex-1">
-                  <h3 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                  <h3 className="text-xs sm:text-sm font-bold text-slate-900 leading-snug break-words">
                     {targetOffer.helperName}
                   </h3>
-                  <div className="text-xs text-slate-500 truncate mt-0.5">
+                  <div className="text-xs text-slate-500 leading-snug break-words mt-0.5">
                     Tugas: <strong className="text-slate-700">{request.title}</strong>
                   </div>
                 </div>
               </div>
 
               {/* Clean Price Breakdown */}
-              <div className="space-y-2.5 text-xs sm:text-sm pt-1">
-                <div className="flex items-center justify-between text-slate-600">
-                  <span>Imbalan Jasa Helper</span>
-                  <span className="font-semibold text-slate-900">{formatIDR(helperProposedPrice)}</span>
+              <div className="space-y-2 text-xs sm:text-sm pt-1">
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 text-slate-600">
+                  <span className="min-w-0 break-words">Imbalan Jasa Helper</span>
+                  <span className="font-semibold text-slate-900 text-right whitespace-nowrap">{formatIDR(helperProposedPrice)}</span>
                 </div>
 
-                <div className="flex items-center justify-between text-slate-500 text-xs">
-                  <span>Potongan Platform Bantuin (8%)</span>
-                  <span className="font-medium text-slate-700">-{formatIDR(platformFee)} (dari imbalan helper)</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 text-slate-500 text-xs">
+                  <span className="min-w-0 break-words">Potongan Platform Bantuin (8%)</span>
+                  <span className="font-medium text-slate-700 text-right max-w-[150px] sm:max-w-none">-{formatIDR(platformFee)} (dari imbalan helper)</span>
                 </div>
 
-                <div className="flex items-center justify-between text-slate-500 text-xs">
-                  <span>Biaya Transaksi Terverifikasi</span>
-                  <span className="font-semibold text-emerald-600">Gratis (Ditanggung Platform)</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 text-slate-500 text-xs">
+                  <span className="min-w-0 break-words">Biaya Transaksi Terverifikasi</span>
+                  <span className="font-semibold text-emerald-600 text-right max-w-[150px] sm:max-w-none">Gratis (Ditanggung Platform)</span>
                 </div>
 
                 {/* Baris diskon voucher */}
                 {discountAmount > 0 && (
-                  <div className="flex items-center justify-between text-xs font-semibold text-emerald-600">
-                    <span>Diskon Voucher ({appliedVoucher?.code})</span>
-                    <span>-{formatIDR(discountAmount)}</span>
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 text-xs font-semibold text-emerald-600">
+                    <span className="min-w-0 break-words">Diskon Voucher ({appliedVoucher?.code})</span>
+                    <span className="text-right whitespace-nowrap">-{formatIDR(discountAmount)}</span>
                   </div>
                 )}
 
-                <div className="p-4 rounded-2xl bg-blue-50/50 border border-blue-100 flex items-center justify-between mt-3">
-                  <div>
+                <div className="p-3.5 sm:p-4 rounded-2xl bg-blue-50/50 border border-blue-100 flex items-center justify-between gap-3 mt-3">
+                  <div className="min-w-0">
                     <span className="font-bold text-xs sm:text-sm text-slate-900 block">Total Tagihan</span>
                     <span className="text-[11px] text-slate-500">Diproses via Payment Gateway Resmi</span>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right shrink-0">
                     {discountAmount > 0 && (
                       <span className="text-[11px] text-slate-400 line-through block">{formatIDR(totalAmount)}</span>
                     )}
-                    <span className="font-black text-xl sm:text-2xl text-[#1683FF]">{formatIDR(finalAmount)}</span>
+                    <span className="font-black text-xl sm:text-2xl text-[#1683FF] whitespace-nowrap">{formatIDR(finalAmount)}</span>
                   </div>
                 </div>
               </div>
@@ -405,23 +419,23 @@ function PembayaranContent() {
               />
 
               {/* Trust Highlight Bar (Senada with #1683FF accents) */}
-              <div className="p-2.5 sm:p-3 rounded-xl bg-slate-50/80 border border-slate-200/80 flex items-center justify-around text-xs text-slate-700 font-medium text-center">
+              <div className="p-2.5 sm:p-3 rounded-xl bg-slate-50/80 border border-slate-200/80 flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 text-[11px] sm:text-xs text-slate-700 font-medium text-center">
                 <span className="flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5 text-[#1683FF]" /> Pembayaran Terverifikasi
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#1683FF] shrink-0" /> Pembayaran Terverifikasi
                 </span>
                 <span className="text-slate-300">•</span>
                 <span className="flex items-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5 text-[#1683FF]" /> Dana Terkunci
+                  <Lock className="w-3.5 h-3.5 text-[#1683FF] shrink-0" /> Dana Terkunci
                 </span>
                 <span className="text-slate-300">•</span>
                 <span className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-[#1683FF]" /> Cair Usai Beres
+                  <CheckCircle2 className="w-3.5 h-3.5 text-[#1683FF] shrink-0" /> Cair Usai Beres
                 </span>
               </div>
             </div>
 
             {/* Action Button */}
-            <div className="space-y-2.5 pt-2">
+            <div className="space-y-2.5 pt-1 sm:pt-2">
               {isSuccess && (
                 <div className="p-3 bg-blue-50 border border-blue-200 text-blue-900 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 animate-in fade-in duration-200">
                   <CheckCircle2 className="w-4 h-4 text-[#1683FF] shrink-0" />
@@ -433,7 +447,7 @@ function PembayaranContent() {
                 type="button"
                 onClick={handleConfirmPayment}
                 disabled={isProcessing || isSuccess}
-                className="w-full py-3.5 sm:py-4 bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-sm sm:text-base rounded-2xl shadow-sm hover:shadow-md transition active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                className="w-full py-3.5 sm:py-4 bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-base rounded-xl sm:rounded-2xl shadow-sm hover:shadow-md transition active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
               >
                 {isProcessing ? (
                   <>

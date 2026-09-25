@@ -70,26 +70,26 @@ export default function ExploreCategories() {
       </h2>
 
       {/* Row of 4 Primary Cards + 1 Dedicated "Lainnya..." Card */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5 sm:gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-4">
         {primaryCategories.map((cat) => {
           const Icon = cat.icon;
           return (
             <Link
               key={cat.name}
               href={cat.href}
-              className="group relative rounded-2xl bg-gradient-to-b from-white/95 via-[#F6FAFF]/90 to-[#EBF4FD]/80 p-4 sm:p-5 border border-white/90 shadow-[0_6px_20px_rgba(180,205,235,0.28),inset_0_1px_1px_rgba(255,255,255,1)] hover:shadow-[0_12px_28px_rgba(22,131,255,0.18)] hover:-translate-y-1 transition-all duration-200 flex flex-col items-center justify-center text-center backdrop-blur-md"
+              className="group relative rounded-2xl bg-gradient-to-b from-white/95 via-[#F6FAFF]/90 to-[#EBF4FD]/80 p-3 sm:p-5 border border-white/90 shadow-[0_6px_20px_rgba(180,205,235,0.28),inset_0_1px_1px_rgba(255,255,255,1)] hover:shadow-[0_12px_28px_rgba(22,131,255,0.18)] hover:-translate-y-1 transition-all duration-200 flex flex-col items-center justify-center text-center backdrop-blur-md min-w-0 overflow-hidden"
             >
               {/* 3D Convex Dome */}
-              <div className="relative w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-gradient-to-b from-white via-[#F0F6FD] to-[#DCEAF9] shadow-[0_4px_12px_rgba(160,195,230,0.4),inset_0_2px_4px_rgba(255,255,255,0.95),inset_0_-2px_4px_rgba(180,210,240,0.35)] border border-white/80 flex items-center justify-center mb-2.5 group-hover:scale-105 transition-transform duration-200">
+              <div className="relative w-11 h-11 sm:w-14 sm:h-14 rounded-full bg-gradient-to-b from-white via-[#F0F6FD] to-[#DCEAF9] shadow-[0_4px_12px_rgba(160,195,230,0.4),inset_0_2px_4px_rgba(255,255,255,0.95),inset_0_-2px_4px_rgba(180,210,240,0.35)] border border-white/80 flex items-center justify-center mb-2 group-hover:scale-105 transition-transform duration-200 shrink-0">
                 <div className="absolute top-1 left-1/2 -translate-x-1/2 w-6 sm:w-7 h-2 bg-gradient-to-b from-white to-transparent rounded-full opacity-80 pointer-events-none" />
                 <Icon className="w-5 h-5 sm:w-6 sm:h-6 text-slate-700 group-hover:text-[#1683FF] transition-colors stroke-[1.75]" />
               </div>
 
-              <h3 className="font-bold text-xs sm:text-sm text-slate-900 tracking-tight group-hover:text-[#1683FF] transition mb-0.5">
+              <h3 className="font-bold text-[11px] sm:text-sm text-slate-900 tracking-tight group-hover:text-[#1683FF] transition mb-0.5 truncate w-full px-1">
                 {cat.name}
               </h3>
 
-              <p className="text-[10px] sm:text-[11px] text-slate-400 font-medium">
+              <p className="text-[10px] sm:text-[11px] text-slate-400 font-medium truncate w-full px-1">
                 {cat.desc}
               </p>
             </Link>
@@ -99,14 +99,14 @@ export default function ExploreCategories() {
         {/* 5th Card: Dedicated "Lainnya..." 3D Glass Card */}
         <button
           onClick={() => setIsMoreOpen(!isMoreOpen)}
-          className={`group relative rounded-2xl p-4 sm:p-5 border transition-all duration-200 flex flex-col items-center justify-center text-center backdrop-blur-md ${
+          className={`col-span-2 sm:col-span-1 group relative rounded-2xl p-3 sm:p-5 border transition-all duration-200 flex flex-col items-center justify-center text-center backdrop-blur-md min-w-0 overflow-hidden cursor-pointer ${
             isMoreOpen
               ? "bg-white border-[#1683FF] shadow-[0_12px_28px_rgba(22,131,255,0.2),inset_0_1px_2px_rgba(255,255,255,1)] ring-2 ring-[#1683FF]/30 -translate-y-1"
               : "bg-gradient-to-b from-white/95 via-[#F6FAFF]/90 to-[#EBF4FD]/80 border-white/90 shadow-[0_6px_20px_rgba(180,205,235,0.28),inset_0_1px_1px_rgba(255,255,255,1)] hover:shadow-[0_12px_28px_rgba(22,131,255,0.18)] hover:-translate-y-1"
           }`}
         >
           {/* 3D Convex Dome */}
-          <div className={`relative w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center mb-2.5 transition-transform group-hover:scale-105 ${
+          <div className={`relative w-11 h-11 sm:w-14 sm:h-14 rounded-full flex items-center justify-center mb-2 transition-transform group-hover:scale-105 shrink-0 ${
             isMoreOpen
               ? "bg-gradient-to-b from-[#1683FF] to-[#0F6FE5] text-white shadow-[0_4px_12px_rgba(22,131,255,0.4),inset_0_2px_4px_rgba(255,255,255,0.6)]"
               : "bg-gradient-to-b from-white via-[#F0F6FD] to-[#DCEAF9] text-slate-700 shadow-[0_4px_12px_rgba(160,195,230,0.4),inset_0_2px_4px_rgba(255,255,255,0.95)] border border-white/80"
@@ -115,14 +115,14 @@ export default function ExploreCategories() {
             <MoreHorizontal className={`w-5 h-5 sm:w-6 sm:h-6 ${isMoreOpen ? "text-white" : "text-slate-700 group-hover:text-[#1683FF]"} stroke-[2]`} />
           </div>
 
-          <h3 className={`font-bold text-xs sm:text-sm tracking-tight mb-0.5 flex items-center gap-1 ${
+          <h3 className={`font-bold text-xs sm:text-sm tracking-tight mb-0.5 flex items-center justify-center gap-1 truncate w-full px-1 ${
             isMoreOpen ? "text-[#1683FF]" : "text-slate-900 group-hover:text-[#1683FF]"
           }`}>
             <span>Lainnya...</span>
-            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isMoreOpen ? "rotate-180" : ""}`} />
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform shrink-0 ${isMoreOpen ? "rotate-180" : ""}`} />
           </h3>
 
-          <p className="text-[10px] sm:text-[11px] text-slate-400 font-medium">
+          <p className="text-[10px] sm:text-[11px] text-slate-400 font-medium truncate w-full px-1">
             +6 Kategori Layanan
           </p>
         </button>
@@ -130,7 +130,7 @@ export default function ExploreCategories() {
 
       {/* Popover Dropdown for Homepage "Lainnya" */}
       {isMoreOpen && (
-        <div className="absolute right-4 sm:right-8 top-full mt-2 w-full max-w-sm sm:max-w-md bg-white/95 backdrop-blur-2xl rounded-3xl border border-slate-200 shadow-[0_24px_60px_rgba(0,0,0,0.18)] p-4 z-40 animate-in fade-in zoom-in-95 duration-150">
+        <div className="absolute left-4 right-4 sm:left-auto sm:right-8 top-full mt-2 w-auto sm:w-full max-w-sm sm:max-w-md bg-white/95 backdrop-blur-2xl rounded-3xl border border-slate-200 shadow-[0_24px_60px_rgba(0,0,0,0.18)] p-4 z-40 animate-in fade-in zoom-in-95 duration-150">
           <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 mb-2">
             <span className="text-xs font-bold text-slate-900">Pilih Kategori Lainnya</span>
             <button

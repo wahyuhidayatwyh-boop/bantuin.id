@@ -116,111 +116,107 @@ function getCategoryStyle(cat) {
 // ─── Activity Card ────────────────────────────────────────────────────────────
 function ActivityCard({ item }) {
   return (
-    <div className="bg-white border border-[#DCEAF7] hover:border-[#1683FF]/50 rounded-2xl transition-all duration-200 shadow-sm hover:shadow-md group overflow-hidden">
-      <div className="flex flex-col sm:flex-row">
+    <div className="bg-white border border-[#DCEAF7] hover:border-[#1683FF]/50 rounded-xl sm:rounded-2xl transition-all duration-200 shadow-2xs hover:shadow-md group overflow-hidden flex flex-col sm:flex-row min-w-0">
+      {/* Thumbnail */}
+      <div className="relative w-full sm:w-44 aspect-[4/3] sm:aspect-auto sm:h-auto shrink-0 bg-slate-100 overflow-hidden">
+        <img
+          src={item.image}
+          alt={item.requestTitle || "Foto transaksi"}
+          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+        />
+        {/* Kategori overlay on photo */}
+        <span
+          className={`absolute top-2 left-2 text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-md border shadow-2xs backdrop-blur-xs ${getCategoryStyle(item.categoryPill)}`}
+        >
+          {item.categoryPill}
+        </span>
+      </div>
 
-        {/* Thumbnail */}
-        <div className="relative sm:w-44 h-36 sm:h-auto shrink-0">
-          <img
-            src={item.image}
-            alt={item.requestTitle}
-            className="w-full h-full object-cover"
-          />
-          {/* Kategori overlay */}
-          <span
-            className={`absolute top-2.5 left-2.5 text-[10px] font-bold px-2 py-0.5 rounded-md border ${getCategoryStyle(item.categoryPill)}`}
-          >
-            {item.categoryPill}
-          </span>
-        </div>
+      {/* Content */}
+      <div className="p-2.5 sm:p-5 flex flex-col justify-between flex-1 gap-1.5 sm:gap-2.5 min-w-0">
+        <div>
+          {/* Title + Status */}
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-1 sm:gap-3 mb-1 min-w-0">
+            <h3 className="font-bold text-xs sm:text-[15px] text-[#102A43] leading-snug group-hover:text-[#1683FF] transition line-clamp-2 min-h-[30px] sm:min-h-0 break-words flex-1">
+              {item.requestTitle || item.rentalDetails?.unitName || "Transaksi"}
+            </h3>
 
-        {/* Content */}
-        <div className="flex-1 p-4 sm:p-5 flex flex-col justify-between gap-3 min-w-0">
-
-          {/* Top row: title + status */}
-          <div>
-            <div className="flex items-start justify-between gap-3 mb-1.5">
-              <h3 className="font-bold text-sm sm:text-[15px] text-[#102A43] leading-snug group-hover:text-[#1683FF] transition line-clamp-2">
-                {item.requestTitle || item.rentalDetails?.unitName || "Transaksi"}
-              </h3>
-
+            {/* Status badge */}
+            <div className="sm:self-auto shrink-0 my-0.5 sm:my-0">
               <span
-                className={`inline-flex items-center gap-1.5 text-[10px] sm:text-[11px] font-bold px-2.5 py-1 rounded-full border shrink-0 ${item.statusMeta.color}`}
+                className={`inline-flex items-center gap-1 sm:gap-1.5 text-[9px] sm:text-[11px] font-bold px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-full border max-w-full truncate ${item.statusMeta.color}`}
               >
-                <span className={`w-1.5 h-1.5 rounded-full ${item.statusMeta.dot}`} />
-                {item.statusMeta.label}
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${item.statusMeta.dot}`} />
+                <span className="truncate">{item.statusMeta.label}</span>
               </span>
             </div>
+          </div>
 
-            {/* Meta info row */}
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[#61758A]">
-              {item.partner?.name && (
-                <span className="flex items-center gap-1">
-                  <User className="w-3 h-3 shrink-0" />
-                  <span className="font-semibold text-[#102A43]">{item.partner.name}</span>
+          {/* Primary date/partner info */}
+          <div className="text-[10px] sm:text-[11px] text-[#61758A] mt-1 space-y-1">
+            {item.isRental && item.rentalDetails && (
+              <div className="flex items-center gap-1 truncate">
+                <CalendarDays className="w-3 h-3 shrink-0 text-[#1683FF]" />
+                <span className="sm:hidden font-medium text-[#102A43] truncate">
+                  {item.rentalDetails.startDate}
                 </span>
-              )}
-              {item.isRental && item.rentalDetails && (
-                <span className="flex items-center gap-1">
-                  <CalendarDays className="w-3 h-3 shrink-0" />
-                  <span>{item.rentalDetails.startDate} – {item.rentalDetails.endDate}</span>
-                  <span className="text-[#DCEAF7]">·</span>
-                  <span className="font-semibold text-[#1683FF]">{item.rentalDetails.durationDays} hari</span>
+                <span className="hidden sm:inline truncate">
+                  {item.rentalDetails.startDate} – {item.rentalDetails.endDate}
                 </span>
-              )}
-              {item.isBantuan && item.pickupPoint && (
-                <span className="flex items-center gap-1 max-w-[200px]">
-                  <MapPin className="w-3 h-3 shrink-0" />
-                  <span className="truncate">{item.pickupPoint}</span>
+                <span className="text-[#DCEAF7]">·</span>
+                <span className="font-bold text-[#1683FF] shrink-0">
+                  {item.rentalDetails.durationDays} hari
                 </span>
-              )}
-            </div>
+              </div>
+            )}
 
-            {/* Payment badge */}
-            <div className="flex items-center gap-1.5 text-[11px] text-[#1683FF] mt-2">
+            {item.isBantuan && (
+              <div className="flex items-center gap-1 truncate">
+                <MapPin className="w-3 h-3 shrink-0 text-[#1683FF]" />
+                <span className="truncate">{item.pickupPoint || "Banyumas"}</span>
+              </div>
+            )}
+
+            {item.partner?.name && (
+              <div className="flex items-center gap-1 truncate">
+                <User className="w-3 h-3 shrink-0 text-[#1683FF]" />
+                <span className="font-semibold text-[#102A43] truncate">
+                  {item.partner.name}
+                </span>
+              </div>
+            )}
+
+            {/* Desktop-only payment guarantee */}
+            <div className="hidden sm:flex items-center gap-1.5 text-[11px] text-[#1683FF] pt-1">
               <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
               <span className="font-medium">Pembayaran Terverifikasi Resmi</span>
             </div>
           </div>
+        </div>
 
-          {/* Bottom row: price + CTA */}
-          <div className="flex items-center justify-between gap-3 pt-3 border-t border-[#DCEAF7]">
-            <div>
-              <div className="text-[10px] text-[#61758A] font-semibold uppercase tracking-wide flex items-center gap-1">
-                <Banknote className="w-3 h-3" />
-                Total Pembayaran
-              </div>
-              <div className="font-black text-base text-[#1683FF] mt-0.5 leading-none">
-                {formatIDR(item.lockedAmount || 0)}
-              </div>
-              {item.isRental && item.depositAmount > 0 && (
-                <div className="text-[10px] text-[#61758A] mt-0.5">
-                  incl. Deposit {formatIDR(item.depositAmount)}
-                </div>
-              )}
+        {/* Bottom row: Price + CTA */}
+        <div className="pt-2 border-t border-[#DCEAF7] flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-2.5">
+          <div className="min-w-0">
+            <div className="text-[8px] sm:text-[10px] text-[#61758A] font-semibold uppercase tracking-wide flex items-center gap-1">
+              <Banknote className="w-3 h-3 hidden sm:inline" />
+              <span>Total</span>
             </div>
-
-            <Link
-              href={`/chat?room=${item.id}`}
-              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] active:scale-95 text-white text-xs font-bold transition shadow-sm shrink-0"
-            >
-              <MessageSquare className="w-3.5 h-3.5" />
-              <span>{item.isCompleted ? "Lihat Chat" : "Chat & Lacak"}</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </Link>
+            <div className="font-black text-xs sm:text-base text-[#1683FF] leading-tight truncate">
+              {formatIDR(item.lockedAmount || 0)}
+            </div>
           </div>
+
+          <Link
+            href={`/chat?room=${item.id}`}
+            className="w-full sm:w-auto flex items-center justify-center gap-1 sm:gap-1.5 px-2.5 sm:px-4 py-1.5 sm:py-2.5 rounded-lg sm:rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] active:scale-95 text-white text-[11px] sm:text-xs font-bold transition shadow-2xs shrink-0"
+          >
+            <MessageSquare className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+            <span>Chat</span>
+            <span className="hidden sm:inline">{item.isCompleted ? " Selesai" : " & Lacak"}</span>
+            <ChevronRight className="w-3.5 h-3.5 hidden sm:inline" />
+          </Link>
         </div>
       </div>
-    </div>
-  );
-}
-
-// ─── Summary Stats Bar ────────────────────────────────────────────────────────
-function StatPill({ label, value, highlight }) {
-  return (
-    <div className={`flex-1 min-w-[90px] rounded-xl px-4 py-3 border text-center ${highlight ? "bg-[#EAF4FF] border-[#DCEAF7]" : "bg-white border-[#DCEAF7]"}`}>
-      <div className={`text-lg font-black leading-none ${highlight ? "text-[#1683FF]" : "text-[#102A43]"}`}>{value}</div>
-      <div className="text-[10px] font-semibold text-[#61758A] mt-0.5">{label}</div>
     </div>
   );
 }
@@ -302,39 +298,41 @@ function ActivityContent() {
     <div className="min-h-screen flex flex-col bg-[#F5FAFF]">
       <Navbar />
 
-      <main className="flex-1 w-full max-w-[1100px] mx-auto px-4 sm:px-6 lg:px-8 py-7 sm:py-10">
+      <main className="flex-1 w-full max-w-[1100px] mx-auto px-3.5 sm:px-6 lg:px-8 py-5 sm:py-10">
 
         {/* ── Page Header ────────────────────────────────────────────── */}
-        <div className="mb-7">
-          <div className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#1683FF] uppercase tracking-widest mb-2">
-            <Activity className="w-3.5 h-3.5" />
-            <span>Aktivitas &amp; Status Transaksi</span>
-          </div>
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+        <div className="mb-4 sm:mb-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <h1 className="text-2xl sm:text-3xl font-extrabold text-[#102A43] tracking-tight leading-tight">
+              <div className="inline-flex items-center gap-1.5 text-[10px] sm:text-[11px] font-bold text-[#1683FF] uppercase tracking-wider mb-1">
+                <Activity className="w-3.5 h-3.5" />
+                <span>Aktivitas &amp; Status Transaksi</span>
+              </div>
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-extrabold text-[#102A43] tracking-tight leading-tight">
                 Aktivitas Saya
               </h1>
-              <p className="text-sm text-[#61758A] mt-1">
-                Pantau semua transaksi sewa, bantuan, dan jasa yang sedang berjalan atau sudah selesai.
+              <p className="hidden sm:block text-xs sm:text-sm text-[#61758A] mt-0.5">
+                Pantau seluruh transaksi sewa alat, bantuan tugas, dan layanan jasa secara terpusat.
               </p>
             </div>
-            <div className="flex items-center gap-2">
+
+            {/* Action buttons row: [ + Sewa ] [ + Bantuan ] [ + Pesan Jasa ] */}
+            <div className="grid grid-cols-3 sm:flex items-center gap-1.5 sm:gap-2">
               <Link
                 href="/sewa"
-                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white border border-[#DCEAF7] hover:border-[#1683FF] text-[#61758A] hover:text-[#1683FF] transition"
+                className="text-center px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-[11px] sm:text-xs font-bold bg-white border border-[#DCEAF7] hover:border-[#1683FF] text-[#102A43] hover:text-[#1683FF] transition shadow-2xs"
               >
-                + Sewa Baru
+                + Sewa
               </Link>
               <Link
                 href="/bantuan"
-                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white border border-[#DCEAF7] hover:border-[#1683FF] text-[#61758A] hover:text-[#1683FF] transition"
+                className="text-center px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-[11px] sm:text-xs font-bold bg-white border border-[#DCEAF7] hover:border-[#1683FF] text-[#102A43] hover:text-[#1683FF] transition shadow-2xs"
               >
-                + Minta Bantuan
+                + Bantuan
               </Link>
               <Link
                 href="/jasa"
-                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-[#1683FF] hover:bg-[#0F6FE5] text-white transition shadow-sm"
+                className="text-center px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-xl text-[11px] sm:text-xs font-bold bg-[#1683FF] hover:bg-[#0F6FE5] text-white transition shadow-2xs"
               >
                 + Pesan Jasa
               </Link>
@@ -342,55 +340,101 @@ function ActivityContent() {
           </div>
         </div>
 
-        {/* ── Stats Pills ──────────────────────────────────────────────── */}
-        <div className="flex items-stretch gap-2.5 mb-7 overflow-x-auto pb-1 scrollbar-none">
-          <StatPill label="Total Aktif" value={ongoingItems.length} highlight />
-          <StatPill label="Sewa Barang" value={sewaCount} />
-          <StatPill label="Bantuan Tugas" value={bantuanCount} />
-          <StatPill label="Layanan Jasa" value={jasaCount} />
-          <StatPill label="Selesai" value={completedItems.length} />
-        </div>
-
-        {/* ── Main Tabs ────────────────────────────────────────────────── */}
-        <div className="flex items-center gap-2 border-b border-[#DCEAF7] pb-3 mb-5">
-          {[
-            { id: "ongoing", label: "Sedang Berlangsung", count: ongoingItems.length },
-            { id: "completed", label: "Riwayat Selesai", count: completedItems.length },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setMainTab(tab.id)}
-              className={`flex items-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-bold transition cursor-pointer ${
-                mainTab === tab.id
-                  ? "bg-[#1683FF] text-white shadow-sm"
-                  : "bg-white text-[#61758A] hover:text-[#102A43] border border-[#DCEAF7] hover:border-[#1683FF]"
-              }`}
-            >
-              <span>{tab.label}</span>
-              <span
-                className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  mainTab === tab.id
-                    ? "bg-white text-[#1683FF]"
-                    : "bg-[#EAF4FF] text-[#1683FF]"
-                }`}
-              >
-                {tab.count}
+        {/* ── BAGIAN 1: RINGKASAN TRANSAKSI AKTIF & RIWAYAT (2-Card Compact) ── */}
+        <div className="grid grid-cols-2 gap-2.5 sm:gap-4 mb-5 sm:mb-6">
+          {/* Card 1: Pesanan Aktif */}
+          <button
+            type="button"
+            onClick={() => setMainTab("ongoing")}
+            className={`p-3 sm:p-4 rounded-xl sm:rounded-2xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+              mainTab === "ongoing"
+                ? "bg-[#EAF4FF] border-[#1683FF] shadow-xs ring-1 ring-[#1683FF]/30"
+                : "bg-white border-[#DCEAF7] hover:border-[#1683FF]/40 hover:bg-slate-50/50"
+            }`}
+          >
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-xs sm:text-sm font-bold text-[#102A43] truncate">
+                Pesanan Aktif
               </span>
-            </button>
-          ))}
+              <span className="w-2 h-2 rounded-full bg-[#1683FF] shrink-0" />
+            </div>
+
+            <div className="my-2 sm:my-3">
+              <span className="text-2xl sm:text-3xl font-black text-[#1683FF] tracking-tight leading-none">
+                {ongoingItems.length}
+              </span>
+            </div>
+
+            {/* Desktop breakdown, hidden on mobile */}
+            <div className="hidden sm:flex items-center gap-1.5 text-[10px] font-semibold text-[#61758A] mb-2">
+              <span>Sewa: {sewaCount}</span>
+              <span>·</span>
+              <span>Bantuan: {bantuanCount}</span>
+              <span>·</span>
+              <span>Jasa: {jasaCount}</span>
+            </div>
+
+            <div className="flex items-center justify-between text-[11px] sm:text-xs font-bold text-[#1683FF] pt-2 border-t border-[#DCEAF7]">
+              <span>Lihat Pesanan</span>
+              <ArrowRight className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+            </div>
+          </button>
+
+          {/* Card 2: Riwayat Selesai */}
+          <button
+            type="button"
+            onClick={() => setMainTab("completed")}
+            className={`p-3 sm:p-4 rounded-xl sm:rounded-2xl border text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+              mainTab === "completed"
+                ? "bg-[#EAF4FF] border-[#1683FF] shadow-xs ring-1 ring-[#1683FF]/30"
+                : "bg-white border-[#DCEAF7] hover:border-[#1683FF]/40 hover:bg-slate-50/50"
+            }`}
+          >
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-xs sm:text-sm font-bold text-[#102A43] truncate">
+                Riwayat Selesai
+              </span>
+              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+            </div>
+
+            <div className="my-2 sm:my-3">
+              <span className="text-2xl sm:text-3xl font-black text-emerald-600 tracking-tight leading-none">
+                {completedItems.length}
+              </span>
+            </div>
+
+            {/* Desktop breakdown, hidden on mobile */}
+            <div className="hidden sm:block text-[10px] font-semibold text-[#61758A] mb-2 truncate">
+              Transaksi selesai &amp; tercatat
+            </div>
+
+            <div className="flex items-center justify-between text-[11px] sm:text-xs font-bold text-emerald-600 pt-2 border-t border-[#DCEAF7]">
+              <span>Lihat Riwayat</span>
+              <ArrowRight className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+            </div>
+          </button>
         </div>
 
-        {/* ── Category Filter Chips ─────────────────────────────────── */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-4 mb-5 scrollbar-none">
+        {/* ── BAGIAN 2: DAFTAR PESANAN & FILTER ── */}
+        <div className="flex items-center justify-between gap-2 mb-2.5">
+          <h2 className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-[#102A43]">
+            {mainTab === "ongoing" ? "Daftar Pesanan Berlangsung" : "Daftar Riwayat Selesai"}
+          </h2>
+          <span className="text-[11px] sm:text-xs font-bold px-2 py-0.5 rounded-full bg-[#EAF4FF] text-[#1683FF] border border-[#DCEAF7]">
+            {displayedItems.length} transaksi
+          </span>
+        </div>
+
+        {/* ── Category Filter Chips (Smooth scroll, compact) ── */}
+        <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar -mx-3.5 px-3.5 sm:mx-0 sm:px-0 pb-2 mb-3.5">
           {FILTERS.map((chip) => (
             <button
               key={chip.id}
               type="button"
               onClick={() => setCategoryFilter(chip.id)}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition shrink-0 cursor-pointer border ${
+              className={`px-3 py-1 sm:px-3.5 sm:py-1.5 rounded-full text-[11px] sm:text-xs font-bold transition shrink-0 cursor-pointer border ${
                 categoryFilter === chip.id
-                  ? "bg-[#1683FF] text-white border-[#1683FF] font-bold shadow-sm"
+                  ? "bg-[#1683FF] text-white border-[#1683FF] shadow-xs"
                   : "bg-white text-[#61758A] border-[#DCEAF7] hover:text-[#102A43] hover:border-[#1683FF]"
               }`}
             >
@@ -399,41 +443,41 @@ function ActivityContent() {
           ))}
         </div>
 
-        {/* ── Items List ────────────────────────────────────────────────── */}
+        {/* ── Items Grid (2 cols on mobile, 1 col on desktop) ── */}
         {displayedItems.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-[#DCEAF7] p-14 text-center space-y-4 shadow-sm">
-            <div className="w-14 h-14 rounded-2xl bg-[#EAF4FF] text-[#1683FF] flex items-center justify-center mx-auto border border-[#DCEAF7]">
-              <Package className="w-7 h-7" />
+          <div className="bg-white rounded-2xl border border-[#DCEAF7] p-10 sm:p-14 text-center space-y-4 shadow-xs">
+            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-[#EAF4FF] text-[#1683FF] flex items-center justify-center mx-auto border border-[#DCEAF7]">
+              <Package className="w-6 h-6 sm:w-7 sm:h-7" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-[#102A43]">
+              <h3 className="font-bold text-sm sm:text-base text-[#102A43]">
                 {mainTab === "ongoing"
                   ? "Tidak Ada Pesanan Aktif"
                   : "Belum Ada Riwayat Selesai"}
               </h3>
-              <p className="text-xs text-[#61758A] max-w-xs mx-auto mt-1.5">
+              <p className="text-xs text-[#61758A] max-w-xs mx-auto mt-1">
                 {mainTab === "ongoing"
                   ? "Semua transaksimu sudah selesai atau belum ada pesanan baru yang aktif."
                   : "Transaksi yang sudah rampung akan tercatat di sini secara otomatis."}
               </p>
             </div>
             {mainTab === "ongoing" && (
-              <div className="flex items-center justify-center gap-2.5 pt-1">
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                 <Link
                   href="/sewa"
-                  className="px-5 py-2.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold transition shadow-sm"
+                  className="px-4 py-2 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold transition shadow-xs"
                 >
                   Sewa Alat
                 </Link>
                 <Link
                   href="/bantuan"
-                  className="px-5 py-2.5 rounded-xl bg-white hover:bg-[#EAF4FF] text-[#102A43] hover:text-[#1683FF] border border-[#DCEAF7] text-xs font-bold transition"
+                  className="px-4 py-2 rounded-xl bg-white hover:bg-[#EAF4FF] text-[#102A43] hover:text-[#1683FF] border border-[#DCEAF7] text-xs font-bold transition"
                 >
                   Minta Bantuan
                 </Link>
                 <Link
                   href="/jasa"
-                  className="px-5 py-2.5 rounded-xl bg-white hover:bg-[#EAF4FF] text-[#102A43] hover:text-[#1683FF] border border-[#DCEAF7] text-xs font-bold transition"
+                  className="px-4 py-2 rounded-xl bg-white hover:bg-[#EAF4FF] text-[#102A43] hover:text-[#1683FF] border border-[#DCEAF7] text-xs font-bold transition"
                 >
                   Pesan Jasa
                 </Link>
@@ -441,7 +485,7 @@ function ActivityContent() {
             )}
           </div>
         ) : (
-          <div className="space-y-3.5">
+          <div className="grid grid-cols-2 sm:grid-cols-1 gap-2.5 sm:gap-3.5">
             {displayedItems.map((item) => (
               <ActivityCard key={item.id} item={item} />
             ))}

@@ -158,9 +158,9 @@ export default function VoucherPicker({
         <div className="rounded-2xl border border-[#DCEAF7] bg-white p-4 space-y-4 animate-in fade-in duration-150 shadow-sm">
 
           {/* Location indicator */}
-          <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 border border-slate-100 text-[11px]">
+          <div className="flex flex-wrap items-center justify-between gap-1 px-3 py-2 rounded-xl bg-slate-50 border border-slate-100 text-[11px]">
             <span className="text-slate-500 flex items-center gap-1">
-              <MapPin className="w-3.5 h-3.5 text-[#1683FF]" />
+              <MapPin className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
               <span>Lokasi Transaksi Anda:</span>
             </span>
             <strong className="text-slate-900 font-bold">{effectiveLocation}</strong>

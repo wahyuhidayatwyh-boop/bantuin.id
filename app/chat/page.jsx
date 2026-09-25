@@ -53,8 +53,7 @@ import {
   HeartHandshake,
   Flag
 } from "lucide-react";
-import RentalFlowTracker from "@/components/rental/RentalFlowTracker";
-import JasaFlowTracker from "@/components/jasa/JasaFlowTracker";
+import ChatFlowTracker from "@/components/chat/ChatFlowTracker";
 import InAppVoiceCallModal from "@/components/chat/InAppVoiceCallModal";
 import ReportModal from "@/components/modals/ReportModal";
 import { detectDisintermediation, detectProhibitedContent } from "@/lib/security";
@@ -960,122 +959,89 @@ function ChatWorkspaceContent() {
           md:flex flex-1 flex-col bg-white overflow-hidden relative z-10
         `}>
           
-          {/* Chat Partner Sub-header */}
-          <div className="h-12 border-b border-slate-100 px-3 sm:px-4 flex items-center justify-between bg-white shrink-0 text-xs">
-            <div className="flex items-center gap-2 min-w-0">
-              {!isSidebarOpen && (
-                <button
-                  type="button"
-                  onClick={() => setIsSidebarOpen(true)}
-                  className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 text-[#1683FF] hover:bg-blue-100 font-bold text-xs transition mr-1 shrink-0"
-                  title="Buka Daftar Obrolan"
-                >
-                  <PanelLeftOpen className="w-3.5 h-3.5" />
-                  <span>Daftar Obrolan</span>
-                </button>
-              )}
-              <span className="w-2 h-2 rounded-full bg-[#1683FF] shrink-0 inline-block" />
-              <span className="font-bold text-slate-800 truncate">
-                {activeRole === "requester" ? selectedRoom?.helper?.name : selectedRoom?.requester?.name}
-              </span>
-              <span className="text-slate-400 hidden xs:inline">•</span>
-              <span className="text-slate-500 font-medium hidden sm:inline truncate">
-                {activeRole === "requester"
-                  ? (isInquiry ? "Mitra / Penyedia • Tahap Diskusi" : isNotSelected ? "Kandidat Tidak Terpilih" : "Mitra Terverifikasi")
-                  : (isInquiry ? "Calon Pemesan • Tahap Diskusi" : "Pemesan / Klien")}
-              </span>
-            </div>
+          {/* ============================================================= */}
+          {/* 2. IDENTITAS TOKO / MITRA (~48-52px) */}
+          {/* ============================================================= */}
+          {selectedRoom && (
+            <div className="h-12 border-b border-slate-100 px-3 sm:px-4 flex items-center justify-between bg-white shrink-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 inline-block" />
+                <span className="font-bold text-slate-900 text-xs sm:text-sm truncate">
+                  {activeRole === "requester" ? selectedRoom.helper?.name : selectedRoom.requester?.name}
+                </span>
+                <span className="text-[11px] text-slate-500 font-medium shrink-0">
+                  ({activeRole === "requester"
+                    ? (selectedRoom.orderType === "rental" ? "Mitra Sewa" : selectedRoom.orderType === "bantuan" ? "Helper Bantuan" : "Mitra Jasa")
+                    : (selectedRoom.orderType === "rental" ? "Penyewa" : "Pemesan")})
+                </span>
+              </div>
 
-            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-              {/* Primary CTA for standard inquiries only (Rental has its own dedicated 1-click action in RentalFlowTracker) */}
-              {isInquiry && activeRole === "requester" && !isNotSelected && selectedRoom?.orderType !== "rental" && (
-                selectedRoom?.orderType === "service" ? (
-                  <button
-                    type="button"
-                    onClick={() => router.push(`/jasa/${selectedRoom?.requestId || selectedRoom?.helper?.id}`)}
-                    className="px-2.5 sm:px-3 py-1 bg-[#1683FF] hover:bg-[#0F6FE5] text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-2xs transition active:scale-95 cursor-pointer"
-                  >
-                    <CheckCircle2 className="w-3 h-3" />
-                    <span>Pesan Layanan</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setIsPaymentModalOpen(true)}
-                    className="px-2.5 sm:px-3 py-1 bg-[#1683FF] hover:bg-[#0F6FE5] text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-2xs transition active:scale-95 cursor-pointer"
-                  >
-                    <Lock className="w-3 h-3" />
-                    <span>Pilih &amp; Bayar</span>
-                  </button>
-                )
-              )}
-
-              {/* In-App Voice Call CTA */}
-              {selectedRoom && (
+              <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+                {/* Telepon Action */}
                 <button
                   type="button"
                   onClick={handleStartCall}
-                  className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-[#1683FF] border border-blue-200 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-2xs group"
-                  title="Panggilan Suara In-App (Privasi Terjaga)"
+                  className="p-1.5 sm:px-2.5 sm:py-1 rounded-lg text-slate-600 hover:text-[#1683FF] hover:bg-blue-50 transition cursor-pointer text-xs font-semibold flex items-center gap-1"
+                  title="Panggilan Suara In-App"
                 >
-                  <Phone className="w-3 h-3 text-[#1683FF] group-hover:scale-110 transition-transform" />
-                  <span className="hidden sm:inline">Telepon In-App</span>
+                  <Phone className="w-3.5 h-3.5 text-[#1683FF]" />
+                  <span className="hidden sm:inline">Telepon</span>
                 </button>
-              )}
 
-              {/* Report Notice and Takedown Action */}
-              {selectedRoom && (
+                {/* Laporkan Action */}
                 <button
                   type="button"
                   onClick={() => setIsReportModalOpen(true)}
-                  className="px-2.5 py-1 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer text-xs font-semibold flex items-center gap-1.5"
-                  title="Laporkan Kendala atau Pelanggaran"
+                  className="p-1.5 sm:px-2.5 sm:py-1 text-slate-500 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition cursor-pointer text-xs font-semibold flex items-center gap-1"
+                  title="Laporkan Kendala"
                 >
                   <Flag className="w-3.5 h-3.5 text-rose-500" />
                   <span className="hidden sm:inline">Laporkan</span>
                 </button>
-              )}
 
-              {/* Header Delete Room Action */}
-              {selectedRoom && (
+                {/* Hapus Obrolan Action */}
                 <button
                   type="button"
                   onClick={(e) => handleDeleteRoom(selectedRoom.id, e)}
                   className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                  title="Hapus Seluruh Obrolan"
+                  title="Hapus Obrolan"
                 >
-                  <Trash2 className="w-4 h-4" />
+                  <Trash2 className="w-3.5 h-3.5" />
                 </button>
-              )}
+              </div>
             </div>
-          </div>
-
-          {/* Trust & Safety Escrow Banner */}
-          <div className="bg-gradient-to-r from-blue-50 via-sky-50 to-blue-50/70 border-b border-blue-100 px-3 sm:px-4 py-1.5 flex items-center justify-between text-[11px] text-slate-600 shrink-0">
-            <div className="flex items-center gap-2 min-w-0">
-              <ShieldCheck className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
-              <span className="truncate">
-                <strong>Garansi Pembayaran Aman:</strong> Dilarang transaksi atau transfer di luar sistem Bantuin demi keamanan dana Anda.
-              </span>
-            </div>
-            <Link
-              href="/syarat-ketentuan"
-              target="_blank"
-              className="text-[10px] font-bold text-[#1683FF] hover:underline shrink-0 ml-2 flex items-center gap-0.5"
-            >
-              <span>Pelajari S&amp;K</span>
-              <ExternalLink className="w-2.5 h-2.5" />
-            </Link>
-          </div>
-
-          {/* Flow Tracker & Actions (Rental vs Jasa / Bantuan) */}
-          {selectedRoom?.orderType === "rental" ? (
-            <RentalFlowTracker room={selectedRoom} activeRole={activeRole} />
-          ) : (
-            selectedRoom && (
-              <JasaFlowTracker room={selectedRoom} activeRole={activeRole} />
-            )
           )}
+
+          {/* ============================================================= */}
+          {/* 3. STATUS TRANSAKSI + AKSI */}
+          {/* ============================================================= */}
+          {selectedRoom && (
+            <ChatFlowTracker room={selectedRoom} activeRole={activeRole} />
+          )}
+
+          {/* ============================================================= */}
+          {/* 4. INFORMASI TRANSAKSI / PEMBAYARAN (COMPACT, 1 ROW) */}
+          {/* ============================================================= */}
+          <div className="px-3 sm:px-4 py-1.5 bg-slate-50/70 border-b border-slate-100 flex items-center justify-between text-[11px] text-slate-500 shrink-0">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <ShieldCheck className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
+              <span className="truncate">Pembayaran aman</span>
+              <span className="text-slate-300">•</span>
+              <Link
+                href="/syarat-ketentuan"
+                target="_blank"
+                className="text-slate-500 hover:text-[#1683FF] hover:underline flex items-center gap-0.5 shrink-0 font-medium"
+              >
+                <span>Pelajari S&amp;K</span>
+                <ExternalLink className="w-2.5 h-2.5" />
+              </Link>
+            </div>
+            {selectedRoom?.lockedAmount && (
+              <span className="text-[10px] text-slate-400 font-medium hidden xs:inline">
+                Terverifikasi Resmi Bantuin.id
+              </span>
+            )}
+          </div>
 
           {/* Messages Area */}
           <div className="flex-1 overflow-y-auto p-3 sm:p-5 space-y-3 bg-[#F8FAFC]">
@@ -1403,9 +1369,14 @@ function ChatWorkspaceContent() {
                 }
 
                 return (
-                  <div key={msg.id || index} className="flex justify-center my-2">
-                    <div className="max-w-md p-3 rounded-xl bg-slate-100 border border-slate-200 text-xs text-slate-700 text-center">
-                      <p className="leading-relaxed font-medium">{msg.message}</p>
+                  <div key={msg.id || index} className="flex justify-center my-2 sm:my-2.5 px-3">
+                    <div className="max-w-lg w-full py-2 px-3 sm:px-3.5 rounded-xl bg-slate-100/90 border border-slate-200/80 text-[13px] text-slate-700 shadow-2xs">
+                      <div className="flex items-start gap-2.5">
+                        <ShieldCheck className="w-4 h-4 text-[#1683FF] shrink-0 mt-0.5" />
+                        <p className="leading-relaxed font-normal flex-1">
+                          {msg.message}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 );
@@ -1424,7 +1395,7 @@ function ChatWorkspaceContent() {
                     />
                   )}
 
-                  <div className={`flex flex-col ${isMe ? "items-end" : "items-start"} max-w-[85%] sm:max-w-[75%]`}>
+                  <div className={`flex flex-col ${isMe ? "items-end" : "items-start"} max-w-[85%] sm:max-w-[80%]`}>
                     
                     {/* If in edit mode for this message */}
                     {isEditingThisMsg ? (
@@ -1478,7 +1449,7 @@ function ChatWorkspaceContent() {
                         )}
 
                         <div
-                          className={`p-3 rounded-2xl text-xs sm:text-[13px] leading-relaxed ${
+                          className={`px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-2xl text-xs sm:text-[13px] leading-relaxed ${
                             isMe
                               ? "bg-[#1683FF] text-white rounded-br-xs"
                               : "bg-white border border-slate-200 text-slate-800 rounded-bl-xs shadow-2xs"
@@ -1563,103 +1534,105 @@ function ChatWorkspaceContent() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Quick Clean Action Chips (No Emojis) */}
-          <div className="px-3 py-2 bg-white border-t border-slate-100 flex items-center gap-1.5 overflow-x-auto scrollbar-none shrink-0">
+          {/* Quick Reply Bar (~40px compact horizontal scroll) */}
+          <div className="h-10 px-3 bg-white border-t border-slate-100 flex items-center gap-2 overflow-x-auto scrollbar-none shrink-0">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider shrink-0">Cepat:</span>
-            {(selectedRoomMeta?.type === "sewa"
-              ? (selectedRoom?.rentalDetails?.plateNumber || selectedRoom?.category?.toLowerCase()?.includes("motor") || selectedRoom?.category?.toLowerCase()?.includes("mobil")
-                  ? (isInquiry
-                      ? [
-                          "Apakah armada ready tanggal ini?",
-                          "Bisa sistem lepas kunci atau dengan driver?",
-                          "Kondisi mesin, bensin & ban aman?",
-                          "Bisa antar ke stasiun/lokasi saya?",
-                          "Persyaratan SIM & e-KTP sudah siap!"
-                        ]
-                      : [
-                          activeRole === "helper" ? "Unit armada sudah bersih dan bensin full siap pakai ya kak" : "Halo, saya otw ambil unit kendaraannya ya",
-                          "Foto fisik bodi & speedometer sudah saya cek",
-                          "STNK dan kunci unit sudah serah terima",
-                          "Siap, terima kasih banyak!"
-                        ]
-                    )
-                  : (isInquiry
-                      ? [
-                          "Apakah alat ready tanggal ini?",
-                          "Kondisi fisik & fungsi normal 100%?",
-                          "Sudah include baterai & tas unit?",
-                          "Bisa ambil di toko jam berapa hari ini?",
-                          "Siap, saya proses pembayaran sekarang!"
-                        ]
-                      : [
-                          activeRole === "helper" ? "Unit alat sudah siap diambil di toko ya kak" : "Halo, saya otw ambil unit ke toko ya",
-                          "Kondisi alat sudah dicek bersama",
-                          "Serah terima berjalan lancar",
-                          "Siap, terima kasih!"
-                        ]
-                    )
-                )
-              : selectedRoomMeta?.type === "bantuan"
-              ? (isInquiry
-                  ? [
-                      "Halo, apakah tugas bantuan ini masih open?",
-                      "Bisa dibantu mulai jam berapa hari ini?",
-                      "Titik penjemputan & antar sudah sesuai lokasi?",
-                      "Ada instruksi atau barang khusus yang perlu dibawa?",
-                      "Siap bantu, saya ajukan penawaran tugas!"
-                    ]
-                  : [
-                      activeRole === "helper" ? "Saya sedang otw menuju ke lokasi tugas ya kak" : "Halo helper, bagaimana posisi dan estimasi tiba?",
-                      activeRole === "helper" ? "Sudah tiba di lokasi dan sedang mengerjakan tugas" : "Tolong kabari jika tugas sudah beres ya",
-                      "Foto serah terima / bukti tugas sudah diunggah",
-                      "Tugas telah selesai dengan baik, terima kasih!"
-                    ]
-                )
-              : isInquiry
-              ? [
-                  "Kapan estimasi pengerjaan bisa dimulai?",
-                  "Apakah siap sesuai spesifikasi brief?",
-                  "Bisa request revisi minor jika diperlukan?",
-                  "Saya setuju dengan penawaran layanan ini.",
-                  "Siap, saya proses pembayaran sekarang!"
-                ]
-              : isOnline
-              ? [
-                  activeRole === "helper" ? "Berkas digital sedang saya proses sesuai brief" : "Bagaimana progres pengerjaan desain/berkas?",
-                  activeRole === "helper" ? "Tautan preview file hasil sudah saya kirimkan" : "Tolong kirimkan preview file hasilnya ya",
-                  "Silakan diperiksa terlebih dahulu hasilnya",
-                  "Hasil pekerjaan sudah sesuai dan saya setujui!"
-                ]
-              : [
-                  activeRole === "helper" ? "Pengerjaan fisik/cetak sedang diproses rapi" : "Apakah hasil cetak/servis sudah siap diambil?",
-                  activeRole === "helper" ? "Pesanan siap diambil di workshop kami" : "Saya otw ke lokasi untuk ambil ya",
-                  "Hasil pekerjaan sangat rapi dan memuaskan",
-                  "Terima kasih banyak atas pelayanannya!"
-                ]
-            ).map((template, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => setChatInput(template)}
-                className="px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200 hover:border-[#1683FF] hover:text-[#1683FF] text-[11px] font-medium text-slate-600 whitespace-nowrap transition cursor-pointer"
-              >
-                {template}
-              </button>
-            ))}
+            <div className="flex items-center gap-1.5 flex-nowrap shrink-0">
+              {(selectedRoomMeta?.type === "sewa"
+                ? (selectedRoom?.rentalDetails?.plateNumber || selectedRoom?.category?.toLowerCase()?.includes("motor") || selectedRoom?.category?.toLowerCase()?.includes("mobil")
+                    ? (isInquiry
+                        ? [
+                            "Apakah armada ready tanggal ini?",
+                            "Bisa sistem lepas kunci atau dengan driver?",
+                            "Kondisi mesin, bensin & ban aman?",
+                            "Bisa antar ke stasiun/lokasi saya?",
+                            "Persyaratan SIM & e-KTP sudah siap!"
+                          ]
+                        : [
+                            activeRole === "helper" ? "Unit armada sudah bersih dan bensin full siap pakai ya kak" : "Halo, saya otw ambil unit kendaraannya ya",
+                            "Foto fisik bodi & speedometer sudah saya cek",
+                            "STNK dan kunci unit sudah serah terima",
+                            "Siap, terima kasih banyak!"
+                          ]
+                      )
+                    : (isInquiry
+                        ? [
+                            "Apakah alat ready tanggal ini?",
+                            "Kondisi fisik & fungsi normal 100%?",
+                            "Sudah include baterai & tas unit?",
+                            "Bisa ambil di toko jam berapa hari ini?",
+                            "Siap, saya proses pembayaran sekarang!"
+                          ]
+                        : [
+                            activeRole === "helper" ? "Unit alat sudah siap diambil di toko ya kak" : "Halo, saya otw ambil unit ke toko ya",
+                            "Kondisi alat sudah dicek bersama",
+                            "Serah terima berjalan lancar",
+                            "Siap, terima kasih!"
+                          ]
+                      )
+                  )
+                : selectedRoomMeta?.type === "bantuan"
+                ? (isInquiry
+                    ? [
+                        "Halo, apakah tugas bantuan ini masih open?",
+                        "Bisa dibantu mulai jam berapa hari ini?",
+                        "Titik penjemputan & antar sudah sesuai lokasi?",
+                        "Ada instruksi atau barang khusus yang perlu dibawa?",
+                        "Siap bantu, saya ajukan penawaran tugas!"
+                      ]
+                    : [
+                        activeRole === "helper" ? "Saya sedang otw menuju ke lokasi tugas ya kak" : "Halo helper, bagaimana posisi dan estimasi tiba?",
+                        activeRole === "helper" ? "Sudah tiba di lokasi dan sedang mengerjakan tugas" : "Tolong kabari jika tugas sudah beres ya",
+                        "Foto serah terima / bukti tugas sudah diunggah",
+                        "Tugas telah selesai dengan baik, terima kasih!"
+                      ]
+                  )
+                : isInquiry
+                ? [
+                    "Kapan estimasi pengerjaan bisa dimulai?",
+                    "Apakah siap sesuai spesifikasi brief?",
+                    "Bisa request revisi minor jika diperlukan?",
+                    "Saya setuju dengan penawaran layanan ini.",
+                    "Siap, saya proses pembayaran sekarang!"
+                  ]
+                : isOnline
+                ? [
+                    activeRole === "helper" ? "Berkas digital sedang saya proses sesuai brief" : "Bagaimana progres pengerjaan desain/berkas?",
+                    activeRole === "helper" ? "Tautan preview file hasil sudah saya kirimkan" : "Tolong kirimkan preview file hasilnya ya",
+                    "Silakan diperiksa terlebih dahulu hasilnya",
+                    "Hasil pekerjaan sudah sesuai dan saya setujui!"
+                  ]
+                : [
+                    activeRole === "helper" ? "Pengerjaan fisik/cetak sedang diproses rapi" : "Apakah hasil cetak/servis sudah siap diambil?",
+                    activeRole === "helper" ? "Pesanan siap diambil di workshop kami" : "Saya otw ke lokasi untuk ambil ya",
+                    "Hasil pekerjaan sangat rapi dan memuaskan",
+                    "Terima kasih banyak atas pelayanannya!"
+                  ]
+              ).map((template, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => setChatInput(template)}
+                  className="h-7 px-2.5 rounded-lg bg-slate-50 hover:bg-blue-50 border border-slate-200/80 hover:border-blue-300 text-[11px] font-medium text-slate-600 hover:text-[#1683FF] whitespace-nowrap transition cursor-pointer shrink-0"
+                >
+                  {template}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* Privacy Banner */}
-          <div className="px-3 sm:px-4 py-1.5 bg-blue-50/70 border-t border-blue-100 flex items-center gap-1.5 text-[11px] text-slate-600 shrink-0">
+          {/* Privacy Notice Bar (~36-40px) */}
+          <div className="h-9 px-3 sm:px-4 bg-slate-50/70 border-t border-slate-100 flex items-center gap-1.5 text-slate-500 shrink-0">
             <ShieldCheck className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
-            <span className="truncate font-medium">
+            <span className="truncate text-[11px] sm:text-xs font-normal">
               Privasi Terjaga: Dilarang bertukar kontak pribadi di luar sistem Bantuin.
             </span>
           </div>
 
-          {/* Chat Input Bar */}
+          {/* Chat Input Bar (~56px) */}
           <form
             onSubmit={handleSend}
-            className="p-2.5 sm:p-3 border-t border-slate-200 bg-white flex items-center gap-1.5 sm:gap-2 shrink-0"
+            className="h-14 px-3 sm:px-4 border-t border-slate-200 bg-white flex items-center gap-2 shrink-0"
           >
             <input
               type="file"
@@ -1671,7 +1644,7 @@ function ChatWorkspaceContent() {
             <button
               type="button"
               onClick={() => chatFileInputRef.current?.click()}
-              className="p-2 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+              className="w-9 h-9 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 flex items-center justify-center transition shrink-0"
               title="Lampirkan Dokumen / Foto"
             >
               <Paperclip className="w-4 h-4" />
@@ -1682,17 +1655,18 @@ function ChatWorkspaceContent() {
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               placeholder="Tulis pesan..."
-              className="flex-1 text-xs sm:text-sm px-3 py-2 rounded-lg border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:border-[#1683FF] transition"
+              className="flex-1 h-9 text-xs sm:text-sm px-3 rounded-xl border border-slate-200 bg-slate-50/60 focus:bg-white focus:outline-none focus:border-[#1683FF] transition"
             />
 
             <button
               type="submit"
               disabled={!chatInput.trim()}
-              className={`p-2 rounded-lg transition ${
+              className={`w-9 h-9 rounded-xl flex items-center justify-center transition shrink-0 ${
                 chatInput.trim()
-                  ? "bg-[#1683FF] text-white hover:bg-[#0F6FE5]"
+                  ? "bg-[#1683FF] text-white hover:bg-[#0F6FE5] shadow-2xs active:scale-95 cursor-pointer"
                   : "bg-slate-100 text-slate-400 cursor-not-allowed"
               }`}
+              title="Kirim pesan"
             >
               <Send className="w-4 h-4" />
             </button>

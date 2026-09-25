@@ -353,7 +353,7 @@ export default function AdminChatPage() {
               return (
                 <div key={msg.id} className={`flex items-end gap-2.5 ${isUser ? "flex-row-reverse" : ""}`}>
                   {!isUser && <AdminAvatar size="sm" />}
-                  <div className="max-w-[72%] sm:max-w-[60%] space-y-1">
+                  <div className="max-w-[78%] sm:max-w-[60%] space-y-1 min-w-0">
                     {/* Gambar bukti (jika ada) */}
                     {msg.image && (
                       <div className={`rounded-2xl overflow-hidden border border-[#DCEAF7] shadow-sm ${isUser ? "rounded-br-none" : "rounded-bl-none"}`}>
@@ -367,7 +367,7 @@ export default function AdminChatPage() {
                     )}
                     {/* Teks (jika ada) */}
                     {msg.text && (
-                      <div className={`px-4 py-3 rounded-2xl text-xs leading-relaxed ${
+                      <div className={`px-4 py-3 rounded-2xl text-xs leading-relaxed break-words ${
                         isUser
                           ? "bg-[#1683FF] text-white rounded-br-none"
                           : "bg-white border border-[#DCEAF7] text-[#102A43] rounded-bl-none shadow-sm"

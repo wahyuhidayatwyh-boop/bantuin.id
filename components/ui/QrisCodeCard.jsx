@@ -11,19 +11,19 @@ export default function QrisCodeCard({
   isCopiedNominal 
 }) {
   return (
-    <div className="p-5 sm:p-6 bg-slate-50/80 rounded-2xl sm:rounded-3xl border border-slate-200/80 flex flex-col md:flex-row items-center gap-6 sm:gap-7">
+    <div className="p-3 sm:p-6 bg-slate-50/80 rounded-2xl sm:rounded-3xl border border-slate-200/80 flex flex-col md:flex-row items-center gap-3.5 sm:gap-7">
       {/* Enlarged QR Code Container Card */}
-      <div className="p-4 sm:p-5 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center shrink-0 w-full max-w-[280px] sm:max-w-[300px]">
+      <div className="p-3 sm:p-5 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center shrink-0 w-full max-w-[240px] sm:max-w-[300px]">
         {/* Top Header of QR Card */}
-        <div className="w-full flex items-center justify-between pb-3 mb-3 border-b border-slate-100">
-          <QrisLogo className="h-6 w-auto object-contain" />
+        <div className="w-full flex items-center justify-between pb-2.5 sm:pb-3 mb-2.5 sm:mb-3 border-b border-slate-100">
+          <QrisLogo className="h-5 sm:h-6 w-auto object-contain" />
           <span className="text-[10px] font-black text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100 tracking-wider">
             GPN
           </span>
         </div>
 
         {/* Large Vector QR Code */}
-        <div className="relative w-56 h-56 sm:w-60 sm:h-60 bg-white p-2 flex items-center justify-center">
+        <div className="relative w-44 h-44 sm:w-60 sm:h-60 bg-white p-1 sm:p-2 flex items-center justify-center">
           <svg
             viewBox="0 0 200 200"
             className="w-full h-full text-slate-900 select-none"
@@ -142,7 +142,7 @@ export default function QrisCodeCard({
       </div>
 
       {/* Right Details & Instructions */}
-      <div className="flex-1 space-y-4 text-center sm:text-left min-w-0 w-full">
+      <div className="flex-1 space-y-3 sm:space-y-4 text-center sm:text-left min-w-0 w-full">
         <div>
           <span className="text-base sm:text-lg font-black text-slate-900 block">
             Scan Kode QRIS
@@ -153,36 +153,36 @@ export default function QrisCodeCard({
         </div>
 
         {/* Amount to Pay Box */}
-        <div className="p-3.5 sm:p-4 bg-white rounded-2xl border border-slate-200 flex items-center justify-between gap-3 shadow-xs">
-          <div>
-            <span className="text-xs text-slate-400 block font-medium">Nominal Pembayaran</span>
-            <span className="text-lg sm:text-xl font-black text-slate-900 font-mono tracking-tight">
+        <div className="p-3 sm:p-4 bg-white rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 shadow-xs">
+          <div className="min-w-0 text-center sm:text-left">
+            <span className="text-xs text-slate-400 block font-medium truncate">Nominal Pembayaran</span>
+            <span className="text-base sm:text-xl font-black text-slate-900 font-mono tracking-tight break-all block">
               {formatIDR(totalAmount)}
             </span>
           </div>
           <button
             type="button"
             onClick={() => handleCopy(totalAmount, "nominal")}
-            className="px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-[#1683FF] border border-blue-100 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 shadow-2xs"
+            className="w-full sm:w-auto px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-[#1683FF] border border-blue-100 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-2xs"
           >
-            <Copy className="w-3.5 h-3.5" />
+            <Copy className="w-3.5 h-3.5 shrink-0" />
             <span>{isCopiedNominal ? "Tersalin" : "Salin Nominal"}</span>
           </button>
         </div>
 
         {/* 3 Quick Steps */}
-        <div className="space-y-1.5 text-xs text-slate-600 bg-white/70 p-3 rounded-xl border border-slate-200/60">
-          <div className="flex items-center gap-2">
-            <span className="w-4 h-4 rounded-full bg-blue-100 text-[#1683FF] text-[10px] font-black flex items-center justify-center shrink-0">1</span>
-            <span>Buka aplikasi m-Banking atau e-Wallet di smartphone Anda</span>
+        <div className="space-y-1.5 text-xs text-slate-600 bg-white/70 p-2.5 sm:p-3 rounded-xl border border-slate-200/60">
+          <div className="flex items-start sm:items-center gap-2">
+            <span className="w-4 h-4 rounded-full bg-blue-100 text-[#1683FF] text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">1</span>
+            <span className="min-w-0 break-words">Buka aplikasi m-Banking atau e-Wallet di smartphone Anda</span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="w-4 h-4 rounded-full bg-blue-100 text-[#1683FF] text-[10px] font-black flex items-center justify-center shrink-0">2</span>
-            <span>Pilih menu <strong>Scan QRIS</strong> dan arahkan kamera ke kode di samping</span>
+          <div className="flex items-start sm:items-center gap-2">
+            <span className="w-4 h-4 rounded-full bg-blue-100 text-[#1683FF] text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">2</span>
+            <span className="min-w-0 break-words">Pilih menu <strong>Scan QRIS</strong> dan arahkan kamera ke kode di samping</span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="w-4 h-4 rounded-full bg-blue-100 text-[#1683FF] text-[10px] font-black flex items-center justify-center shrink-0">3</span>
-            <span>Periksa nominal tagihan dan konfirmasi pembayaran Anda</span>
+          <div className="flex items-start sm:items-center gap-2">
+            <span className="w-4 h-4 rounded-full bg-blue-100 text-[#1683FF] text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5 sm:mt-0">3</span>
+            <span className="min-w-0 break-words">Periksa nominal tagihan dan konfirmasi pembayaran Anda</span>
           </div>
         </div>
 

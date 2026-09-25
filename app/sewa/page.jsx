@@ -31,24 +31,34 @@ export default function SewaPage() {
     activeKabupaten, 
     filterByKabupaten, 
     setFilterByKabupaten, 
-    isItemInCurrentKabupaten 
+    isItemInCurrentKabupaten,
+    setIsGpsModalOpen
   } = useApp();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("Semua");
-  const [isCategoryOpen, setIsCategoryOpen] = useState(false);
+  const [activeModal, setActiveModal] = useState(null); // null | "kategori" | "wilayah"
   const [showMap, setShowMap] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const categoryDropdownRef = useRef(null);
+  const controlsRef = useRef(null);
 
-  // Close category dropdown on outside click
+  // Close dropdowns when clicking outside or pressing Escape
   useEffect(() => {
     function handleClickOutside(event) {
-      if (categoryDropdownRef.current && !categoryDropdownRef.current.contains(event.target)) {
-        setIsCategoryOpen(false);
+      if (controlsRef.current && !controlsRef.current.contains(event.target)) {
+        setActiveModal(null);
+      }
+    }
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setActiveModal(null);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
   }, []);
 
   const ITEMS_PER_PAGE = 16;
@@ -132,76 +142,98 @@ export default function SewaPage() {
 
       <main className="flex-1 max-w-[1360px] w-full mx-auto px-4 md:px-6 lg:px-8 py-8">
         
-        {/* Layer 1: Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+        {/* ============================================================ */}
+        {/* HEADER SECTION (CLEAN & COMPACT)                             */}
+        {/* ============================================================ */}
+        <div className="space-y-3 sm:space-y-4 mb-5 sm:mb-6">
+          
+          {/* Header Title */}
           <div>
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">
-                Sewa di <span className="text-[#1683FF]">{activeKabupaten}</span>
-              </h1>
-              <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-50 text-[#1683FF] border border-blue-100">
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-slate-900 tracking-tight">
+              Sewa di {filterByKabupaten ? activeKabupaten.replace(/^Kabupaten\s+/i, 'Kab. ') : "Semua Wilayah"}
+            </h1>
+            <div className="hidden sm:flex items-center gap-2 text-xs sm:text-sm text-slate-500 mt-1">
+              <span className="font-bold text-[#1683FF]">
                 {filteredRentals.length} unit tersedia
               </span>
+              <span>·</span>
+              <span>Temukan kamera mirrorless, drone, audio podcast, proyektor, hingga perkakas harian</span>
             </div>
-            <p className="text-xs sm:text-sm text-slate-500 mt-1">
-              Temukan kamera mirrorless, drone, audio podcast, proyektor, hingga perkakas harian di sekitarmu.
-            </p>
           </div>
-        </div>
 
-        {/* Layer 2: Clean Unified Toolbar (Pencarian, Dropdown Kategori, Filter Wilayah, & Peta) */}
-        <div className="mb-6">
-          <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2.5">
-            {/* Search Input */}
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          {/* Search Bar (Fokus Utama & Lebar) */}
+          <div className="relative">
+            <div className="relative flex items-center bg-white border border-slate-300 hover:border-slate-400 focus-within:border-[#1683FF] focus-within:ring-4 focus-within:ring-[#1683FF]/15 rounded-2xl shadow-xs transition-all">
+              <Search className="w-5 h-5 text-slate-400 ml-3.5 sm:ml-4 shrink-0 pointer-events-none" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
-                placeholder="Cari barang sewa (misal: kamera Sony, drone, mic wireless, proyektor)..."
-                className="w-full text-xs sm:text-sm pl-10 pr-9 py-2.5 rounded-xl border border-slate-200 focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/15 bg-white text-slate-900 transition outline-none shadow-2xs"
+                placeholder="Cari barang sewa..."
+                className="w-full h-12 sm:h-13 pl-3 pr-10 text-xs sm:text-sm md:text-base text-slate-900 placeholder:text-slate-400 font-medium bg-transparent outline-none rounded-2xl"
               />
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => { setSearchQuery(""); setCurrentPage(1); }}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 p-1"
+                  className="absolute right-3.5 p-1 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer"
+                  title="Hapus pencarian"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  <X className="w-4 h-4" />
                 </button>
               )}
             </div>
+          </div>
 
-            {/* Action Filters: Dropdown Kategori + Toggle Wilayah + Tombol Peta */}
-            <div className="flex items-center gap-2 shrink-0">
-              {/* Dropdown Kategori */}
-              <div className="relative shrink-0 flex-1 sm:flex-none" ref={categoryDropdownRef}>
+          {/* Compact Controls: [ Semua Kategori ] [ Wilayah ] [ Peta ] */}
+          <div ref={controlsRef} className="relative">
+            <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center sm:gap-2.5">
+              
+              {/* 1. KONTROL KATEGORI */}
+              <div className="relative">
                 <button
                   type="button"
-                  onClick={() => setIsCategoryOpen(!isCategoryOpen)}
-                  className={`w-full sm:w-auto px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-between gap-2 border shadow-2xs cursor-pointer ${
+                  onClick={() => setActiveModal(activeModal === "kategori" ? null : "kategori")}
+                  className={`w-full sm:w-auto flex items-center justify-center sm:justify-start gap-1 sm:gap-1.5 px-2.5 sm:px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-semibold sm:font-bold border transition cursor-pointer shadow-2xs ${
                     selectedCategory !== "Semua"
-                      ? "bg-blue-50 text-[#1683FF] border-blue-200 ring-1 ring-blue-500/20"
-                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                      ? "bg-blue-50 border-[#1683FF] text-[#1683FF]"
+                      : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-slate-900"
                   }`}
+                  title="Pilih Kategori"
                 >
-                  <div className="flex items-center gap-2 truncate">
-                    <CategoryIcon category={currentCat} className={`w-4 h-4 shrink-0 ${selectedCategory !== "Semua" ? "text-[#1683FF]" : "text-slate-400"}`} />
-                    <span className="truncate max-w-[130px] sm:max-w-[150px]">
-                      {selectedCategory === "Semua" ? "Semua Kategori" : currentCatName}
-                    </span>
-                  </div>
-                  <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform ${isCategoryOpen ? "rotate-180 text-[#1683FF]" : "text-slate-400"}`} />
+                  <CategoryIcon category={currentCat} className={`w-3.5 h-3.5 shrink-0 ${selectedCategory !== "Semua" ? "text-[#1683FF]" : "text-slate-500"}`} />
+                  <span className="hidden sm:inline truncate max-w-[150px]">
+                    {selectedCategory === "Semua" ? "Semua Kategori" : currentCatName}
+                  </span>
+                  <span className="sm:hidden truncate">
+                    {selectedCategory === "Semua" ? "Kategori" : currentCatName}
+                  </span>
+                  {selectedCategory !== "Semua" && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#1683FF] shrink-0 sm:hidden" />
+                  )}
+                  <ChevronDown className={`w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0 transition-transform duration-200 ${activeModal === "kategori" ? "rotate-180" : ""}`} />
                 </button>
 
-                {/* Popover Menu Dropdown */}
-                {isCategoryOpen && (
-                  <div className="absolute left-0 sm:right-0 sm:left-auto top-full mt-1.5 w-60 bg-white rounded-2xl border border-slate-200 shadow-xl p-1.5 z-50 animate-in fade-in duration-100">
-                    <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1">
-                      Kategori Sewa Alat
+                {/* Popover Desktop: Kategori */}
+                {activeModal === "kategori" && (
+                  <div className="hidden sm:block absolute top-full left-0 mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 p-2.5 z-30 animate-in fade-in zoom-in-95 duration-150">
+                    <div className="flex items-center justify-between pb-2 mb-1.5 border-b border-slate-100 px-1">
+                      <span className="text-xs font-bold text-slate-900">Kategori Sewa Alat</span>
+                      {selectedCategory !== "Semua" && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedCategory("Semua");
+                            setActiveModal(null);
+                            setCurrentPage(1);
+                          }}
+                          className="text-[11px] font-semibold text-[#1683FF] hover:underline cursor-pointer"
+                        >
+                          Reset
+                        </button>
+                      )}
                     </div>
-                    <div className="space-y-0.5 max-h-64 overflow-y-auto">
+                    <div className="space-y-0.5 max-h-64 overflow-y-auto pr-0.5">
                       {categories.map((cat) => {
                         const isSelected = selectedCategory === cat.id;
                         const catDisplayName = cat.name || cat.label;
@@ -211,7 +243,7 @@ export default function SewaPage() {
                             type="button"
                             onClick={() => {
                               setSelectedCategory(cat.id);
-                              setIsCategoryOpen(false);
+                              setActiveModal(null);
                               setCurrentPage(1);
                             }}
                             className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition cursor-pointer ${
@@ -233,47 +265,326 @@ export default function SewaPage() {
                 )}
               </div>
 
-              {/* Toggle Wilayah: Ringkas & Tidak Bertumpuk */}
-              <div className="flex items-center p-1 bg-white border border-slate-200 rounded-xl shadow-2xs text-xs shrink-0">
+              {/* 2. KONTROL WILAYAH */}
+              <div className="relative">
                 <button
                   type="button"
-                  onClick={() => { setFilterByKabupaten(true); setCurrentPage(1); }}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
+                  onClick={() => setActiveModal(activeModal === "wilayah" ? null : "wilayah")}
+                  className={`w-full sm:w-auto flex items-center justify-center sm:justify-start gap-1 sm:gap-1.5 px-2.5 sm:px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-semibold sm:font-bold border transition cursor-pointer shadow-2xs ${
                     filterByKabupaten
-                      ? "bg-[#1683FF] text-white shadow-2xs"
-                      : "text-slate-600 hover:text-slate-900"
+                      ? "bg-blue-50 border-[#1683FF] text-[#1683FF]"
+                      : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-slate-900"
                   }`}
+                  title="Pilih Wilayah"
                 >
-                  Hanya {activeKabupaten}
+                  <MapPin className={`w-3.5 h-3.5 shrink-0 ${filterByKabupaten ? "text-[#1683FF]" : "text-slate-500"}`} />
+                  <span className="hidden sm:inline truncate max-w-[140px]">
+                    {filterByKabupaten ? activeKabupaten.replace(/^Kabupaten\s+/i, 'Kab. ') : "Semua Wilayah"}
+                  </span>
+                  <span className="sm:hidden truncate">Wilayah</span>
+                  {filterByKabupaten && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#1683FF] shrink-0 sm:hidden" />
+                  )}
+                  <ChevronDown className={`w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0 transition-transform duration-200 ${activeModal === "wilayah" ? "rotate-180" : ""}`} />
                 </button>
+
+                {/* Popover Desktop: Wilayah */}
+                {activeModal === "wilayah" && (
+                  <div className="hidden sm:block absolute top-full left-0 mt-2 w-76 bg-white rounded-2xl shadow-xl border border-slate-200 p-3 z-30 animate-in fade-in zoom-in-95 duration-150">
+                    <span className="text-xs font-bold text-slate-900 block pb-2 mb-2 border-b border-slate-100">
+                      Cakupan Wilayah
+                    </span>
+                    <div className="space-y-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFilterByKabupaten(true);
+                          setActiveModal(null);
+                          setCurrentPage(1);
+                        }}
+                        className={`w-full p-2.5 rounded-xl text-left flex items-start gap-2.5 transition cursor-pointer ${
+                          filterByKabupaten
+                            ? "bg-blue-50 text-[#1683FF] font-bold"
+                            : "hover:bg-slate-50 text-slate-700"
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded-full border mt-0.5 flex items-center justify-center shrink-0 ${
+                          filterByKabupaten ? "border-[#1683FF] bg-[#1683FF]" : "border-slate-300"
+                        }`}>
+                          {filterByKabupaten && <Check className="w-2.5 h-2.5 text-white stroke-[3]" />}
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold">Hanya {activeKabupaten}</div>
+                          <div className="text-[10px] text-slate-500 mt-0.5 leading-snug">
+                            Tampilkan barang sewa lokal terdekat
+                          </div>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFilterByKabupaten(false);
+                          setActiveModal(null);
+                          setCurrentPage(1);
+                        }}
+                        className={`w-full p-2.5 rounded-xl text-left flex items-start gap-2.5 transition cursor-pointer ${
+                          !filterByKabupaten
+                            ? "bg-blue-50 text-[#1683FF] font-bold"
+                            : "hover:bg-slate-50 text-slate-700"
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded-full border mt-0.5 flex items-center justify-center shrink-0 ${
+                          !filterByKabupaten ? "border-[#1683FF] bg-[#1683FF]" : "border-slate-300"
+                        }`}>
+                          {!filterByKabupaten && <Check className="w-2.5 h-2.5 text-white stroke-[3]" />}
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold">Semua Wilayah</div>
+                          <div className="text-[10px] text-slate-500 mt-0.5 leading-snug">
+                            Tampilkan seluruh unit sewa dari berbagai kota
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+
+                    <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-500">Pusat Lokasi:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveModal(null);
+                          setIsGpsModalOpen?.(true);
+                        }}
+                        className="font-bold text-[#1683FF] hover:underline cursor-pointer"
+                      >
+                        Ganti GPS
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 3. KONTROL PETA (Paling Kanan) */}
+              <div className="relative">
                 <button
                   type="button"
-                  onClick={() => { setFilterByKabupaten(false); setCurrentPage(1); }}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
-                    !filterByKabupaten
-                      ? "bg-[#1683FF] text-white shadow-2xs"
-                      : "text-slate-600 hover:text-slate-900"
+                  onClick={() => setShowMap(!showMap)}
+                  className={`w-full sm:w-auto flex items-center justify-center sm:justify-start gap-1 sm:gap-1.5 px-2.5 sm:px-3.5 py-2 rounded-xl text-[11px] sm:text-xs font-semibold sm:font-bold border transition cursor-pointer shadow-2xs ${
+                    showMap
+                      ? "bg-[#1683FF] border-[#1683FF] text-white shadow-xs"
+                      : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-slate-900"
                   }`}
+                  title={showMap ? "Tutup Peta" : "Lihat Peta"}
                 >
-                  Semua
+                  <Map className="w-3.5 h-3.5 shrink-0" />
+                  <span className="hidden sm:inline">{showMap ? "Tutup Peta" : "Lihat Peta"}</span>
+                  <span className="sm:hidden">{showMap ? "Tutup" : "Peta"}</span>
                 </button>
               </div>
 
-              {/* Tombol Toggle Peta */}
-              <button
-                type="button"
-                onClick={() => setShowMap(!showMap)}
-                className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-2xs cursor-pointer shrink-0 ${
-                  showMap
-                    ? "bg-[#1683FF] text-white shadow-blue-500/20"
-                    : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
-                }`}
-              >
-                <Map className="w-4 h-4" />
-                <span className="hidden sm:inline">{showMap ? "Tutup Peta" : "Lihat Peta"}</span>
-              </button>
             </div>
           </div>
+
+          {/* ============================================================ */}
+          {/* MOBILE BOTTOM SHEET FOR KATEGORI & WILAYAH                   */}
+          {/* ============================================================ */}
+          {activeModal && (
+            <div className="fixed inset-0 z-50 sm:hidden flex flex-col justify-end">
+              <div 
+                className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity"
+                onClick={() => setActiveModal(null)}
+              />
+              <div className="relative z-10 bg-white rounded-t-3xl border-t border-slate-200 shadow-2xl p-5 max-h-[82vh] overflow-y-auto space-y-4 animate-in slide-in-from-bottom duration-200 pb-[max(env(safe-area-inset-bottom),1.5rem)]">
+                
+                {/* Drag Handle */}
+                <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto -mt-1 mb-1" />
+
+                {/* Header Sheet */}
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div className="flex items-center gap-2">
+                    {activeModal === "kategori" && <CategoryIcon category={currentCat} className="w-4 h-4 text-[#1683FF]" />}
+                    {activeModal === "wilayah" && <MapPin className="w-4 h-4 text-[#1683FF]" />}
+                    <h3 className="font-extrabold text-sm text-slate-900">
+                      {activeModal === "kategori" && "Pilih Kategori Sewa Alat"}
+                      {activeModal === "wilayah" && "Cakupan Wilayah"}
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveModal(null)}
+                    className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center justify-center cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Content: Kategori Sheet */}
+                {activeModal === "kategori" && (
+                  <div className="space-y-1.5 max-h-[60vh] overflow-y-auto pr-0.5">
+                    {categories.map((cat) => {
+                      const isSelected = selectedCategory === cat.id;
+                      const catDisplayName = cat.name || cat.label;
+                      return (
+                        <button
+                          key={cat.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedCategory(cat.id);
+                            setActiveModal(null);
+                            setCurrentPage(1);
+                          }}
+                          className={`w-full flex items-center justify-between p-3 rounded-2xl border text-xs transition cursor-pointer ${
+                            isSelected
+                              ? "bg-blue-50 border-[#1683FF] text-[#1683FF] font-bold"
+                              : "border-slate-200 text-slate-700 hover:bg-slate-50 font-medium"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 truncate">
+                            <CategoryIcon category={cat} className={`w-4 h-4 shrink-0 ${isSelected ? "text-[#1683FF]" : "text-slate-400"}`} />
+                            <span className="truncate">{catDisplayName}</span>
+                          </div>
+                          {isSelected && <Check className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Content: Wilayah Sheet */}
+                {activeModal === "wilayah" && (
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFilterByKabupaten(true);
+                        setActiveModal(null);
+                        setCurrentPage(1);
+                      }}
+                      className={`w-full p-3.5 rounded-2xl border text-left flex items-start gap-3 transition cursor-pointer ${
+                        filterByKabupaten
+                          ? "bg-blue-50 border-[#1683FF] text-[#1683FF] font-bold"
+                          : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className={`w-5 h-5 rounded-full border mt-0.5 flex items-center justify-center shrink-0 ${
+                        filterByKabupaten ? "border-[#1683FF] bg-[#1683FF]" : "border-slate-300"
+                      }`}>
+                        {filterByKabupaten && <Check className="w-3 h-3 text-white stroke-[3]" />}
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold">Hanya {activeKabupaten}</div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                          Tampilkan barang sewa lokal terdekat di sekitar Anda
+                        </div>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFilterByKabupaten(false);
+                        setActiveModal(null);
+                        setCurrentPage(1);
+                      }}
+                      className={`w-full p-3.5 rounded-2xl border text-left flex items-start gap-3 transition cursor-pointer ${
+                        !filterByKabupaten
+                          ? "bg-blue-50 text-[#1683FF] font-bold"
+                          : "border-slate-200 text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className={`w-5 h-5 rounded-full border mt-0.5 flex items-center justify-center shrink-0 ${
+                        !filterByKabupaten ? "border-[#1683FF] bg-[#1683FF]" : "border-slate-300"
+                      }`}>
+                        {!filterByKabupaten && <Check className="w-3 h-3 text-white stroke-[3]" />}
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold">Semua Wilayah</div>
+                        <div className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                          Tampilkan seluruh unit sewa dari berbagai kota
+                        </div>
+                      </div>
+                    </button>
+
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+                      <span className="text-slate-500">Pusat Lokasi Perangkat:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveModal(null);
+                          setIsGpsModalOpen?.(true);
+                        }}
+                        className="font-bold text-[#1683FF] hover:underline cursor-pointer"
+                      >
+                        Ganti GPS / Wilayah
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+            </div>
+          )}
+
+          {/* Active Chips & Clear All */}
+          {(selectedCategory !== "Semua" || !filterByKabupaten || searchQuery) && (
+            <div className="flex items-center gap-1.5 flex-wrap pt-0.5 text-xs">
+              <span className="text-slate-400 font-semibold text-[11px]">Filter aktif:</span>
+              
+              {selectedCategory !== "Semua" && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 text-[#1683FF] font-bold text-[11px] border border-blue-100">
+                  <span>{currentCatName}</span>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedCategory("Semua"); setCurrentPage(1); }}
+                    className="hover:text-blue-900 cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+
+              {!filterByKabupaten && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-50 text-[#1683FF] font-bold text-[11px] border border-blue-100">
+                  <span>Semua Wilayah</span>
+                  <button
+                    type="button"
+                    onClick={() => { setFilterByKabupaten(true); setCurrentPage(1); }}
+                    className="hover:text-blue-900 cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+
+              {searchQuery && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-bold text-[11px] border border-slate-200">
+                  <span>&quot;{searchQuery}&quot;</span>
+                  <button
+                    type="button"
+                    onClick={() => { setSearchQuery(""); setCurrentPage(1); }}
+                    className="hover:text-slate-900 cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedCategory("Semua");
+                  setFilterByKabupaten(true);
+                  setSearchQuery("");
+                  setCurrentPage(1);
+                }}
+                className="text-[11px] font-bold text-slate-500 hover:text-rose-600 transition underline cursor-pointer ml-1"
+              >
+                Reset Semua
+              </button>
+            </div>
+          )}
+
         </div>
 
         {/* Interactive Map of Rental Locations */}
@@ -341,36 +652,36 @@ export default function SewaPage() {
                   key={st.id}
                   className="bg-white rounded-2xl p-4 sm:p-5 border border-blue-200/90 shadow-[0_4px_16px_rgba(22,131,255,0.06)] hover:shadow-md transition flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                 >
-                  <div className="flex items-center gap-3.5">
+                  <div className="flex items-center gap-3.5 min-w-0 flex-1">
                     <div className="relative w-14 h-14 rounded-2xl overflow-hidden bg-slate-100 shrink-0 border border-slate-200">
                       <img src={st.avatar} alt={st.name} className="w-full h-full object-cover" />
                       <div className="absolute -bottom-0.5 -right-0.5 bg-emerald-500 rounded-full p-1 text-white border-2 border-white">
                         <ShieldCheck className="w-2.5 h-2.5" />
                       </div>
                     </div>
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <Link 
                           href={`/mitra/${st.id}`}
-                          className="font-extrabold text-sm sm:text-base text-slate-900 hover:text-[#1683FF] transition-colors"
+                          className="font-extrabold text-sm sm:text-base text-slate-900 hover:text-[#1683FF] transition-colors truncate"
                         >
                           {st.name}
                         </Link>
-                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
                           <ShieldCheck className="w-3 h-3 text-emerald-600" />
                           Terverifikasi
                         </span>
                       </div>
                       <p className="text-xs text-slate-500 line-clamp-1 mt-0.5">{st.tagline}</p>
-                      <div className="flex items-center gap-3 text-xs text-slate-600 mt-2 flex-wrap">
-                        <span className="flex items-center gap-1 font-bold text-slate-800">
+                      <div className="flex items-center gap-3 text-xs text-slate-600 mt-2 flex-wrap min-w-0">
+                        <span className="flex items-center gap-1 font-bold text-slate-800 shrink-0">
                           <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
                           {st.rating} ({st.reviewCount} ulasan)
                         </span>
                         <span className="text-slate-300">•</span>
-                        <span className="text-slate-500 font-medium">{st.catalog?.length || 0} unit sewa</span>
+                        <span className="text-slate-500 font-medium shrink-0">{st.catalog?.length || 0} unit sewa</span>
                         <span className="text-slate-300">•</span>
-                        <span className="text-slate-500 font-medium">{st.address}</span>
+                        <span className="text-slate-500 font-medium truncate max-w-[180px] sm:max-w-none">{st.address}</span>
                       </div>
                     </div>
                   </div>
@@ -388,9 +699,9 @@ export default function SewaPage() {
         )}
 
         {/* KATALOG PRODUK BARANG SEWA */}
-        <div className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="pt-2 sm:pt-3 border-t border-slate-200/80 mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
-            <h2 className="text-sm sm:text-base font-black text-slate-900 flex items-center gap-2">
+            <h2 className="text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-2">
               <span>Daftar Unit Barang Sewa</span>
               <span className="text-xs font-bold text-[#1683FF] bg-blue-50 border border-blue-100 px-2 py-0.5 rounded-full">
                 {filteredRentals.length} unit

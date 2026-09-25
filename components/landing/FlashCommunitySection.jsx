@@ -61,22 +61,22 @@ export default function FlashCommunitySection() {
 
             {/* Mini Urgent Task Previews */}
             <div className="space-y-2.5">
-              <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3 border border-white/10 flex items-center justify-between">
-                <div>
-                  <div className="text-xs font-bold text-white">Antar Hardcopy Skripsi ke Rektorat</div>
-                  <div className="text-[10px] text-slate-400">Deadline 45 menit · Depok</div>
+              <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3 border border-white/10 flex items-center justify-between gap-2 min-w-0">
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-bold text-white truncate">Antar Hardcopy Skripsi ke Rektorat</div>
+                  <div className="text-[10px] text-slate-400 truncate">Deadline 45 menit · Depok</div>
                 </div>
-                <div className="text-right">
+                <div className="text-right shrink-0">
                   <span className="text-xs font-bold text-[#38BDF8]">Rp 45.000</span>
                 </div>
               </div>
 
-              <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3 border border-white/10 flex items-center justify-between">
-                <div>
-                  <div className="text-xs font-bold text-white">Sewa Sony Lens 85mm f1.4 Dadakan</div>
-                  <div className="text-[10px] text-slate-400">Untuk wisuda siang ini · Bandung</div>
+              <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3 border border-white/10 flex items-center justify-between gap-2 min-w-0">
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-bold text-white truncate">Sewa Sony Lens 85mm f1.4 Dadakan</div>
+                  <div className="text-[10px] text-slate-400 truncate">Untuk wisuda siang ini · Bandung</div>
                 </div>
-                <div className="text-right">
+                <div className="text-right shrink-0">
                   <span className="text-xs font-bold text-[#38BDF8]">Rp 150.000</span>
                 </div>
               </div>

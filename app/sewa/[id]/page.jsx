@@ -660,11 +660,11 @@ export default function RentalDetailPage() {
 
           {/* KOLOM KANAN (5 Kolom): Sticky Checkout Panel (1 Card Bersih & Konsisten) */}
           <div className="lg:col-span-5 lg:sticky lg:top-24">
-            <div className="bg-white border border-slate-200/90 rounded-2xl p-6 sm:p-7 shadow-2xs space-y-5">
+            <div className="bg-white border border-slate-200/90 rounded-2xl sm:rounded-3xl p-4 sm:p-7 shadow-xs space-y-4 sm:space-y-5">
               
               {/* Tarif & Uang Jaminan */}
-              <div className="flex items-baseline justify-between pb-4 border-b border-slate-100">
-                <div>
+              <div className="flex flex-wrap items-baseline justify-between gap-2.5 pb-3 sm:pb-4 border-b border-slate-100">
+                <div className="min-w-0">
                   <span className="text-xs text-slate-400 font-semibold block uppercase tracking-wider">Tarif Sewa</span>
                   <div className="text-2xl sm:text-3xl font-black text-[#1683FF] tracking-tight mt-0.5">
                     {formatIDR(rental.dailyPrice)}
@@ -672,12 +672,12 @@ export default function RentalDetailPage() {
                   </div>
                 </div>
 
-                <div className="text-right">
+                <div className="text-left sm:text-right shrink-0">
                   <span className="text-xs text-slate-400 font-semibold block uppercase tracking-wider">Deposit Jaminan</span>
                   <div className="text-base sm:text-lg font-bold text-slate-900 mt-0.5">
                     {formatIDR(rental.depositAmount)}
                   </div>
-                  <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200 inline-block mt-0.5">
+                  <span className="text-[10px] sm:text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200 inline-block mt-0.5">
                     100% Kembali Utuh
                   </span>
                 </div>
@@ -689,65 +689,67 @@ export default function RentalDetailPage() {
                   Tentukan Periode Sewa:
                 </div>
                 
-                <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
                   <div>
-                    <label className="block font-semibold text-slate-600 mb-1.5">
+                    <label className="block font-semibold text-slate-600 mb-1">
                       Tanggal Mulai:
                     </label>
                     <input
                       type="date"
                       value={startDate}
                       onChange={(e) => setStartDate(e.target.value)}
-                      className="w-full p-2.5 rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 focus:border-[#1683FF] focus:ring-2 focus:ring-blue-50 focus:outline-none transition"
+                      className="w-full p-2.5 rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 text-xs focus:border-[#1683FF] focus:ring-2 focus:ring-blue-50 focus:outline-none transition min-w-0"
                     />
                   </div>
                   <div>
-                    <label className="block font-semibold text-slate-600 mb-1.5">
+                    <label className="block font-semibold text-slate-600 mb-1">
                       Tanggal Selesai:
                     </label>
                     <input
                       type="date"
                       value={endDate}
                       onChange={(e) => setEndDate(e.target.value)}
-                      className="w-full p-2.5 rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 focus:border-[#1683FF] focus:ring-2 focus:ring-blue-50 focus:outline-none transition"
+                      className="w-full p-2.5 rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 text-xs focus:border-[#1683FF] focus:ring-2 focus:ring-blue-50 focus:outline-none transition min-w-0"
                     />
                   </div>
                 </div>
 
                 {/* Durasi Sewa */}
-                <div className="flex items-center justify-between text-xs font-semibold text-slate-600 pt-1 px-0.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs font-semibold text-slate-600 pt-1 px-0.5">
                   <span className="flex items-center gap-1.5 text-slate-500">
-                    <Clock className="w-3.5 h-3.5 text-[#1683FF]" />
-                    Durasi Sewa:
+                    <Clock className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
+                    <span>Durasi Sewa:</span>
                   </span>
-                  <span className="text-[#1683FF] font-black text-sm">{totalDays} Hari</span>
+                  <span className="text-[#1683FF] font-black text-sm text-left sm:text-right">{totalDays} Hari</span>
                 </div>
               </div>
 
               {/* Rincian Transparansi Biaya */}
               <div className="space-y-2 pt-3 text-xs border-t border-slate-100">
-                <div className="flex items-center justify-between text-slate-600">
-                  <span>Biaya Sewa ({totalDays} hari × {formatIDR(rental.dailyPrice)})</span>
-                  <span className="text-slate-900 font-semibold">{formatIDR(rentalFee)}</span>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-slate-600">
+                  <span className="min-w-0 break-words">Biaya Sewa ({totalDays} hari × {formatIDR(rental.dailyPrice)})</span>
+                  <span className="text-slate-900 font-semibold shrink-0 text-left sm:text-right">{formatIDR(rentalFee)}</span>
                 </div>
 
-                <div className="flex items-center justify-between text-slate-600">
-                  <span>Uang Jaminan (Deposit)</span>
-                  <span className="text-slate-900 font-semibold">{formatIDR(depositFee)}</span>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-slate-600">
+                  <span className="min-w-0 break-words">Uang Jaminan (Deposit)</span>
+                  <span className="text-slate-900 font-semibold shrink-0 text-left sm:text-right">{formatIDR(depositFee)}</span>
                 </div>
 
-                <div className="flex items-center justify-between text-slate-500 text-[11px] pt-0.5">
-                  <span>Potongan Platform Bantuin (8%)</span>
-                  <span className="text-slate-700 font-medium">-{formatIDR(platformFee)} (ditanggung toko)</span>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-slate-500 text-[11px] pt-0.5">
+                  <span className="min-w-0 break-words">Potongan Platform Bantuin (8%)</span>
+                  <span className="text-slate-700 font-medium shrink-0 text-left sm:text-right">-{formatIDR(platformFee)} (ditanggung toko)</span>
                 </div>
 
                 {/* Total Tagihan */}
-                <div className="pt-3.5 border-t border-slate-200/90 flex items-baseline justify-between mt-1">
-                  <div>
+                <div className="pt-3 border-t border-slate-200/90 flex flex-col sm:flex-row sm:items-baseline justify-between gap-1.5 sm:gap-2 mt-1">
+                  <div className="min-w-0">
                     <span className="font-bold text-xs sm:text-sm text-slate-900 block">Total Tagihan</span>
-                    <span className="text-[11px] text-slate-500">Deposit otomatis kembali saat unit beres</span>
+                    <span className="text-[10px] sm:text-[11px] text-slate-500 block leading-tight">Deposit otomatis kembali saat unit beres</span>
                   </div>
-                  <span className="text-[#1683FF] text-2xl font-black tracking-tight">{formatIDR(totalAmount)}</span>
+                  <div className="text-left sm:text-right shrink-0">
+                    <span className="text-[#1683FF] text-xl sm:text-2xl font-black tracking-tight break-all block">{formatIDR(totalAmount)}</span>
+                  </div>
                 </div>
               </div>
 
@@ -759,15 +761,15 @@ export default function RentalDetailPage() {
                     disabled
                     className="w-full py-3.5 rounded-xl bg-slate-200 text-slate-500 font-bold text-sm cursor-not-allowed flex items-center justify-center gap-2 text-center"
                   >
-                    <Lock className="w-4 h-4" />
+                    <Lock className="w-4 h-4 shrink-0" />
                     <span>Stok Unit Sedang Habis</span>
                   </button>
                 ) : (
                   <Link
                     href={`/sewa/${rental.id}/pembayaran?start=${startDate}&end=${endDate}&days=${totalDays}`}
-                    className="w-full py-3.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-sm sm:text-base shadow-2xs hover:shadow-xs transition active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer text-center"
+                    className="w-full py-3.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm md:text-base shadow-2xs hover:shadow-xs transition active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer text-center"
                   >
-                    <Lock className="w-4 h-4" />
+                    <Lock className="w-4 h-4 shrink-0" />
                     <span>Sewa Sekarang (Lanjut Pembayaran)</span>
                   </Link>
                 )}
@@ -775,20 +777,20 @@ export default function RentalDetailPage() {
                 <button
                   type="button"
                   onClick={handleStartInquiry}
-                  className="w-full py-2.5 rounded-xl bg-white border border-slate-200 hover:border-[#1683FF] hover:bg-blue-50/60 text-slate-700 hover:text-[#1683FF] font-semibold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-2.5 rounded-xl bg-white border border-slate-200 hover:border-[#1683FF] hover:bg-blue-50/60 text-slate-700 hover:text-[#1683FF] font-semibold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer text-center"
                 >
-                  <MessageSquare className="w-4 h-4 text-[#1683FF]" />
+                  <MessageSquare className="w-4 h-4 text-[#1683FF] shrink-0" />
                   <span>Chat Toko Dulu (Tanya Ketersediaan)</span>
                 </button>
               </div>
 
               {/* Integrated Trust Guarantee */}
               <div className="pt-3 border-t border-slate-100 space-y-1 text-center">
-                <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-700">
-                  <ShieldCheck className="w-4 h-4 text-[#1683FF]" />
+                <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-slate-700 flex-wrap">
+                  <ShieldCheck className="w-4 h-4 text-[#1683FF] shrink-0" />
                   <span>Sistem Pembayaran Terverifikasi</span>
                 </div>
-                <div className="flex items-center justify-center gap-2 text-[11px] font-medium text-slate-500">
+                <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[11px] font-medium text-slate-500">
                   <span>Payment Gateway Resmi</span>
                   <span>•</span>
                   <span>Jaminan Uang Kembali</span>

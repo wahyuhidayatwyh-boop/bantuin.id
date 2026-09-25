@@ -122,9 +122,10 @@ export default function BestOffers() {
             {/* Action Button */}
             <Link
               href={item.href}
-              className="w-full py-1.5 sm:py-2.5 rounded-lg sm:rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-[11px] sm:text-xs shadow-[0_4px_14px_rgba(22,131,255,0.25)] transition text-center block active:scale-98"
+              className="w-full py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-xs shadow-[0_4px_14px_rgba(22,131,255,0.2)] transition text-center block active:scale-98"
             >
-              {item.actionText}
+              <span className="sm:hidden">{item.isRental ? "Sewa" : "Pesan"}</span>
+              <span className="hidden sm:inline">{item.actionText}</span>
             </Link>
           </div>
         ))}

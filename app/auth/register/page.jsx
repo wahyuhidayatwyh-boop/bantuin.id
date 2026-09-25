@@ -5,7 +5,6 @@ import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import logoImg from "@/components/image/logo.png";
-import bgLoginImg from "@/components/image/bgroundlogin.png";
 import { useApp } from "@/lib/context/AppContext";
 import { INDONESIA_REGION_DATA, PROVINCE_LIST } from "@/lib/data/indonesiaRegions";
 import { detectRealtimeLocation } from "@/lib/services/gpsService";
@@ -350,17 +349,20 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen relative flex flex-col items-center justify-between p-4 sm:p-6 lg:p-8 overflow-x-hidden font-sans">
-      {/* Background Image */}
-      <Image
-        src={bgLoginImg}
-        alt="Bantuin Register Background"
-        fill
-        priority
-        className="object-cover object-center -z-10"
+    <div className="min-h-screen relative flex flex-col items-center justify-between p-4 sm:p-6 lg:p-8 overflow-x-hidden font-sans bg-gradient-to-br from-[#EBF3FE] via-[#F0F6FF] to-[#DEEEFC]">
+      {/* 1. Subtle Dot Grid Matrix Motif Overlay */}
+      <div 
+        className="absolute inset-0 pointer-events-none opacity-30"
+        style={{
+          backgroundImage: "radial-gradient(#1683FF 1.2px, transparent 1.2px)",
+          backgroundSize: "24px 24px",
+        }}
       />
-      {/* Subtle overlay */}
-      <div className="absolute inset-0 bg-slate-900/10 -z-10" />
+
+      {/* 2. Ambient Soft Glow Orbs */}
+      <div className="absolute -top-24 -left-24 w-96 h-96 bg-blue-300/35 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-1/3 -right-20 w-80 h-80 bg-sky-200/40 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-20 left-1/3 w-72 h-72 bg-indigo-200/30 rounded-full blur-3xl pointer-events-none" />
 
       {/* Top Brand Logo Centered */}
       <div className="w-full max-w-2xl mx-auto pt-2 pb-2 flex justify-center">

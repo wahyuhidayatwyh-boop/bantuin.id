@@ -293,4 +293,12 @@
   animation: shimmer 1.5s infinite;
 }
 
+/* Mobile Safe Area Bottom Padding for Fixed Glass Bottom Nav */
+@media (max-width: 767px) {
+  main:not(.no-bottom-nav-pad) {
+    padding-bottom: calc(4.75rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+
 

@@ -101,10 +101,10 @@ export default function MitraSection() {
             <Link
               key={item.id}
               href={item.href}
-              className="group flex flex-col items-center text-center"
+              className="group flex flex-col items-center text-center min-w-0 w-full overflow-hidden"
             >
               {/* Squircle Image Card matching reference */}
-              <div className="w-full aspect-square rounded-[22px] sm:rounded-[26px] md:rounded-[30px] overflow-hidden bg-slate-100 border border-slate-200/80 shadow-2xs group-hover:shadow-md group-hover:border-[#1683FF]/50 group-hover:-translate-y-1 transition-all duration-300 relative">
+              <div className="w-full aspect-square rounded-[18px] sm:rounded-[26px] md:rounded-[30px] overflow-hidden bg-slate-100 border border-slate-200/80 shadow-2xs group-hover:shadow-md group-hover:border-[#1683FF]/50 group-hover:-translate-y-1 transition-all duration-300 relative">
                 <img
                   src={item.image}
                   alt={item.name}
@@ -112,9 +112,9 @@ export default function MitraSection() {
                 />
                 
                 {/* Verified icon pill */}
-                <div className="absolute top-2 right-2 sm:top-2.5 sm:right-2.5">
-                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white/90 text-emerald-600 backdrop-blur-md shadow-2xs border border-white/60">
-                    <ShieldCheck className="w-3.5 h-3.5" />
+                <div className="absolute top-1.5 right-1.5 sm:top-2.5 sm:right-2.5">
+                  <span className="inline-flex items-center justify-center w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-white/90 text-emerald-600 backdrop-blur-md shadow-2xs border border-white/60">
+                    <ShieldCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                   </span>
                 </div>
 
@@ -127,11 +127,11 @@ export default function MitraSection() {
               </div>
 
               {/* Title & Tag */}
-              <div className="mt-2 sm:mt-2.5 w-full px-1">
-                <h3 className="text-xs sm:text-sm font-bold text-slate-800 group-hover:text-[#1683FF] transition-colors truncate">
+              <div className="mt-1.5 sm:mt-2.5 w-full min-w-0 px-0.5">
+                <h3 className="text-[11px] sm:text-sm font-bold text-slate-800 group-hover:text-[#1683FF] transition-colors truncate w-full">
                   {item.name}
                 </h3>
-                <p className="text-[10px] sm:text-[11px] text-slate-500 truncate mt-0.5">
+                <p className="text-[9px] sm:text-[11px] text-slate-500 truncate mt-0.5 w-full">
                   {item.tag}
                 </p>
               </div>

@@ -163,24 +163,26 @@ export default function HelperSection() {
                 </Link>
 
                 {/* Name with verified icon */}
-                <Link 
-                  href={`/jasa/penyedia/${helper.providerId}`}
-                  className="font-bold text-xs sm:text-base text-slate-900 flex items-center justify-center gap-1 hover:text-[#1683FF] transition line-clamp-1"
-                >
-                  <span>{helper.name}</span>
-                  <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#1683FF] shrink-0" />
-                </Link>
+                <div className="w-full min-w-0 px-1">
+                  <Link 
+                    href={`/jasa/penyedia/${helper.providerId}`}
+                    className="font-bold text-xs sm:text-base text-slate-900 flex items-center justify-center gap-1 hover:text-[#1683FF] transition min-w-0"
+                  >
+                    <span className="truncate">{helper.name}</span>
+                    <CheckCircle2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#1683FF] shrink-0" />
+                  </Link>
+                </div>
                 
-                <p className="text-[10px] sm:text-[11px] text-slate-500 mb-1.5 sm:mb-2.5 line-clamp-1">
+                <p className="text-[10px] sm:text-[11px] text-slate-500 mb-1.5 sm:mb-2.5 truncate w-full px-1">
                   {helper.role}
                 </p>
 
                 {/* Rating & Metric */}
-                <div className="flex items-center gap-1 text-[10px] sm:text-xs font-semibold text-slate-800 bg-slate-50 border border-slate-100 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full mb-2 sm:mb-3.5">
-                  <Star className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-amber-400 text-amber-400" />
+                <div className="flex items-center justify-center gap-1 text-[10px] sm:text-xs font-semibold text-slate-800 bg-slate-50 border border-slate-100 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full mb-2 sm:mb-3.5 max-w-full overflow-hidden">
+                  <Star className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-amber-400 text-amber-400 shrink-0" />
                   <span>{helper.ratingAvg}</span>
                   <span className="text-slate-300">·</span>
-                  <span className="text-emerald-700 font-bold">{helper.completedHelps} tugas</span>
+                  <span className="text-emerald-700 font-bold truncate">{helper.completedHelps} tugas</span>
                 </div>
 
                 {/* Genuine Distance / Location */}
@@ -188,9 +190,9 @@ export default function HelperSection() {
                   const distInfo = getDistanceToUser ? getDistanceToUser(helper.latitude, helper.longitude) : null;
                   const displayLoc = distInfo?.isRealtime && distInfo?.text ? distInfo.text : helper.locationName;
                   return (
-                    <div className="flex items-center gap-1 text-[10px] sm:text-xs text-slate-600 mb-2 sm:mb-3.5">
+                    <div className="flex items-center justify-center gap-1 text-[10px] sm:text-xs text-slate-600 mb-2 sm:mb-3.5 w-full min-w-0 px-1 overflow-hidden">
                       <MapPin className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#1683FF] shrink-0" />
-                      <span className="font-medium truncate max-w-[150px] sm:max-w-none">{displayLoc}</span>
+                      <span className="font-medium truncate max-w-full">{displayLoc}</span>
                     </div>
                   );
                 })()}
@@ -206,20 +208,20 @@ export default function HelperSection() {
               </div>
 
               {/* Action Buttons: Buka Profil Publik & Pesan Langsung */}
-              <div className="w-full flex flex-col gap-1.5 sm:gap-2 pt-2 border-t border-slate-100">
+              <div className="w-full flex flex-col gap-1.5 sm:gap-2 pt-2 border-t border-slate-100 min-w-0">
                 <Link
                   href={`/jasa/penyedia/${helper.providerId}`}
-                  className="w-full py-1.5 sm:py-2 rounded-lg sm:rounded-xl border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 text-slate-700 hover:text-[#1683FF] font-bold text-[11px] sm:text-xs transition flex items-center justify-center gap-1 cursor-pointer"
+                  className="w-full py-1.5 sm:py-2 rounded-lg sm:rounded-xl border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 text-slate-700 hover:text-[#1683FF] font-bold text-[11px] sm:text-xs transition flex items-center justify-center gap-1 cursor-pointer truncate"
                 >
-                  <Eye className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-slate-400 group-hover:text-[#1683FF]" />
-                  <span>Lihat Profil</span>
+                  <Eye className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-slate-400 group-hover:text-[#1683FF] shrink-0" />
+                  <span className="truncate">Lihat Profil</span>
                 </Link>
 
                 <Link
                   href={`/jasa/penyedia/${helper.providerId}`}
-                  className="w-full py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-[11px] sm:text-xs shadow-xs transition text-center active:scale-95 flex items-center justify-center gap-1"
+                  className="w-full py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-[11px] sm:text-xs shadow-xs transition text-center active:scale-95 flex items-center justify-center gap-1 truncate"
                 >
-                  <span>Pesan Jasa</span>
+                  <span className="truncate">Pesan Jasa</span>
                 </Link>
               </div>
 

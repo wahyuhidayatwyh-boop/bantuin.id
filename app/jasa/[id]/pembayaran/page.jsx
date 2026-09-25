@@ -264,22 +264,22 @@ function JasaPembayaranContent() {
 
       {/* Breadcrumb / Top Bar */}
       <div className="bg-white border-b border-slate-200/80 shadow-2xs">
-        <div className="max-w-[1400px] mx-auto px-4 sm:px-8 py-3 flex items-center justify-between">
+        <div className="max-w-[1400px] mx-auto px-3.5 sm:px-8 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-2.5">
           <Link
             href={roomIdParam ? `/chat?room=${roomIdParam}` : `/jasa/${service.id}`}
-            className="inline-flex items-center gap-2 text-xs sm:text-sm font-bold text-slate-600 hover:text-[#1683FF] transition cursor-pointer"
+            className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-slate-600 hover:text-[#1683FF] transition cursor-pointer shrink-0"
           >
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="w-4 h-4 shrink-0" />
             <span>{roomIdParam ? "Kembali ke Obrolan" : "Kembali ke Detail Layanan"}</span>
           </Link>
 
-          <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#1683FF] bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
-              <Lock className="w-3.5 h-3.5 text-[#1683FF]" />
+          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+            <span className="inline-flex items-center gap-1.5 text-[11px] sm:text-xs font-semibold text-[#1683FF] bg-blue-50 px-2.5 sm:px-3 py-1 rounded-full border border-blue-100 whitespace-normal text-left">
+              <Lock className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
               <span>Sistem Pembayaran Terverifikasi</span>
             </span>
-            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50/70 border border-blue-100 text-slate-700 text-xs font-semibold">
-              <Clock className="w-3.5 h-3.5 text-[#1683FF]" />
+            <div className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full bg-blue-50/70 border border-blue-100 text-slate-700 text-[11px] sm:text-xs font-semibold shrink-0">
+              <Clock className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
               <span>Batas Waktu:</span>
               <span className="font-mono font-black text-[#1683FF]">{formatTimer(timeLeft)}</span>
             </div>
@@ -288,55 +288,55 @@ function JasaPembayaranContent() {
       </div>
 
       {/* Main Container - Expansive, clean, and unified design */}
-      <main className="flex-1 max-w-[1400px] w-full mx-auto px-4 sm:px-8 py-5 sm:py-7">
+        <main className="flex-1 max-w-[1400px] w-full mx-auto px-4 sm:px-8 py-4 sm:py-7">
         
         {/* State: Berhasil Dibayar */}
         {isSuccess ? (
-          <div className="bg-white rounded-3xl border border-slate-200 p-8 sm:p-10 shadow-xs max-w-xl mx-auto text-center space-y-5 animate-in fade-in duration-300">
-            <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-3xl flex items-center justify-center mx-auto border border-emerald-200 shadow-xs">
-              <CheckCircle2 className="w-10 h-10" />
+          <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200 p-5 sm:p-10 shadow-xs max-w-xl mx-auto text-center space-y-4 sm:space-y-5 animate-in fade-in duration-300">
+            <div className="w-14 h-14 sm:w-16 sm:h-16 bg-emerald-50 text-emerald-600 rounded-2xl sm:rounded-3xl flex items-center justify-center mx-auto border border-emerald-200 shadow-xs">
+              <CheckCircle2 className="w-8 h-8 sm:w-10 sm:h-10" />
             </div>
 
             <div>
-              <span className="text-xs font-extrabold uppercase px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 inline-block mb-2">
+              <span className="text-[10px] sm:text-xs font-extrabold uppercase px-2.5 sm:px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 inline-block mb-2">
                 Pembayaran Berhasil Terverifikasi
               </span>
-              <h1 className="text-2xl font-black text-slate-900 tracking-tight">
+              <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
                 Pembayaran Berhasil Dikonfirmasi!
               </h1>
-              <p className="text-xs sm:text-sm text-slate-500 mt-1.5 leading-relaxed">
+              <p className="text-xs sm:text-sm text-slate-500 mt-1.5 leading-relaxed break-words">
                 Pembayaran Anda sebesar <strong>{formatIDR(totalAmount)}</strong> telah berhasil diverifikasi melalui sistem pembayaran resmi Bantuin.
               </p>
             </div>
 
             {/* Detail Singkat Pesanan */}
-            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 text-left space-y-2 text-xs">
-              <div className="flex justify-between py-1 border-b border-slate-200/60">
+            <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-50 border border-slate-100 text-left space-y-2 text-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between py-1 border-b border-slate-200/60 gap-0.5">
                 <span className="text-slate-500">Layanan Jasa:</span>
-                <span className="font-bold text-slate-900">{service.title}</span>
+                <span className="font-bold text-slate-900 break-words">{service.title}</span>
               </div>
-              <div className="flex justify-between py-1 border-b border-slate-200/60">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between py-1 border-b border-slate-200/60 gap-0.5">
                 <span className="text-slate-500">Paket Terpilih:</span>
-                <span className="font-bold text-slate-900">{selectedPackage.name}</span>
+                <span className="font-bold text-slate-900 break-words">{selectedPackage.name}</span>
               </div>
-              <div className="flex justify-between py-1 border-b border-slate-200/60">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between py-1 border-b border-slate-200/60 gap-0.5">
                 <span className="text-slate-500">Jadwal Pelaksanaan:</span>
-                <span className="font-bold text-[#1683FF]">{dateParam || "Sesuai Jadwal"} • Pukul {timeParam || "09:00"} WIB</span>
+                <span className="font-bold text-[#1683FF] break-words">{dateParam || "Sesuai Jadwal"} • Pukul {timeParam || "09:00"} WIB</span>
               </div>
-              <div className="flex justify-between py-1">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between py-1 gap-0.5">
                 <span className="text-slate-500">Mitra Penyedia:</span>
-                <span className="font-bold text-slate-900">{service.provider.name}</span>
+                <span className="font-bold text-slate-900 break-words">{service.provider.name}</span>
               </div>
             </div>
 
-            <div className="p-3.5 rounded-2xl bg-blue-50/60 border border-blue-100 flex items-start gap-2.5 text-[11px] text-blue-900 text-left">
+            <div className="p-3 sm:p-3.5 rounded-2xl bg-blue-50/60 border border-blue-100 flex items-start gap-2.5 text-[11px] text-blue-900 text-left">
               <ShieldCheck className="w-4 h-4 text-[#1683FF] shrink-0 mt-0.5" />
-              <span>
+              <span className="min-w-0 break-words">
                 Mitra telah menerima notifikasi pembayaran dan akan melaksanakan pekerjaan sesuai jadwal. Dana baru diteruskan ke mitra setelah pekerjaan selesai dan Anda setujui.
               </span>
             </div>
 
-            <div className="pt-2 flex flex-col sm:flex-row items-center gap-3">
+            <div className="pt-2 flex flex-col sm:flex-row items-center gap-2.5 sm:gap-3">
               <Link
                 href="/activity?tab=jasa"
                 className="w-full py-3 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm transition shadow-xs text-center"
@@ -353,29 +353,29 @@ function JasaPembayaranContent() {
           </div>
         ) : (
           /* Tampilan Pembayaran Gateway (Bayar Dulu) */
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 lg:gap-8 items-start">
             
             {/* Left Column: Metode Pembayaran (7 Cols) */}
-            <div className="lg:col-span-7 bg-white rounded-3xl border border-slate-200/90 p-6 sm:p-7 shadow-xs flex flex-col justify-between space-y-5">
+            <div className="lg:col-span-7 bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 p-4 sm:p-7 shadow-xs flex flex-col justify-between space-y-4 sm:space-y-5 min-w-0">
               <div>
                 {/* Header Title */}
-                <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
-                  <div>
-                    <h1 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
+                  <div className="min-w-0">
+                    <h1 className="text-base sm:text-xl font-black text-slate-900 tracking-tight">
                       Pilih Metode Pembayaran
                     </h1>
                     <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
                       Pilih kanal bayar resmi terverifikasi Bantuin
                     </p>
                   </div>
-                  <span className="text-xs text-[#1683FF] font-bold flex items-center gap-1.5 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-[#1683FF]" />
+                  <span className="text-[11px] sm:text-xs text-[#1683FF] font-bold flex items-center gap-1.5 bg-blue-50 px-2.5 sm:px-3 py-1 rounded-full border border-blue-100 shrink-0">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
                     Verifikasi Otomatis
                   </span>
                 </div>
 
-                {/* Payment Channel Selector Grid (Senada & Unified Logo Containers) */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mt-4">
+                {/* Payment Channel Selector List - Consistent Visual Structure */}
+                <div className="flex flex-col gap-2 mt-3 sm:mt-4">
                   {paymentChannels.map((channel) => {
                     const isSelected = selectedMethod === channel.id;
                     return (
@@ -383,37 +383,51 @@ function JasaPembayaranContent() {
                         key={channel.id}
                         type="button"
                         onClick={() => setSelectedMethod(channel.id)}
-                        className={`p-3.5 rounded-2xl border text-left transition flex items-center gap-3.5 cursor-pointer relative ${
+                        className={`w-full p-3 sm:p-3.5 rounded-2xl border text-left transition flex items-center gap-3 cursor-pointer relative ${
                           isSelected
                             ? "border-[#1683FF] bg-blue-50/40 shadow-xs ring-1.5 ring-[#1683FF]"
                             : "border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50/80"
                         }`}
                       >
-                        <div className="w-16 h-10 px-2 rounded-xl border border-slate-200/80 bg-white flex items-center justify-center shrink-0 overflow-hidden shadow-2xs">
+                        {/* [Logo] */}
+                        <div className="w-14 sm:w-16 h-10 px-2 rounded-xl border border-slate-200/80 bg-white flex items-center justify-center shrink-0 overflow-hidden shadow-2xs">
                           {channel.logo}
                         </div>
+
+                        {/* Nama Metode & Informasi/Subtext */}
                         <div className="min-w-0 flex-1">
-                          <div className="text-xs sm:text-sm font-bold text-slate-900 truncate leading-snug">
-                            {channel.name}
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-xs sm:text-sm font-bold text-slate-900 leading-snug">
+                              {channel.name}
+                            </span>
+                            {channel.badge && (
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border hidden xs:inline ${channel.badgeColor}`}>
+                                {channel.badge}
+                              </span>
+                            )}
                           </div>
-                          <div className="text-[11px] sm:text-xs text-slate-500 truncate mt-0.5">
-                            {channel.feeText}
+                          <div className="text-[11px] sm:text-xs text-slate-500 leading-snug break-words mt-0.5">
+                            {channel.description ? `${channel.description} • ${channel.feeText}` : channel.feeText}
                           </div>
                         </div>
-                        {isSelected ? (
-                          <div className="w-5 h-5 rounded-full bg-[#1683FF] text-white flex items-center justify-center shrink-0 shadow-2xs">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                          </div>
-                        ) : (
-                          <div className="w-4 h-4 rounded-full border-2 border-slate-300 shrink-0" />
-                        )}
+
+                        {/* [Radio/Check] */}
+                        <div className="shrink-0 pl-1">
+                          {isSelected ? (
+                            <div className="w-5 h-5 rounded-full bg-[#1683FF] text-white flex items-center justify-center shadow-2xs">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                            </div>
+                          ) : (
+                            <div className="w-4 h-4 rounded-full border-2 border-slate-300" />
+                          )}
+                        </div>
                       </button>
                     );
                   })}
                 </div>
 
                 {/* Active Channel Action Area */}
-                <div className="mt-4 pt-4 border-t border-slate-100">
+                <div className="mt-3.5 sm:mt-4 pt-3.5 sm:pt-4 border-t border-slate-100">
                   {selectedMethod === "qris" && (
                     <QrisCodeCard
                       totalAmount={totalAmount}
@@ -424,38 +438,38 @@ function JasaPembayaranContent() {
                   )}
 
                   {selectedMethod.endsWith("_va") && (
-                    <div className="p-5 bg-slate-50/80 rounded-2xl border border-slate-200/80 space-y-3.5">
-                      <div className="flex items-center justify-between text-xs sm:text-sm">
+                    <div className="p-3.5 sm:p-5 bg-slate-50/80 rounded-2xl border border-slate-200/80 space-y-3 sm:space-y-3.5">
+                      <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs sm:text-sm">
                         <span className="text-slate-700 font-semibold">
                           Nomor Virtual Account {selectedMethod.split("_")[0].toUpperCase()}:
                         </span>
-                        <span className="text-xs font-bold text-[#1683FF] bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100">
+                        <span className="text-[10px] sm:text-xs font-bold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100 shrink-0">
                           Otomatis Terverifikasi
                         </span>
                       </div>
 
-                      <div className="flex items-center justify-between gap-3 p-3.5 sm:p-4 bg-white rounded-xl border border-slate-200 shadow-2xs">
-                        <span className="font-mono text-lg sm:text-2xl font-black text-slate-900 tracking-wider select-all">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 p-3 sm:p-4 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                        <span className="font-mono text-base sm:text-2xl font-black text-slate-900 tracking-wider select-all break-all text-center sm:text-left">
                           {vaNumbers[selectedMethod]}
                         </span>
                         <button
                           type="button"
                           onClick={() => handleCopy(vaNumbers[selectedMethod], "va")}
-                          className="px-4 py-2 bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs sm:text-sm font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
+                          className="w-full sm:w-auto px-4 py-2 bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs sm:text-sm font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
                         >
-                          <Copy className="w-4 h-4" />
+                          <Copy className="w-4 h-4 shrink-0" />
                           <span>{isCopiedVA ? "Tersalin" : "Salin No VA"}</span>
                         </button>
                       </div>
 
-                      <div className="flex items-center justify-between text-xs text-slate-500 pt-1">
-                        <span>Total Tagihan: <strong className="text-slate-900 font-bold">{formatIDR(totalAmount)}</strong></span>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs text-slate-500 pt-1">
+                        <span className="break-words">Total Tagihan: <strong className="text-slate-900 font-bold">{formatIDR(totalAmount)}</strong></span>
                         <button
                           type="button"
                           onClick={() => handleCopy(totalAmount, "nominal")}
-                          className="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-[#1683FF] border border-blue-100 text-xs font-bold rounded-md transition flex items-center gap-1 cursor-pointer"
+                          className="self-start sm:self-auto px-2.5 sm:px-3 py-1 bg-blue-50 hover:bg-blue-100 text-[#1683FF] border border-blue-100 text-xs font-bold rounded-md transition flex items-center gap-1 cursor-pointer"
                         >
-                          <Copy className="w-3.5 h-3.5" />
+                          <Copy className="w-3.5 h-3.5 shrink-0" />
                           <span>{isCopiedNominal ? "Tersalin" : "Salin Nominal"}</span>
                         </button>
                       </div>
@@ -465,48 +479,48 @@ function JasaPembayaranContent() {
               </div>
 
               {/* Bottom Security Notice */}
-              <div className="pt-3 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-500">
+              <div className="pt-3 border-t border-slate-100 flex items-center gap-2 text-[11px] sm:text-xs text-slate-500">
                 <ShieldCheck className="w-4 h-4 text-[#1683FF] shrink-0" />
-                <span>Transaksi dilindungi Sistem Pembayaran Resmi &amp; Terverifikasi Bantuin.</span>
+                <span className="min-w-0 break-words">Transaksi dilindungi Sistem Pembayaran Resmi &amp; Terverifikasi Bantuin.</span>
               </div>
             </div>
 
             {/* Right Column: Rincian Tagihan & Tombol Bayar (5 Cols) */}
-            <div className="lg:col-span-5 bg-white rounded-3xl border border-slate-200/90 p-6 sm:p-7 shadow-xs flex flex-col justify-between space-y-5">
-              <div className="space-y-4">
+            <div className="lg:col-span-5 bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 p-4 sm:p-7 shadow-xs flex flex-col justify-between space-y-4 sm:space-y-5 min-w-0">
+              <div className="space-y-3.5 sm:space-y-4">
                 {/* Header */}
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div className="flex items-center justify-between gap-2 pb-2.5 sm:pb-3 border-b border-slate-100">
                   <h2 className="text-base sm:text-lg font-extrabold text-slate-900">
                     Rincian Tagihan
                   </h2>
-                  <span className="text-xs font-bold text-[#1683FF] bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100">
+                  <span className="text-[11px] sm:text-xs font-bold text-[#1683FF] bg-blue-50 px-2.5 py-0.5 sm:py-1 rounded-full border border-blue-100 shrink-0">
                     100% Terverifikasi
                   </span>
                 </div>
 
                 {/* Compact Item Card */}
-                <div className="p-3.5 rounded-2xl bg-slate-50/70 border border-slate-200/80 flex items-center gap-3.5">
+                <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-50/70 border border-slate-200/80 flex items-start sm:items-center gap-3">
                   <img
                     src={service.image}
                     alt={service.title}
-                    className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl object-cover shrink-0 border border-slate-200"
+                    className="w-13 h-13 sm:w-16 sm:h-16 rounded-xl object-cover shrink-0 border border-slate-200"
                   />
                   <div className="min-w-0 flex-1">
-                    <h3 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                    <h3 className="text-xs sm:text-sm font-bold text-slate-900 leading-snug break-words line-clamp-2">
                       {service.title}
                     </h3>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-[11px] font-bold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
+                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                      <span className="text-[10px] sm:text-[11px] font-bold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
                         {selectedPackage.name}
                       </span>
                     </div>
-                    <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-slate-200/60">
+                    <div className="flex items-center gap-1.5 mt-1.5 pt-1.5 border-t border-slate-200/60 min-w-0">
                       <img
                         src={service.provider.avatar}
                         alt={service.provider.name}
-                        className="w-5 h-5 rounded-full object-cover border border-slate-200"
+                        className="w-4 h-4 sm:w-5 sm:h-5 rounded-full object-cover border border-slate-200 shrink-0"
                       />
-                      <span className="text-[11px] text-slate-600 truncate">
+                      <span className="text-[10px] sm:text-[11px] text-slate-600 truncate min-w-0">
                         Penyedia: <strong className="text-slate-900 font-bold">{service.provider.name}</strong>
                       </span>
                       <ShieldCheck className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
@@ -515,7 +529,7 @@ function JasaPembayaranContent() {
                 </div>
 
                 {/* Badge Tipe Jasa */}
-                <div className="mb-2.5">
+                <div className="mb-1.5">
                   <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold ${
                     isDigitalMode 
                       ? "bg-blue-50 text-blue-700 border border-blue-200/80"
@@ -523,12 +537,12 @@ function JasaPembayaranContent() {
                   }`}>
                     {isDigitalMode ? (
                       <>
-                        <Globe className="w-3 h-3 text-blue-600" />
+                        <Globe className="w-3 h-3 text-blue-600 shrink-0" />
                         <span>Jasa Digital — Pengerjaan Jarak Jauh</span>
                       </>
                     ) : (
                       <>
-                        <MapPin className="w-3 h-3 text-amber-600" />
+                        <MapPin className="w-3 h-3 text-amber-600 shrink-0" />
                         <span>Layanan Datang ke Lokasi</span>
                       </>
                     )}
@@ -536,13 +550,13 @@ function JasaPembayaranContent() {
                 </div>
 
                 {/* Jadwal / Info Pesanan */}
-                <div className="p-3.5 rounded-2xl bg-slate-50/70 border border-slate-200/80 space-y-2 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500 flex items-center gap-1.5">
-                      <Calendar className="w-3.5 h-3.5 text-[#1683FF]" />
+                <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-50/70 border border-slate-200/80 space-y-2 text-xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                    <span className="text-slate-500 flex items-center gap-1.5 shrink-0">
+                      <Calendar className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
                       <span>{isDigitalMode ? "Target Selesai:" : "Tanggal Pelaksanaan:"}</span>
                     </span>
-                    <span className="font-bold text-slate-900">
+                    <span className="font-bold text-slate-900 text-left sm:text-right break-words">
                       {dateParam || "Sesuai Jadwal"}
                     </span>
                   </div>
@@ -550,12 +564,12 @@ function JasaPembayaranContent() {
                   {/* Datang ke Lokasi: tampilkan jam + titik koordinat GPS + alamat */}
                   {!isDigitalMode && (
                     <>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500 flex items-center gap-1.5">
-                          <Clock className="w-3.5 h-3.5 text-[#1683FF]" />
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                        <span className="text-slate-500 flex items-center gap-1.5 shrink-0">
+                          <Clock className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
                           <span>Jam Mulai:</span>
                         </span>
-                        <span className="font-bold text-slate-900">
+                        <span className="font-bold text-slate-900 text-left sm:text-right">
                           {timeParam || "09:00"} WIB
                         </span>
                       </div>
@@ -563,26 +577,26 @@ function JasaPembayaranContent() {
                       {alamatParam && (
                         <div className="pt-2 border-t border-slate-200/60">
                           <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1">
-                            <MapPin className="w-3 h-3 text-[#1683FF]" /> Lokasi &amp; Titik Peta:
+                            <MapPin className="w-3 h-3 text-[#1683FF] shrink-0" /> Lokasi &amp; Titik Peta:
                           </span>
-                          <p className="text-[11px] text-slate-800 font-semibold leading-relaxed">
+                          <p className="text-[11px] text-slate-800 font-semibold leading-relaxed break-words">
                             {decodeURIComponent(alamatParam)}
                           </p>
 
                           {latParam && lngParam && (
-                            <div className="mt-1.5 flex items-center justify-between text-[10px] bg-white p-2 rounded-lg border border-slate-200/70">
+                            <div className="mt-1.5 flex flex-wrap items-center justify-between gap-1.5 text-[10px] bg-white p-2 rounded-lg border border-slate-200/70">
                               <span className="text-emerald-700 font-medium flex items-center gap-1">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
                                 Pin GPS: {parseFloat(latParam).toFixed(4)}, {parseFloat(lngParam).toFixed(4)}
                               </span>
                               <a
                                 href={`https://www.google.com/maps/search/?api=1&query=${latParam},${lngParam}`}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="text-[#1683FF] hover:underline font-bold inline-flex items-center gap-0.5"
+                                className="text-[#1683FF] hover:underline font-bold inline-flex items-center gap-0.5 shrink-0"
                               >
                                 <span>Buka Peta</span>
-                                <ExternalLink className="w-2.5 h-2.5" />
+                                <ExternalLink className="w-2.5 h-2.5 shrink-0" />
                               </a>
                             </div>
                           )}
@@ -591,13 +605,13 @@ function JasaPembayaranContent() {
                     </>
                   )}
 
-                  {/* Digital: tampilkan brief kebutuhan */}
+                  {/* Digital: brief */}
                   {isDigitalMode && briefParam && (
                     <div className="pt-2 border-t border-slate-200/60">
                       <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1">
-                        <FileText className="w-3 h-3 text-[#1683FF]" /> Brief Kebutuhan Digital:
+                        <FileText className="w-3 h-3 text-[#1683FF] shrink-0" /> Brief Kebutuhan Digital:
                       </span>
-                      <p className="italic text-[11px] text-slate-700 whitespace-pre-line bg-white p-2.5 rounded-lg border border-slate-200/60 leading-relaxed">
+                      <p className="italic text-[11px] text-slate-700 whitespace-pre-line bg-white p-2.5 rounded-lg border border-slate-200/60 leading-relaxed break-words">
                         &ldquo;{decodeURIComponent(briefParam)}&rdquo;
                       </p>
                     </div>
@@ -608,7 +622,7 @@ function JasaPembayaranContent() {
                       <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider mb-0.5">
                         Catatan Tambahan:
                       </span>
-                      <p className="italic text-[11px] line-clamp-2">
+                      <p className="italic text-[11px] line-clamp-2 break-words">
                         &ldquo;{decodeURIComponent(notesParam)}&rdquo;
                       </p>
                     </div>
@@ -617,45 +631,45 @@ function JasaPembayaranContent() {
 
                 {/* Price Breakdown Calculation */}
                 <div className="space-y-2 pt-2 border-t border-slate-100 text-xs">
-                  <div className="flex items-center justify-between text-slate-600">
-                    <span>Tarif Layanan ({selectedPackage.name})</span>
-                    <span className="font-semibold text-slate-900">{formatIDR(servicePrice)}</span>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-slate-600">
+                    <span className="min-w-0 break-words">Tarif Layanan ({selectedPackage.name})</span>
+                    <span className="font-semibold text-slate-900 shrink-0 text-left sm:text-right">{formatIDR(servicePrice)}</span>
                   </div>
 
-                  <div className="flex items-center justify-between text-slate-500 text-[11px]">
-                    <span>Potongan Platform Bantuin (8%)</span>
-                    <span className="text-slate-700 font-medium">-{formatIDR(platformFee)} (ditanggung mitra)</span>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-slate-500 text-[11px]">
+                    <span className="min-w-0 break-words">Potongan Platform Bantuin (8%)</span>
+                    <span className="text-slate-700 font-medium shrink-0 text-left sm:text-right">-{formatIDR(platformFee)} (ditanggung mitra)</span>
                   </div>
 
-                  <div className="flex items-center justify-between text-slate-500 text-[11px]">
-                    <span>Biaya Sistem Terverifikasi</span>
-                    <span className="text-emerald-600 font-bold">Gratis (Rp 0)</span>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-slate-500 text-[11px]">
+                    <span className="min-w-0 break-words">Biaya Sistem Terverifikasi</span>
+                    <span className="text-emerald-600 font-bold shrink-0 text-left sm:text-right">Gratis (Rp 0)</span>
                   </div>
 
-                  <div className="flex items-center justify-between text-slate-500 text-[11px]">
-                    <span>Biaya Pemrosesan Gateway</span>
-                    <span className="text-emerald-600 font-bold">Gratis (Ditanggung Platform)</span>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-slate-500 text-[11px]">
+                    <span className="min-w-0 break-words">Biaya Pemrosesan Gateway</span>
+                    <span className="text-emerald-600 font-bold shrink-0 text-left sm:text-right">Gratis (Ditanggung Platform)</span>
                   </div>
 
                   {/* Baris diskon voucher */}
                   {discountAmount > 0 && (
-                    <div className="flex items-center justify-between text-[11px] font-semibold text-emerald-600">
-                      <span>Diskon Voucher ({appliedVoucher?.code})</span>
-                      <span>-{formatIDR(discountAmount)}</span>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px] font-semibold text-emerald-600">
+                      <span className="min-w-0 break-words">Diskon Voucher ({appliedVoucher?.code})</span>
+                      <span className="shrink-0 text-left sm:text-right">-{formatIDR(discountAmount)}</span>
                     </div>
                   )}
 
                   {/* Total Tagihan */}
-                  <div className="pt-3 border-t border-slate-200/90 flex items-baseline justify-between mt-1">
-                    <div>
+                  <div className="pt-3 border-t border-slate-200/90 flex flex-col sm:flex-row sm:items-baseline justify-between gap-1.5 sm:gap-2 mt-1">
+                    <div className="min-w-0">
                       <span className="font-black text-xs sm:text-sm text-slate-900 block">Total Tagihan</span>
-                      <span className="text-[10px] text-slate-400 font-normal">Diproses via Payment Gateway Resmi</span>
+                      <span className="text-[10px] text-slate-400 font-normal block leading-tight">Diproses via Payment Gateway Resmi</span>
                     </div>
-                    <div className="text-right">
+                    <div className="text-left sm:text-right shrink-0">
                       {discountAmount > 0 && (
                         <span className="text-[10px] text-slate-400 line-through block">{formatIDR(totalAmount)}</span>
                       )}
-                      <span className="text-[#1683FF] text-xl sm:text-2xl font-black tracking-tight">
+                      <span className="text-[#1683FF] text-xl sm:text-2xl font-black tracking-tight break-all block">
                         {formatIDR(finalAmount)}
                       </span>
                     </div>
@@ -674,7 +688,7 @@ function JasaPembayaranContent() {
                 {/* Security Banner */}
                 <div className="p-3 rounded-2xl bg-emerald-50/60 border border-emerald-100 flex items-start gap-2.5 text-[11px] text-emerald-800 leading-snug">
                   <Lock className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <span>
+                  <span className="min-w-0 break-words">
                     <strong>Pembayaran Aman Bantuin:</strong> Hak pembayaran mitra baru dapat dicairkan setelah pekerjaan selesai dan Anda konfirmasi puas.
                   </span>
                 </div>
@@ -690,12 +704,12 @@ function JasaPembayaranContent() {
                 >
                   {isProcessing ? (
                     <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Loader2 className="w-4 h-4 animate-spin shrink-0" />
                       <span>Memverifikasi Pembayaran...</span>
                     </>
                   ) : (
                     <>
-                      <ShieldCheck className="w-4 h-4" />
+                      <ShieldCheck className="w-4 h-4 shrink-0" />
                       <span>Saya Sudah Bayar (Konfirmasi Pembayaran)</span>
                     </>
                   )}
@@ -703,9 +717,9 @@ function JasaPembayaranContent() {
 
                 <Link
                   href={`/chat?partnerId=${service.provider.id}&serviceId=${service.id}`}
-                  className="w-full py-2.5 rounded-xl border border-slate-200 hover:border-[#1683FF] text-slate-700 hover:text-[#1683FF] font-bold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="w-full py-2.5 rounded-xl border border-slate-200 hover:border-[#1683FF] text-slate-700 hover:text-[#1683FF] font-bold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer text-center"
                 >
-                  <MessageSquare className="w-3.5 h-3.5" />
+                  <MessageSquare className="w-3.5 h-3.5 shrink-0" />
                   <span>Tanya / Konsultasi via Chat</span>
                 </Link>
               </div>

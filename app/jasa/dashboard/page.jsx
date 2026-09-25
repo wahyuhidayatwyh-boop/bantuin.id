@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import logoImg from "@/components/image/logo.png";
 import { useApp } from "@/lib/context/AppContext";
+import UnreadBadge from "@/components/ui/UnreadBadge";
 import RoleGuard from "@/components/auth/RoleGuard";
 import { formatIDR, formatDateIndo } from "@/lib/utils";
 import { 
@@ -60,7 +61,9 @@ import {
   CreditCard,
   RefreshCw,
   RotateCcw,
+  TrendingUp,
   Navigation,
+  MoreHorizontal,
 } from "lucide-react";
 import { resolveCategoryIcon } from "@/lib/services/categoryService";
 import { promotionService } from "@/lib/services/promotionService";
@@ -107,6 +110,7 @@ export default function JasaDashboardPage() {
   };
 
   const [activeMenu, setActiveMenu] = useState("overview"); 
+  const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
   // Menu IDs: overview, catalog, packages, portfolio, orders, wallet, profile, reviews, settings
 
   // -------------------------------------------------------------
@@ -776,34 +780,6 @@ export default function JasaDashboardPage() {
           </div>
         </div>
 
-        {/* Horizontal Navigation Pills */}
-        <div className="flex items-center gap-1.5 px-3 py-2 overflow-x-auto no-scrollbar border-t border-slate-100 bg-[#F8FAFC]">
-          {sidebarLinks.map((link) => {
-            const Icon = link.icon;
-            const isActive = activeMenu === link.id;
-            return (
-              <button
-                key={link.id}
-                onClick={() => setActiveMenu(link.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer shrink-0 ${
-                  isActive
-                    ? "bg-[#1683FF] text-white shadow-xs"
-                    : "text-slate-600 hover:text-slate-900 bg-white border border-slate-200/80"
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                <span>{link.label}</span>
-                {link.count !== undefined && link.count > 0 && (
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                    isActive ? "bg-white/20 text-white" : "bg-blue-50 text-[#1683FF]"
-                  }`}>
-                    {link.count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
       </div>
 
       {/* 2. DESKTOP SIDEBAR (Pure Biru & Putih) */}
@@ -3563,9 +3539,278 @@ export default function JasaDashboardPage() {
           </div>
         </div>
       )}
+      {/* ============================================================ */}
+      {/* MOBILE GLASS BOTTOM NAVIGATION (lg:hidden)                  */}
+      {/* ============================================================ */}
+      <nav 
+        aria-label="Navigasi Bawah Jasa"
+        className="fixed bottom-0 inset-x-0 z-40 lg:hidden bg-white/90 backdrop-blur-xl border-t border-slate-200/80 shadow-[0_-4px_24px_rgba(0,0,0,0.06)] pb-[max(env(safe-area-inset-bottom),0.5rem)] pt-1"
+      >
+        <div className="grid grid-cols-5 h-14 max-w-lg mx-auto px-1 items-center">
+          {/* 1. Ringkasan */}
+          <button
+            type="button"
+            onClick={() => { setActiveMenu("overview"); setIsMobileMoreOpen(false); }}
+            className={`flex flex-col items-center justify-center py-1 rounded-xl transition min-h-[44px] cursor-pointer ${
+              activeMenu === "overview" ? "text-[#1683FF]" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <div className={`w-9 h-7 rounded-full flex items-center justify-center transition ${
+              activeMenu === "overview" ? "bg-[#EAF4FF] text-[#1683FF]" : "bg-transparent"
+            }`}>
+              <LayoutDashboard className={`w-5 h-5 ${activeMenu === "overview" ? "scale-110" : ""}`} />
+            </div>
+            <span className="text-[10px] font-bold leading-tight mt-0.5 truncate max-w-[64px]">Home</span>
+          </button>
+
+          {/* 2. Layanan */}
+          <button
+            type="button"
+            onClick={() => { setActiveMenu("catalog"); setIsMobileMoreOpen(false); }}
+            className={`flex flex-col items-center justify-center py-1 rounded-xl transition min-h-[44px] cursor-pointer ${
+              activeMenu === "catalog" ? "text-[#1683FF]" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <div className={`w-9 h-7 rounded-full flex items-center justify-center transition ${
+              activeMenu === "catalog" ? "bg-[#EAF4FF] text-[#1683FF]" : "bg-transparent"
+            }`}>
+              <Briefcase className={`w-5 h-5 ${activeMenu === "catalog" ? "scale-110" : ""}`} />
+            </div>
+            <span className="text-[10px] font-bold leading-tight mt-0.5 truncate max-w-[64px]">Layanan</span>
+          </button>
+
+          {/* 3. Pesanan */}
+          <button
+            type="button"
+            onClick={() => { setActiveMenu("orders"); setIsMobileMoreOpen(false); }}
+            className={`flex flex-col items-center justify-center py-1 rounded-xl transition min-h-[44px] cursor-pointer relative ${
+              activeMenu === "orders" ? "text-[#1683FF]" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <div className="relative">
+              <div className={`w-9 h-7 rounded-full flex items-center justify-center transition ${
+                activeMenu === "orders" ? "bg-[#EAF4FF] text-[#1683FF]" : "bg-transparent"
+              }`}>
+                <Receipt className={`w-5 h-5 ${activeMenu === "orders" ? "scale-110" : ""}`} />
+              </div>
+              <UnreadBadge count={provider.orders?.filter(o => o.status !== "completed").length} />
+            </div>
+            <span className="text-[10px] font-bold leading-tight mt-0.5 truncate max-w-[64px]">Pesanan</span>
+          </button>
+
+          {/* 4. Dompet */}
+          <button
+            type="button"
+            onClick={() => { setActiveMenu("wallet"); setIsMobileMoreOpen(false); }}
+            className={`flex flex-col items-center justify-center py-1 rounded-xl transition min-h-[44px] cursor-pointer ${
+              activeMenu === "wallet" ? "text-[#1683FF]" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <div className={`w-9 h-7 rounded-full flex items-center justify-center transition ${
+              activeMenu === "wallet" ? "bg-[#EAF4FF] text-[#1683FF]" : "bg-transparent"
+            }`}>
+              <Wallet className={`w-5 h-5 ${activeMenu === "wallet" ? "scale-110" : ""}`} />
+            </div>
+            <span className="text-[10px] font-bold leading-tight mt-0.5 truncate max-w-[64px]">Dompet</span>
+          </button>
+
+          {/* 5. Lainnya (•••) */}
+          <button
+            type="button"
+            onClick={() => setIsMobileMoreOpen(true)}
+            className={`flex flex-col items-center justify-center py-1 rounded-xl transition min-h-[44px] cursor-pointer ${
+              isMobileMoreOpen ? "text-[#1683FF]" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <div className={`w-9 h-7 rounded-full flex items-center justify-center transition ${
+              isMobileMoreOpen ? "bg-[#EAF4FF] text-[#1683FF]" : "bg-transparent"
+            }`}>
+              <MoreHorizontal className={`w-5 h-5 ${isMobileMoreOpen ? "scale-110" : ""}`} />
+            </div>
+            <span className="text-[10px] font-bold leading-tight mt-0.5 truncate max-w-[64px]">Lainnya</span>
+          </button>
+        </div>
+      </nav>
+
+      {/* ============================================================ */}
+      {/* MOBILE "LAINNYA" STRUCTURED BOTTOM SHEET                     */}
+      {/* ============================================================ */}
+      {isMobileMoreOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden flex flex-col justify-end">
+          {/* Backdrop */}
+          <div 
+            className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity animate-in fade-in"
+            onClick={() => setIsMobileMoreOpen(false)}
+          />
+
+          {/* Bottom Sheet Modal */}
+          <div className="relative z-10 bg-white rounded-t-3xl border-t border-slate-200 shadow-2xl p-5 max-h-[85vh] overflow-y-auto animate-in slide-in-from-bottom duration-200 space-y-4">
+            {/* Sheet Handle & Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Briefcase className="w-4 h-4 text-[#1683FF]" />
+                <h3 className="font-extrabold text-sm text-slate-900">Menu Dashboard Jasa</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMobileMoreOpen(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Group 1: Layanan & Karya */}
+            <div>
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                Layanan &amp; Portofolio
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setActiveMenu("catalog"); setIsMobileMoreOpen(false); }}
+                  className={`p-3 rounded-2xl border text-left flex items-center gap-2.5 transition ${
+                    activeMenu === "catalog" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-slate-50 border-slate-200/80 text-slate-700"
+                  }`}
+                >
+                  <Briefcase className="w-4 h-4 shrink-0 text-[#1683FF]" />
+                  <span className="text-xs font-bold truncate">Katalog Jasa</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setActiveMenu("portfolio"); setIsMobileMoreOpen(false); }}
+                  className={`p-3 rounded-2xl border text-left flex items-center gap-2.5 transition ${
+                    activeMenu === "portfolio" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-slate-50 border-slate-200/80 text-slate-700"
+                  }`}
+                >
+                  <ImageIcon className="w-4 h-4 shrink-0 text-[#1683FF]" />
+                  <span className="text-xs font-bold truncate">Portofolio</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setActiveMenu("packages"); setIsMobileMoreOpen(false); }}
+                  className={`p-3 rounded-2xl border text-left flex items-center gap-2.5 transition col-span-2 ${
+                    activeMenu === "packages" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-slate-50 border-slate-200/80 text-slate-700"
+                  }`}
+                >
+                  <Layers className="w-4 h-4 shrink-0 text-[#1683FF]" />
+                  <span className="text-xs font-bold truncate">Paket Bundling &amp; Borongan</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Group 2: Promosi */}
+            <div>
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                Promosi &amp; Pemasaran
+              </div>
+              <button
+                type="button"
+                onClick={() => { setActiveMenu("promotions"); setIsMobileMoreOpen(false); }}
+                className={`w-full p-3 rounded-2xl border text-left flex items-center justify-between transition ${
+                  activeMenu === "promotions" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-slate-50 border-slate-200/80 text-slate-700"
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Megaphone className="w-4 h-4 text-[#1683FF]" />
+                  <div>
+                    <div className="text-xs font-bold">Promosi Layanan Jasa</div>
+                    <div className="text-[10px] text-slate-500">Tingkatkan visibilitas profil &amp; pesanan</div>
+                  </div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-slate-400" />
+              </button>
+            </div>
+
+            {/* Group 3: Profil, Ulasan & Laporan */}
+            <div>
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                Profil &amp; Kinerja
+              </div>
+              <div className="space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => { setActiveMenu("profile"); setIsMobileMoreOpen(false); }}
+                  className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition ${
+                    activeMenu === "profile" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-slate-50/60 border-slate-200/60 text-slate-700"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <User className="w-4 h-4 text-slate-500" />
+                    <span className="text-xs font-bold">Profil &amp; Keterampilan</span>
+                  </div>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setActiveMenu("reviews"); setIsMobileMoreOpen(false); }}
+                  className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition ${
+                    activeMenu === "reviews" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-slate-50/60 border-slate-200/60 text-slate-700"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Star className="w-4 h-4 text-amber-500" />
+                    <span className="text-xs font-bold">Ulasan Klien</span>
+                  </div>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setActiveMenu("reports"); setIsMobileMoreOpen(false); }}
+                  className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition ${
+                    activeMenu === "reports" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-slate-50/60 border-slate-200/60 text-slate-700"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-emerald-600" />
+                    <span className="text-xs font-bold">Laporan Kinerja &amp; Pendapatan</span>
+                  </div>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setActiveMenu("settings"); setIsMobileMoreOpen(false); }}
+                  className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition ${
+                    activeMenu === "settings" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-slate-50/60 border-slate-200/60 text-slate-700"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Settings className="w-4 h-4 text-slate-500" />
+                    <span className="text-xs font-bold">Tarif &amp; Ketersediaan</span>
+                  </div>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+              </div>
+            </div>
+
+            {/* Quick External Links */}
+            <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+              <Link
+                href="/chat"
+                className="flex-1 py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold text-center flex items-center justify-center gap-1.5"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span>Chat Workspace</span>
+              </Link>
+              <Link
+                href={`/jasa/penyedia/${provider.id}`}
+                target="_blank"
+                className="flex-1 py-2 px-3 rounded-xl bg-blue-50 text-[#1683FF] text-xs font-bold text-center flex items-center justify-center gap-1.5"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Lihat Publik</span>
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
 
       </div>
     </RoleGuard>
   );
 }
-

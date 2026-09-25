@@ -24,14 +24,14 @@ export default function ImageCard({ item }) {
           </div>
         </div>
 
-        <div>
-          <div className="text-[11px] text-blue-200 font-medium tracking-wide uppercase">
+        <div className="min-w-0">
+          <div className="text-[11px] text-blue-200 font-medium tracking-wide uppercase truncate">
             {item.category}
           </div>
-          <h3 className="font-bold text-lg md:text-xl text-white tracking-tight mt-0.5">
+          <h3 className="font-bold text-lg md:text-xl text-white tracking-tight mt-0.5 break-words line-clamp-2">
             {item.title}
           </h3>
-          <p className="text-xs text-white/80 mt-1">
+          <p className="text-xs text-white/80 mt-1 truncate">
             {item.itemCount}
           </p>
         </div>

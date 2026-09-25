@@ -61,6 +61,7 @@ import {
   Briefcase,
   Star,
   Eraser,
+  MoreHorizontal,
 } from "lucide-react";
 import { getAllProviders } from "@/lib/mock/providersData";
 import { getAllMitraStores } from "@/lib/mock/mitraData";
@@ -68,6 +69,7 @@ import { promotionService } from "@/lib/services/promotionService";
 import { adminService } from "@/lib/services/adminService";
 import { payoutService } from "@/lib/services/payoutService";
 import { refundService } from "@/lib/services/refundService";
+import UnreadBadge from "@/components/ui/UnreadBadge";
 
 // ─── Mock Admin Inbox Chat ──────────────────────────────────────────────────
 const MOCK_INBOX = [
@@ -182,6 +184,7 @@ export default function AdminDashboardPage() {
 
   // ── Active Menu ──────────────────────────────────────────────────────────
   const [activeMenu, setActiveMenu] = useState("overview");
+  const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
 
   // ── Global Location Filter (untuk admin melihat data per wilayah) ────────
   const [adminLocationFilter, setAdminLocationFilter] = useState("all");
@@ -856,22 +859,6 @@ export default function AdminDashboardPage() {
               <User className="w-3 h-3" />
             </Link>
           </div>
-        </div>
-        <div className="flex items-center gap-1.5 px-3 py-2 overflow-x-auto no-scrollbar border-t border-slate-100 bg-slate-50/50">
-          {allNavLinks.map((link) => {
-            const Icon = link.icon;
-            const isActive = activeMenu === link.id;
-            return (
-              <button key={link.id} onClick={() => setActiveMenu(link.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer shrink-0 ${isActive ? pillActiveCls : pillIdleCls}`}>
-                <Icon className="w-3.5 h-3.5" />
-                <span>{link.label}</span>
-                {link.badge !== undefined && link.badge > 0 && (
-                  <span className={`text-[10px] px-1.5 rounded-full font-bold ${isActive ? "bg-white/20 text-white" : link.badgeColor ? `${link.badgeColor} text-white` : "bg-blue-50 text-[#1683FF]"}`}>{link.badge}</span>
-                )}
-              </button>
-            );
-          })}
         </div>
       </div>
 
@@ -2944,7 +2931,7 @@ export default function AdminDashboardPage() {
                         >
                           <div className="relative shrink-0">
                             <img src={thread.userAvatar} alt={thread.userName} className="w-9 h-9 rounded-full object-cover border border-slate-200" />
-                            {thread.unread && <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-rose-500 border-2 border-white" />}
+                            <UnreadBadge count={thread.unread ? 1 : 0} dotOnly />
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center justify-between gap-1">
@@ -3177,6 +3164,299 @@ export default function AdminDashboardPage() {
               >
                 Buka Tab Baru <ExternalLink className="w-3 h-3" />
               </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
+      {/* MOBILE GLASS BOTTOM NAVIGATION (lg:hidden)                  */}
+      {/* ============================================================ */}
+      <nav 
+        aria-label="Navigasi Bawah Admin"
+        className="fixed bottom-0 inset-x-0 z-40 lg:hidden bg-white/90 backdrop-blur-xl border-t border-slate-200/80 shadow-[0_-4px_24px_rgba(0,0,0,0.06)] pb-[max(env(safe-area-inset-bottom),0.5rem)] pt-1"
+      >
+        <div className="grid grid-cols-5 h-14 max-w-lg mx-auto px-1 items-center">
+          {/* 1. Overview */}
+          <button
+            type="button"
+            onClick={() => { setActiveMenu("overview"); setIsMobileMoreOpen(false); }}
+            className={`flex flex-col items-center justify-center py-1 rounded-xl transition min-h-[44px] cursor-pointer ${
+              activeMenu === "overview" ? "text-[#1683FF]" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <div className={`w-9 h-7 rounded-full flex items-center justify-center transition ${
+              activeMenu === "overview" ? "bg-[#EAF4FF] text-[#1683FF]" : "bg-transparent"
+            }`}>
+              <LayoutDashboard className={`w-5 h-5 ${activeMenu === "overview" ? "scale-110" : ""}`} />
+            </div>
+            <span className="text-[10px] font-bold leading-tight mt-0.5 truncate max-w-[64px]">Dashboard</span>
+          </button>
+
+          {/* 2. Pengguna */}
+          <button
+            type="button"
+            onClick={() => { setActiveMenu("users"); setIsMobileMoreOpen(false); }}
+            className={`flex flex-col items-center justify-center py-1 rounded-xl transition min-h-[44px] cursor-pointer ${
+              activeMenu === "users" ? "text-[#1683FF]" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <div className={`w-9 h-7 rounded-full flex items-center justify-center transition ${
+              activeMenu === "users" ? "bg-[#EAF4FF] text-[#1683FF]" : "bg-transparent"
+            }`}>
+              <Users className={`w-5 h-5 ${activeMenu === "users" ? "scale-110" : ""}`} />
+            </div>
+            <span className="text-[10px] font-bold leading-tight mt-0.5 truncate max-w-[64px]">Users</span>
+          </button>
+
+          {/* 3. Pesanan */}
+          <button
+            type="button"
+            onClick={() => { setActiveMenu("orders"); setIsMobileMoreOpen(false); }}
+            className={`flex flex-col items-center justify-center py-1 rounded-xl transition min-h-[44px] cursor-pointer relative ${
+              activeMenu === "orders" ? "text-[#1683FF]" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <div className="relative">
+              <div className={`w-9 h-7 rounded-full flex items-center justify-center transition ${
+                activeMenu === "orders" ? "bg-[#EAF4FF] text-[#1683FF]" : "bg-transparent"
+              }`}>
+                <Package className={`w-5 h-5 ${activeMenu === "orders" ? "scale-110" : ""}`} />
+              </div>
+            </div>
+            <span className="text-[10px] font-bold leading-tight mt-0.5 truncate max-w-[64px]">Pesanan</span>
+          </button>
+
+          {/* 4. Keuangan */}
+          <button
+            type="button"
+            onClick={() => { setActiveMenu("finance"); setIsMobileMoreOpen(false); }}
+            className={`flex flex-col items-center justify-center py-1 rounded-xl transition min-h-[44px] cursor-pointer ${
+              activeMenu === "finance" ? "text-[#1683FF]" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <div className={`w-9 h-7 rounded-full flex items-center justify-center transition ${
+              activeMenu === "finance" ? "bg-[#EAF4FF] text-[#1683FF]" : "bg-transparent"
+            }`}>
+              <DollarSign className={`w-5 h-5 ${activeMenu === "finance" ? "scale-110" : ""}`} />
+            </div>
+            <span className="text-[10px] font-bold leading-tight mt-0.5 truncate max-w-[64px]">Keuangan</span>
+          </button>
+
+          {/* 5. Menu Admin (•••) */}
+          <button
+            type="button"
+            onClick={() => setIsMobileMoreOpen(true)}
+            className={`flex flex-col items-center justify-center py-1 rounded-xl transition min-h-[44px] cursor-pointer ${
+              isMobileMoreOpen ? "text-[#1683FF]" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <div className={`w-9 h-7 rounded-full flex items-center justify-center transition ${
+              isMobileMoreOpen ? "bg-[#EAF4FF] text-[#1683FF]" : "bg-transparent"
+            }`}>
+              <MoreHorizontal className={`w-5 h-5 ${isMobileMoreOpen ? "scale-110" : ""}`} />
+            </div>
+            <span className="text-[10px] font-bold leading-tight mt-0.5 truncate max-w-[64px]">Lainnya</span>
+          </button>
+        </div>
+      </nav>
+
+      {/* ============================================================ */}
+      {/* MOBILE "MENU ADMIN" STRUCTURED BOTTOM SHEET                  */}
+      {/* ============================================================ */}
+      {isMobileMoreOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden flex flex-col justify-end">
+          {/* Backdrop */}
+          <div 
+            className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity animate-in fade-in"
+            onClick={() => setIsMobileMoreOpen(false)}
+          />
+
+          {/* Bottom Sheet Modal */}
+          <div className="relative z-10 bg-white rounded-t-3xl border-t border-slate-200 shadow-2xl p-5 max-h-[85vh] overflow-y-auto animate-in slide-in-from-bottom duration-200 space-y-4">
+            {/* Sheet Handle & Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-[#1683FF]" />
+                <h3 className="font-extrabold text-sm text-slate-900">Menu Konsol Admin</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMobileMoreOpen(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Group 1: Direktori Pengguna & Mitra */}
+            <div>
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                Manajemen Pengguna &amp; Mitra
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setActiveMenu("users"); setIsMobileMoreOpen(false); }}
+                  className={`p-3 rounded-2xl border text-left flex items-center gap-2.5 transition ${
+                    activeMenu === "users" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-slate-50 border-slate-200/80 text-slate-700"
+                  }`}
+                >
+                  <Users className="w-4 h-4 shrink-0 text-[#1683FF]" />
+                  <span className="text-xs font-bold truncate">Semua Pengguna</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setActiveMenu("providers"); setIsMobileMoreOpen(false); }}
+                  className={`p-3 rounded-2xl border text-left flex items-center gap-2.5 transition ${
+                    activeMenu === "providers" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-slate-50 border-slate-200/80 text-slate-700"
+                  }`}
+                >
+                  <Building2 className="w-4 h-4 shrink-0 text-[#1683FF]" />
+                  <span className="text-xs font-bold truncate">Penyedia Jasa</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setActiveMenu("partners"); setIsMobileMoreOpen(false); }}
+                  className={`p-3 rounded-2xl border text-left flex items-center gap-2.5 transition ${
+                    activeMenu === "partners" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-slate-50 border-slate-200/80 text-slate-700"
+                  }`}
+                >
+                  <Store className="w-4 h-4 shrink-0 text-[#1683FF]" />
+                  <span className="text-xs font-bold truncate">Mitra Rental</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setActiveMenu("verification"); setIsMobileMoreOpen(false); }}
+                  className={`p-3 rounded-2xl border text-left flex items-center gap-2.5 transition ${
+                    activeMenu === "verification" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-slate-50 border-slate-200/80 text-slate-700"
+                  }`}
+                >
+                  <UserCheck className="w-4 h-4 shrink-0 text-[#1683FF]" />
+                  <span className="text-xs font-bold truncate">Verifikasi KYC</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Group 2: Transaksi & Keuangan */}
+            <div>
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                Transaksi, Keuangan &amp; Sengketa
+              </div>
+              <div className="space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => { setActiveMenu("orders"); setIsMobileMoreOpen(false); }}
+                  className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition ${
+                    activeMenu === "orders" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-slate-50/60 border-slate-200/60 text-slate-700"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Receipt className="w-4 h-4 text-slate-500" />
+                    <span className="text-xs font-bold">Semua Pesanan &amp; Transaksi</span>
+                  </div>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setActiveMenu("finance"); setIsMobileMoreOpen(false); }}
+                  className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition ${
+                    activeMenu === "finance" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-slate-50/60 border-slate-200/60 text-slate-700"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <DollarSign className="w-4 h-4 text-emerald-600" />
+                    <span className="text-xs font-bold">Pusat Keuangan, Pencairan &amp; Deposit</span>
+                  </div>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setActiveMenu("disputes"); setIsMobileMoreOpen(false); }}
+                  className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition ${
+                    activeMenu === "disputes" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-slate-50/60 border-slate-200/60 text-slate-700"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-rose-500" />
+                    <span className="text-xs font-bold">Laporan &amp; Penyelesaian Sengketa</span>
+                  </div>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+              </div>
+            </div>
+
+            {/* Group 3: Promosi & Sistem */}
+            <div>
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">
+                Promosi, Voucher &amp; Audit
+              </div>
+              <div className="space-y-1.5">
+                <button
+                  type="button"
+                  onClick={() => { setActiveMenu("vouchers"); setIsMobileMoreOpen(false); }}
+                  className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition ${
+                    activeMenu === "vouchers" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-slate-50/60 border-slate-200/60 text-slate-700"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Ticket className="w-4 h-4 text-amber-500" />
+                    <span className="text-xs font-bold">Voucher Promo Wilayah</span>
+                  </div>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setActiveMenu("promotions"); setIsMobileMoreOpen(false); }}
+                  className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition ${
+                    activeMenu === "promotions" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-slate-50/60 border-slate-200/60 text-slate-700"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Rocket className="w-4 h-4 text-[#1683FF]" />
+                    <span className="text-xs font-bold">Moderasi Promosi Landing</span>
+                  </div>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setActiveMenu("audit"); setIsMobileMoreOpen(false); }}
+                  className={`w-full p-2.5 rounded-xl border text-left flex items-center justify-between transition ${
+                    activeMenu === "audit" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-slate-50/60 border-slate-200/60 text-slate-700"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <History className="w-4 h-4 text-slate-500" />
+                    <span className="text-xs font-bold">Audit Trail &amp; Log Sistem</span>
+                  </div>
+                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+              </div>
+            </div>
+
+            {/* Quick External Links */}
+            <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+              <Link
+                href="/chat"
+                className="flex-1 py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold text-center flex items-center justify-center gap-1.5"
+              >
+                <span>Buka Chat</span>
+              </Link>
+              <Link
+                href="/"
+                target="_blank"
+                className="flex-1 py-2 px-3 rounded-xl bg-blue-50 text-[#1683FF] text-xs font-bold text-center flex items-center justify-center gap-1.5"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Lihat Web Publik</span>
+              </Link>
             </div>
           </div>
         </div>

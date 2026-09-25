@@ -529,14 +529,14 @@ export default function JasaCheckoutDetailPage() {
           {/* KOLOM KANAN (5 Kolom): STICKY CHECKOUT PANEL (MIRIP SEWA)   */}
           {/* ============================================================ */}
           <div className="lg:col-span-5 lg:sticky lg:top-24">
-            <div className="bg-white border border-slate-200/90 rounded-3xl p-5 sm:p-7 shadow-xs space-y-5">
+            <div className="bg-white border border-slate-200/90 rounded-2xl sm:rounded-3xl p-4 sm:p-7 shadow-xs space-y-4 sm:space-y-5">
               
               {/* Header Box Checkout */}
-              <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
                 <h3 className="font-black text-sm sm:text-base text-slate-900">
                   Checkout Pesanan Jasa
                 </h3>
-                <span className="text-[11px] font-bold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
+                <span className="text-[10px] sm:text-[11px] font-bold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100 shrink-0">
                   Pembayaran Terverifikasi
                 </span>
               </div>
@@ -546,10 +546,10 @@ export default function JasaCheckoutDetailPage() {
                 <img
                   src={service.image}
                   alt={service.title}
-                  className="w-14 h-14 rounded-xl object-cover border border-slate-200 shrink-0"
+                  className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl object-cover border border-slate-200 shrink-0"
                 />
                 <div className="min-w-0 flex-1">
-                  <h4 className="font-bold text-xs sm:text-sm text-slate-900 truncate">
+                  <h4 className="font-bold text-xs sm:text-sm text-slate-900 leading-snug break-words line-clamp-2">
                     {service.title}
                   </h4>
                   <p className="text-[11px] text-slate-500 truncate mt-0.5">
@@ -559,15 +559,15 @@ export default function JasaCheckoutDetailPage() {
               </div>
 
               {/* Rincian Paket Terpilih */}
-              <div className="p-3.5 rounded-2xl bg-blue-50/60 border border-blue-100 space-y-1">
+              <div className="p-3 sm:p-3.5 rounded-2xl bg-blue-50/60 border border-blue-100 space-y-1">
                 <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider block">
                   Paket yang Dipilih:
                 </span>
-                <div className="flex items-center justify-between">
-                  <span className="font-extrabold text-xs sm:text-sm text-slate-900">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                  <span className="font-extrabold text-xs sm:text-sm text-slate-900 break-words">
                     {activePkg.name}
                   </span>
-                  <span className="font-black text-sm sm:text-base text-[#1683FF]">
+                  <span className="font-black text-sm sm:text-base text-[#1683FF] shrink-0 text-left sm:text-right">
                     {formatIDR(activePkg.price)}
                   </span>
                 </div>
@@ -578,10 +578,10 @@ export default function JasaCheckoutDetailPage() {
 
               {/* Form Input Pesanan */}
               {!isOrderedSuccess ? (
-                <form onSubmit={handleCheckout} className="space-y-4">
+                <form onSubmit={handleCheckout} className="space-y-3.5 sm:space-y-4">
 
                   {/* Badge tipe jasa: Digital vs Datang ke Lokasi */}
-                  <div className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-2xl text-xs font-bold border ${
+                  <div className={`flex items-center gap-2.5 px-3 py-2 rounded-2xl text-xs font-bold border ${
                     isDigitalService
                       ? "bg-blue-50 text-blue-700 border-blue-200/80"
                       : "bg-amber-50 text-amber-800 border-amber-200/80"
@@ -589,7 +589,7 @@ export default function JasaCheckoutDetailPage() {
                     {isDigitalService
                       ? <Globe className="w-4 h-4 shrink-0 text-blue-600" />
                       : <MapPin className="w-4 h-4 shrink-0 text-amber-600" />}
-                    <span>
+                    <span className="min-w-0 break-words">
                       {isDigitalService
                         ? "Jasa Digital — Pengerjaan Berkas & Jarak Jauh"
                         : "Datang ke Lokasi — Mitra Hadir Langsung ke Tempatmu"}
@@ -602,7 +602,7 @@ export default function JasaCheckoutDetailPage() {
                       {isDigitalService ? "Deadline / Target Selesai:" : "Tanggal Pelaksanaan yang Diinginkan:"}
                     </label>
                     <div className="relative">
-                      <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 shrink-0" />
                       <input
                         type="date"
                         required
@@ -626,9 +626,9 @@ export default function JasaCheckoutDetailPage() {
                             {targetTime} WIB
                           </span>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <div className="relative w-36 shrink-0">
-                            <Clock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="relative w-full sm:w-36 shrink-0">
+                            <Clock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 shrink-0" />
                             <input
                               type="time"
                               required
@@ -637,7 +637,7 @@ export default function JasaCheckoutDetailPage() {
                               className="w-full pl-9 pr-2 py-2 rounded-xl border border-slate-200 text-xs text-slate-900 outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/15 transition bg-white font-bold"
                             />
                           </div>
-                          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
+                          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5 flex-1 min-w-0">
                             {["07:00", "09:00", "11:00", "14:00", "16:00"].map((preset) => (
                               <button
                                 key={preset}
@@ -657,11 +657,11 @@ export default function JasaCheckoutDetailPage() {
                       </div>
 
                       {/* Interactive Map & Titik Lokasi Pengerjaan */}
-                      <div className="space-y-3 p-3.5 sm:p-4 rounded-2xl bg-slate-50/80 border border-slate-200/90">
+                      <div className="space-y-3 p-3 sm:p-4 rounded-2xl bg-slate-50/80 border border-slate-200/90">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1 border-b border-slate-200/60">
                           <div>
                             <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                              <MapPin className="w-3.5 h-3.5 text-[#1683FF]" />
+                              <MapPin className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
                               <span>Titik Lokasi Pengerjaan</span>
                               <span className="text-red-500">*</span>
                             </h4>
@@ -674,16 +674,16 @@ export default function JasaCheckoutDetailPage() {
                             type="button"
                             onClick={handleUseMyGPS}
                             disabled={isDetectingGPS}
-                            className="inline-flex items-center gap-1.5 text-xs font-bold text-[#1683FF] hover:text-[#0F6FE5] bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-xl border border-blue-200/80 transition cursor-pointer self-start sm:self-auto"
+                            className="inline-flex items-center gap-1.5 text-xs font-bold text-[#1683FF] hover:text-[#0F6FE5] bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-xl border border-blue-200/80 transition cursor-pointer self-start sm:self-auto shrink-0"
                           >
                             {isDetectingGPS ? (
                               <>
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
                                 <span>Mendeteksi GPS...</span>
                               </>
                             ) : (
                               <>
-                                <Navigation className="w-3.5 h-3.5" />
+                                <Navigation className="w-3.5 h-3.5 shrink-0" />
                                 <span>Gunakan GPS Saya</span>
                               </>
                             )}
@@ -698,13 +698,13 @@ export default function JasaCheckoutDetailPage() {
                             onChange={handleMapLocationChange}
                             onUseGps={handleUseMyGPS}
                             isDetectingGPS={isDetectingGPS}
-                            height="220px"
+                            height="200px"
                           />
 
-                          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                          <div className="mt-2 flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
                             <div className="flex items-center gap-1.5 text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/80 font-medium">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                              <span>
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+                              <span className="truncate">
                                 Pin Terkunci: {coords ? `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}` : "Belum ditentukan"}
                               </span>
                             </div>
@@ -713,11 +713,11 @@ export default function JasaCheckoutDetailPage() {
                               type="button"
                               onClick={handleSyncAddressFromCoords}
                               disabled={isReverseGeocoding}
-                              className="text-[#1683FF] hover:text-[#0F6FE5] font-bold hover:underline inline-flex items-center gap-1 cursor-pointer"
+                              className="text-[#1683FF] hover:text-[#0F6FE5] font-bold hover:underline inline-flex items-center gap-1 cursor-pointer shrink-0"
                             >
                               {isReverseGeocoding ? (
                                 <>
-                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  <Loader2 className="w-3 h-3 animate-spin shrink-0" />
                                   <span>Membaca Alamat Peta...</span>
                                 </>
                               ) : (
@@ -764,17 +764,16 @@ export default function JasaCheckoutDetailPage() {
                   {isDigitalService && (
                     <div>
                       <label className="block text-xs font-bold text-slate-800 mb-1">
-                        <span className="text-red-500">*</span> Brief / Keterangan Detail Kebutuhan:
+                        <span className="text-red-500">*</span> Brief Kebutuhan:
                       </label>
                       <textarea
-                        rows={4}
+                        rows={2}
                         required
                         value={brief}
                         onChange={(e) => setBrief(e.target.value)}
-                        placeholder="Ceritakan kebutuhanmu secara detail:\n• Ukuran / format output yang diinginkan\n• Referensi gaya / contoh yang kamu suka\n• Warna, font, atau tema yang diinginkan\n• Deadline dan revisi yang diharapkan"
+                        placeholder="Jelaskan kebutuhan, preferensi gaya, format file, atau instruksi khusus..."
                         className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 placeholder-slate-400 outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/15 transition resize-none bg-white"
                       />
-                      <p className="text-[10px] text-slate-400 mt-1">Semakin detail brief-mu, semakin cepat mitra bisa mulai mengerjakan.</p>
                     </div>
                   )}
 
@@ -787,42 +786,42 @@ export default function JasaCheckoutDetailPage() {
                       rows={2}
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
-                      placeholder={isDigitalService
-                        ? "Contoh: Tolong kirim file .AI dan .PNG sekaligus, ada logo lama bisa saya kirim via chat..."
-                        : "Contoh: Tolong bawa tangga ekstra, ada 2 unit AC di lantai 2..."}
+                      placeholder="Catatan atau instruksi tambahan (opsional)..."
                       className="w-full p-2.5 rounded-xl border border-slate-200 text-xs text-slate-900 placeholder-slate-400 outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/15 transition resize-none bg-white"
                     />
                   </div>
 
                   {/* Rincian Transparansi Biaya */}
                   <div className="pt-3 border-t border-slate-100 space-y-2 text-xs">
-                    <div className="flex items-center justify-between text-slate-600">
-                      <span>Tarif Layanan ({activePkg.name})</span>
-                      <span className="font-semibold text-slate-900">{formatIDR(activePkg.price)}</span>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-slate-600">
+                      <span className="min-w-0 break-words">Tarif Layanan ({activePkg.name})</span>
+                      <span className="font-semibold text-slate-900 shrink-0 text-left sm:text-right">{formatIDR(activePkg.price)}</span>
                     </div>
-                    <div className="flex items-center justify-between text-slate-500 text-[11px]">
-                      <span>Potongan Platform Bantuin (8%)</span>
-                      <span className="text-slate-700 font-medium">-{formatIDR(platformFee)} (ditanggung mitra)</span>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-slate-500 text-[11px]">
+                      <span className="min-w-0 break-words">Potongan Platform Bantuin (8%)</span>
+                      <span className="text-slate-700 font-medium shrink-0 text-left sm:text-right">-{formatIDR(platformFee)} (ditanggung mitra)</span>
                     </div>
-                    <div className="flex items-center justify-between text-slate-500 text-[11px]">
-                      <span>Biaya Sistem Terverifikasi</span>
-                      <span className="text-emerald-600 font-bold">Gratis (Rp 0)</span>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-slate-500 text-[11px]">
+                      <span className="min-w-0 break-words">Biaya Sistem Terverifikasi</span>
+                      <span className="text-emerald-600 font-bold shrink-0 text-left sm:text-right">Gratis (Rp 0)</span>
                     </div>
-                    <div className="pt-2.5 border-t border-slate-200/90 flex items-baseline justify-between mt-1">
-                      <div>
+                    <div className="pt-2.5 border-t border-slate-200/90 flex flex-col sm:flex-row sm:items-baseline justify-between gap-1.5 mt-1">
+                      <div className="min-w-0">
                         <span className="font-black text-xs sm:text-sm text-slate-900 block">Total Pembayaran</span>
-                        <span className="text-[10px] text-slate-400 font-normal">Diproses via Payment Gateway Resmi</span>
+                        <span className="text-[10px] text-slate-400 font-normal block leading-tight">Diproses via Payment Gateway Resmi</span>
                       </div>
-                      <span className="text-[#1683FF] text-xl sm:text-2xl font-black tracking-tight">
-                        {formatIDR(activePkg.price)}
-                      </span>
+                      <div className="text-left sm:text-right shrink-0">
+                        <span className="text-[#1683FF] text-xl sm:text-2xl font-black tracking-tight break-all block">
+                          {formatIDR(activePkg.price)}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
                   {/* Jaminan Pembayaran */}
                   <div className="p-3 rounded-2xl bg-emerald-50/60 border border-emerald-100 flex items-start gap-2.5 text-[11px] text-emerald-800 leading-snug">
                     <Lock className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                    <span>
+                    <span className="min-w-0 break-words">
                       <strong>Pembayaran Terverifikasi:</strong> Hak pembayaran mitra baru dapat dicairkan setelah pekerjaan selesai dan Anda konfirmasi tuntas.
                     </span>
                   </div>
@@ -833,16 +832,16 @@ export default function JasaCheckoutDetailPage() {
                       type="submit"
                       className="w-full py-3.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm transition shadow-xs flex items-center justify-center gap-2 cursor-pointer"
                     >
-                      <Lock className="w-4 h-4" />
+                      <Lock className="w-4 h-4 shrink-0" />
                       <span>Lanjut ke Pembayaran (Bayar Dulu)</span>
-                      <ChevronRight className="w-4 h-4" />
+                      <ChevronRight className="w-4 h-4 shrink-0" />
                     </button>
                     <button
                       type="button"
                       onClick={handleStartChat}
-                      className="w-full py-2.5 rounded-xl border border-slate-200 hover:border-[#1683FF] text-slate-700 hover:text-[#1683FF] font-bold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="w-full py-2.5 rounded-xl border border-slate-200 hover:border-[#1683FF] text-slate-700 hover:text-[#1683FF] font-bold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer text-center"
                     >
-                      <MessageSquare className="w-3.5 h-3.5" />
+                      <MessageSquare className="w-3.5 h-3.5 shrink-0" />
                       <span>Tanya / Konsultasi via Chat</span>
                     </button>
                   </div>

@@ -194,9 +194,9 @@ export default function MitraStorePage() {
                       <span className="text-slate-900 font-extrabold">{store.rating}</span>
                       <span className="text-slate-400 font-normal">({store.reviewCount} ulasan)</span>
                     </div>
-                    <div className="flex items-center gap-1.5 text-slate-500">
-                      <MapPin className="w-4 h-4 text-[#1683FF]" />
-                      <span>{store.address}, {activeKabupaten}</span>
+                    <div className="flex items-center gap-1.5 text-slate-500 min-w-0">
+                      <MapPin className="w-4 h-4 text-[#1683FF] shrink-0" />
+                      <span className="truncate max-w-[260px] sm:max-w-none">{store.address}, {activeKabupaten}</span>
                     </div>
                     <div className="flex items-center gap-1.5 text-emerald-600 font-medium">
                       <Clock className="w-4 h-4" />
@@ -372,7 +372,7 @@ export default function MitraStorePage() {
                           </div>
                         </div>
 
-                        <h3 className="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-[#1683FF] transition-colors line-clamp-2 leading-tight sm:leading-snug min-h-[32px] sm:min-h-[40px]">
+                        <h3 className="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-[#1683FF] transition-colors line-clamp-2 leading-tight sm:leading-snug min-h-[32px] sm:min-h-[40px] break-words">
                           {item.name}
                         </h3>
 
@@ -382,19 +382,19 @@ export default function MitraStorePage() {
                       </div>
 
                       {/* Price & Action */}
-                      <div className="mt-2 sm:mt-4 pt-2 sm:pt-3 border-t border-slate-100 flex flex-col xs:flex-row xs:items-center justify-between gap-1.5 sm:gap-2">
-                        <div>
-                          <div className="text-[9px] sm:text-[10px] text-slate-400 font-medium">Harga Sewa</div>
-                          <div className="text-xs sm:text-base font-black text-[#1683FF]">
+                      <div className="mt-2 sm:mt-4 pt-2 sm:pt-3 border-t border-slate-100 flex flex-col xs:flex-row xs:items-center justify-between gap-1.5 sm:gap-2 min-w-0 overflow-hidden">
+                        <div className="min-w-0 overflow-hidden">
+                          <div className="text-[9px] sm:text-[10px] text-slate-400 font-medium truncate">Harga Sewa</div>
+                          <div className="text-xs sm:text-base font-black text-[#1683FF] truncate">
                             {formatIDR(item.price)}
                             <span className="text-[9px] sm:text-[10px] font-normal text-slate-500 ml-0.5">{item.unit}</span>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-1 sm:gap-1.5 w-full xs:w-auto">
+                        <div className="flex items-center gap-1 sm:gap-1.5 w-full xs:w-auto shrink-0">
                           <Link
                             href={`/sewa/${item.id}`}
-                            className="flex-1 xs:flex-none text-center px-2 sm:px-2.5 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-[#1683FF] font-bold text-[10px] sm:text-xs transition active:scale-95 cursor-pointer shrink-0"
+                            className="flex-1 xs:flex-none text-center px-2 sm:px-2.5 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-[#1683FF] font-bold text-[10px] sm:text-xs transition active:scale-95 cursor-pointer shrink-0 truncate"
                             title="Lihat Galeri Foto & Detail Unit"
                           >
                             Detail
@@ -404,7 +404,7 @@ export default function MitraStorePage() {
                               setSelectedProduct(item);
                               setSelectedModalPhotoIndex(0);
                             }}
-                            className="flex-1 xs:flex-none text-center px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-[10px] sm:text-xs transition active:scale-95 cursor-pointer shrink-0"
+                            className="flex-1 xs:flex-none text-center px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-lg sm:rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-[10px] sm:text-xs transition active:scale-95 cursor-pointer shrink-0 truncate"
                           >
                             Sewa
                           </button>

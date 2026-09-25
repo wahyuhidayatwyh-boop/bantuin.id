@@ -30,7 +30,9 @@ import {
   Package,
   Copy,
   Check,
-  Star
+  Star,
+  Tag,
+  Layers
 } from "lucide-react";
 
 const MITRA_PROMOTION_PACKAGES = [
@@ -91,9 +93,10 @@ function BuatPromosiMitraContent() {
     return getMitraStoreById("mitra-kamera") || {};
   });
   const [selectedTargetType, setSelectedTargetType] = useState(targetParam === "store" ? "store" : "unit"); // "unit" or "store"
-  const [selectedUnitId, setSelectedUnitId] = useState(() => {
+  const [selectedUnitIds, setSelectedUnitIds] = useState(() => {
     const s = getMitraStoreById("mitra-kamera");
-    return unitParam || s?.catalog?.[0]?.id || "";
+    const initial = unitParam || s?.catalog?.[0]?.id || "";
+    return initial ? [initial] : [];
   });
   const [selectedPackageId, setSelectedPackageId] = useState(pkgParam || "pkg-silver");
   const [selectedMethod, setSelectedMethod] = useState("qris"); // "qris", "bca_va", "mandiri_va", "bri_va", "bni_va"
@@ -107,11 +110,30 @@ function BuatPromosiMitraContent() {
     const s = getMitraStoreById("mitra-kamera");
     if (s) {
       setStore(s);
-      if (!selectedUnitId && s.catalog && s.catalog.length > 0) {
-        setSelectedUnitId(unitParam || s.catalog[0].id);
+      if (selectedUnitIds.length === 0 && s.catalog && s.catalog.length > 0) {
+        setSelectedUnitIds([unitParam || s.catalog[0].id]);
       }
     }
-  }, [unitParam, selectedUnitId]);
+  }, [unitParam, selectedUnitIds.length]);
+
+  const toggleUnitSelection = (id) => {
+    setSelectedUnitIds((prev) => {
+      if (prev.includes(id)) {
+        if (prev.length === 1) return prev; // Minimal 1 unit tetap terpilih
+        return prev.filter((item) => item !== id);
+      } else {
+        return [...prev, id];
+      }
+    });
+  };
+
+  const selectAllUnits = () => {
+    if (selectedUnitIds.length === (store?.catalog || []).length) {
+      setSelectedUnitIds([store?.catalog?.[0]?.id || ""]);
+    } else {
+      setSelectedUnitIds((store?.catalog || []).map((u) => u.id));
+    }
+  };
 
   useEffect(() => {
     if (targetParam === "store") {
@@ -137,9 +159,23 @@ function BuatPromosiMitraContent() {
   };
 
   const selectedPkg = MITRA_PROMOTION_PACKAGES.find(p => p.id === selectedPackageId) || MITRA_PROMOTION_PACKAGES[1];
-  const selectedUnit = store?.catalog?.find(u => String(u.id) === String(selectedUnitId)) || store?.catalog?.[0];
-  const totalAmount = selectedPkg.price;
-  const targetName = selectedTargetType === "store" ? (store?.name || "Toko Mitra Rental") : (selectedUnit?.name || "Unit Rental");
+  const selectedUnits = (store?.catalog || []).filter(u => selectedUnitIds.includes(u.id));
+  const effectiveSelectedUnits = selectedUnits.length > 0 ? selectedUnits : [store?.catalog?.[0] || { id: "unit-001", name: "Unit Rental" }];
+  
+  const unitCount = selectedTargetType === "unit" ? effectiveSelectedUnits.length : 1;
+  const subtotalAmount = selectedPkg.price * unitCount;
+
+  // Aturan Diskon Paket Bundling Sewa:
+  // 1 unit / profil toko: 0% diskon
+  // 2 unit sewa: 20% diskon
+  // 3 unit sewa: 30% diskon
+  // 4+ unit sewa: 35% diskon
+  const discountRate = (selectedTargetType === "unit" && unitCount >= 4) ? 0.35 : (selectedTargetType === "unit" && unitCount === 3) ? 0.30 : (selectedTargetType === "unit" && unitCount === 2) ? 0.20 : 0;
+  const discountAmount = Math.round(subtotalAmount * discountRate);
+  const totalAmount = subtotalAmount - discountAmount;
+  const targetName = selectedTargetType === "store" 
+    ? (store?.name || "Toko Mitra Rental") 
+    : (effectiveSelectedUnits.length === 1 ? effectiveSelectedUnits[0].name : `Paket ${effectiveSelectedUnits.length} Unit Rental`);
 
   const vaNumbers = {
     bca_va: "8802918291028371",
@@ -211,34 +247,73 @@ function BuatPromosiMitraContent() {
     }
   };
 
-  const handleConfirmPayment = () => {
-    if (selectedTargetType === "unit" && !selectedUnitId) {
-      if (addToast) addToast("Pilih Unit", "Mohon pilih unit rental yang ingin dipromosikan.", "error");
+  const handleConfirmPayment = async () => {
+    if (selectedTargetType === "unit" && effectiveSelectedUnits.length === 0) {
+      if (addToast) addToast("Pilih Unit", "Mohon pilih minimal satu unit rental yang ingin dipromosikan.", "error");
       return;
     }
 
     setIsProcessing(true);
-    setTimeout(() => {
+    try {
       if (store) {
+        let newPromos = [];
+        if (selectedTargetType === "unit") {
+          newPromos = effectiveSelectedUnits.map((u, idx) => ({
+            id: `prm-${Date.now()}-${idx}`,
+            target: "unit",
+            targetId: u.id,
+            targetName: u.name,
+            packageName: selectedPkg.name,
+            durationDays: selectedPkg.durationDays,
+            startDate: new Date().toISOString(),
+            expiryDate: new Date(Date.now() + selectedPkg.durationDays * 24 * 60 * 60 * 1000).toISOString(),
+            status: "ACTIVE",
+            paidAmount: Math.round(totalAmount / effectiveSelectedUnits.length)
+          }));
+        } else {
+          newPromos = [{
+            id: `prm-${Date.now()}`,
+            target: "store",
+            targetId: store.id,
+            targetName: store.name || "Toko Mitra Rental",
+            packageName: selectedPkg.name,
+            durationDays: selectedPkg.durationDays,
+            startDate: new Date().toISOString(),
+            expiryDate: new Date(Date.now() + selectedPkg.durationDays * 24 * 60 * 60 * 1000).toISOString(),
+            status: "ACTIVE",
+            paidAmount: totalAmount
+          }];
+        }
+
         const updatedStore = {
           ...store,
           promotions: [
             ...(store.promotions || []),
-            {
-              id: `prm-${Date.now()}`,
-              target: selectedTargetType,
-              targetId: selectedTargetType === "unit" ? selectedUnitId : store.id,
-              targetName: targetName,
-              packageName: selectedPkg.name,
-              durationDays: selectedPkg.durationDays,
-              startDate: new Date().toISOString(),
-              expiryDate: new Date(Date.now() + selectedPkg.durationDays * 24 * 60 * 60 * 1000).toISOString(),
-              status: "ACTIVE",
-              paidAmount: totalAmount
-            }
+            ...newPromos
           ]
         };
         saveMitraStoreData(updatedStore);
+
+        // Sinkronkan ke promotionService & paymentService
+        try {
+          const payment = await paymentService.createPromotionPayment({
+            ownerId: store.id || "mitra-kamera",
+            ownerName: store.name || "Mitra Rental",
+            ownerType: "partner",
+            targetType: selectedTargetType === "unit" ? "rental" : "store",
+            targetId: selectedTargetType === "unit" ? effectiveSelectedUnits.map(u => u.id).join(",") : store.id,
+            targetTitle: targetName,
+            packageId: selectedPkg.id,
+            durationDays: selectedPkg.durationDays,
+            amount: totalAmount,
+            channel: selectedMethod,
+          });
+          if (payment?.id) {
+            await paymentService.confirmPayment(payment.id);
+          }
+        } catch (e) {
+          console.warn("[mitra] paymentService sync:", e);
+        }
       }
 
       setIsProcessing(false);
@@ -247,7 +322,15 @@ function BuatPromosiMitraContent() {
       if (addToast) {
         addToast("Promosi Berhasil Aktif!", `Promosi untuk "${targetName}" telah diverifikasi.`);
       }
-    }, 1200);
+    } catch (err) {
+      console.warn("[mitra] Fallback konfirmasi:", err);
+      setIsProcessing(false);
+      setIsSuccess(true);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      if (addToast) {
+        addToast("Promosi Berhasil Aktif!", `Promosi untuk "${targetName}" telah diverifikasi.`);
+      }
+    }
   };
 
   return (
@@ -257,22 +340,22 @@ function BuatPromosiMitraContent() {
 
         {/* Breadcrumb / Top Bar */}
         <div className="bg-white border-b border-slate-200/80 shadow-2xs">
-          <div className="max-w-[1400px] mx-auto px-4 sm:px-8 py-3 flex items-center justify-between">
+          <div className="max-w-[1400px] mx-auto px-4 sm:px-8 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-2.5">
             <Link
               href="/mitra/dashboard"
-              className="inline-flex items-center gap-2 text-xs sm:text-sm font-bold text-slate-600 hover:text-[#1683FF] transition cursor-pointer"
+              className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-slate-600 hover:text-[#1683FF] transition cursor-pointer shrink-0"
             >
               <ArrowLeft className="w-4 h-4" />
               <span>Kembali ke Dashboard Mitra</span>
             </Link>
 
-            <div className="flex items-center gap-3">
-              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#1683FF] bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
-                <Lock className="w-3.5 h-3.5 text-[#1683FF]" />
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <span className="inline-flex items-center gap-1.5 text-[11px] sm:text-xs font-semibold text-[#1683FF] bg-blue-50 px-2.5 sm:px-3 py-1 rounded-full border border-blue-100">
+                <Lock className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
                 <span>Sistem Pembayaran Terverifikasi</span>
               </span>
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50/70 border border-blue-100 text-slate-700 text-xs font-semibold">
-                <Clock className="w-3.5 h-3.5 text-[#1683FF]" />
+              <div className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full bg-blue-50/70 border border-blue-100 text-slate-700 text-[11px] sm:text-xs font-semibold shrink-0">
+                <Clock className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
                 <span>Batas Waktu:</span>
                 <span className="font-mono font-black text-[#1683FF]">{formatTimer(timeLeft)}</span>
               </div>
@@ -281,7 +364,7 @@ function BuatPromosiMitraContent() {
         </div>
 
         {/* Main Container - Expansive, clean, and unified design */}
-        <main className="flex-1 max-w-[1400px] w-full mx-auto px-4 sm:px-8 py-5 sm:py-7">
+        <main className="flex-1 max-w-[1400px] w-full mx-auto px-4 sm:px-8 py-4 sm:py-7">
           
           {/* ============================================================ */}
           {/* STATE 1: TAMPILAN SUKSES & TERVERIFIKASI SETELAH BAYAR      */}
@@ -310,10 +393,26 @@ function BuatPromosiMitraContent() {
                   <span className="text-slate-500">Objek Promosi:</span>
                   <span className="font-bold text-slate-900">{targetName}</span>
                 </div>
+                {selectedTargetType === "unit" && (
+                  <div className="space-y-1 py-1 border-b border-slate-200/60">
+                    {effectiveSelectedUnits.map((u) => (
+                      <div key={u.id} className="flex items-center justify-between text-[11px]">
+                        <span className="text-slate-700 font-medium truncate">• {u.name}</span>
+                        <span className="text-emerald-600 font-bold shrink-0">Aktif</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="flex justify-between py-1 border-b border-slate-200/60">
                   <span className="text-slate-500">Paket Promosi:</span>
                   <span className="font-bold text-slate-900">{selectedPkg.name} ({selectedPkg.durationDays} Hari)</span>
                 </div>
+                {discountAmount > 0 && (
+                  <div className="flex justify-between py-1 border-b border-slate-200/60 text-emerald-700 font-bold">
+                    <span>Diskon Paket Bundling:</span>
+                    <span>Hemat {formatIDR(discountAmount)} ({discountRate * 100}%)</span>
+                  </div>
+                )}
                 <div className="flex justify-between py-1 border-b border-slate-200/60">
                   <span className="text-slate-500">Target Penempatan:</span>
                   <span className="font-bold text-[#1683FF]">
@@ -357,13 +456,13 @@ function BuatPromosiMitraContent() {
             /* ============================================================ */
             /* STATE 2: TAMPILAN PAYMENT GATEWAY (PERSIS JASA/SEWA/BANTUAN) */
             /* ============================================================ */
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 lg:gap-8 items-start">
               
               {/* Left Column: Pemilihan & Metode Pembayaran (7 Cols) */}
-              <div className="lg:col-span-7 space-y-6">
+              <div className="lg:col-span-7 space-y-4 sm:space-y-6 min-w-0">
                 
                 {/* 1. Pilih Target Promosi (Unit vs Toko) */}
-                <div className="bg-white rounded-3xl p-6 sm:p-7 border border-slate-200/90 shadow-xs space-y-4">
+                <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-7 border border-slate-200/90 shadow-xs space-y-3.5 sm:space-y-4">
                   <div className="border-b border-slate-100 pb-3">
                     <h2 className="text-base sm:text-lg font-black text-slate-900">1. Pilih Objek Promosi</h2>
                     <p className="text-xs text-slate-500">Pilih mempromosikan 1 unit rental spesifik atau seluruh etalase toko mitra Anda.</p>
@@ -415,20 +514,73 @@ function BuatPromosiMitraContent() {
                     </div>
                   </div>
 
-                  {/* Jika target adalah unit spesifik: pilih unit dari katalog */}
+                  {/* Jika target adalah unit spesifik: pilih unit dari katalog (BISA MULTI-PILIH DENGAN DISKON BUNDLING) */}
                   {selectedTargetType === "unit" && (
-                    <div className="pt-3 border-t border-slate-100 space-y-2.5">
-                      <label className="block text-xs font-bold text-slate-700">Pilih Unit dari Katalog Toko Anda:</label>
+                    <div className="pt-3 border-t border-slate-100 space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                        <div className="min-w-0">
+                          <label className="block text-xs font-bold text-slate-900 break-words">Pilih Unit dari Katalog Toko Anda:</label>
+                          <p className="text-[11px] text-slate-500 break-words">Pilih lebih dari 1 unit untuk mendapatkan diskon paket bundling hemat!</p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={selectAllUnits}
+                            className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-[#1683FF] text-[11px] font-bold rounded-lg border border-blue-100 transition cursor-pointer shrink-0"
+                          >
+                            {selectedUnitIds.length === (store?.catalog || []).length ? "Batal Pilih Semua" : "Pilih Semua Unit"}
+                          </button>
+                          <span className="px-2 py-0.5 bg-slate-100 text-slate-700 text-[11px] font-bold rounded-lg shrink-0">
+                            {selectedUnitIds.length} Terpilih
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Bundling Banner */}
+                      {unitCount >= 2 ? (
+                        <div className="p-3 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-emerald-900">
+                          <div className="flex items-start sm:items-center gap-2.5 min-w-0">
+                            <div className="w-7 h-7 rounded-xl bg-emerald-500 text-white flex items-center justify-center font-black text-xs shrink-0 shadow-2xs mt-0.5 sm:mt-0">
+                              <Check className="w-4 h-4 stroke-[3]" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-extrabold flex flex-wrap items-center gap-1.5">
+                                <span>Paket Bundling {unitCount} Unit Sewa Aktif!</span>
+                                <span className="text-[10px] bg-emerald-200/70 text-emerald-800 px-1.5 py-0.5 rounded font-black shrink-0">
+                                  Hemat {discountRate * 100}%
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-emerald-700 mt-0.5 break-words">
+                                Harga promosi didiskon {discountRate * 100}%, Anda hemat <strong>{formatIDR(discountAmount)}</strong>!
+                              </div>
+                            </div>
+                          </div>
+                          <span className="text-sm font-black text-emerald-700 bg-white px-2.5 py-1 rounded-xl border border-emerald-200 shadow-2xs shrink-0 self-start sm:self-center">
+                            -{formatIDR(discountAmount)}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-blue-900">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Tag className="w-4 h-4 text-[#1683FF] shrink-0" />
+                            <span className="break-words">Pilih 2 unit sewa atau lebih untuk mendapatkan potongan harga paket bundling hingga <strong>35%</strong>!</span>
+                          </div>
+                          <span className="text-[10px] font-bold text-[#1683FF] bg-white px-2 py-0.5 rounded-lg border border-blue-200 shrink-0 self-start sm:self-center">
+                            Bisa Multi-Pilih
+                          </span>
+                        </div>
+                      )}
+
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                         {store?.catalog?.map((item) => {
-                          const isUnitSelected = String(selectedUnitId) === String(item.id);
+                          const isUnitSelected = selectedUnitIds.includes(item.id);
                           return (
                             <div
                               key={item.id}
-                              onClick={() => setSelectedUnitId(item.id)}
-                              className={`p-3 rounded-xl border-2 flex items-center gap-3 cursor-pointer transition ${
+                              onClick={() => toggleUnitSelection(item.id)}
+                              className={`p-3 rounded-xl border-2 flex items-center gap-3 cursor-pointer transition select-none ${
                                 isUnitSelected
-                                  ? "border-[#1683FF] bg-blue-50/50 ring-1 ring-[#1683FF]"
+                                  ? "border-[#1683FF] bg-blue-50/50 ring-1 ring-[#1683FF] shadow-xs"
                                   : "border-slate-200 hover:border-slate-300 bg-white"
                               }`}
                             >
@@ -441,10 +593,10 @@ function BuatPromosiMitraContent() {
                                 <h5 className="text-xs font-bold text-slate-900 truncate">{item.name}</h5>
                                 <p className="text-[11px] text-[#1683FF] font-black">{formatIDR(item.dailyPrice || item.price)} / hari</p>
                               </div>
-                              <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                                isUnitSelected ? "border-[#1683FF] bg-[#1683FF] text-white" : "border-slate-300"
+                              <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center shrink-0 transition ${
+                                isUnitSelected ? "border-[#1683FF] bg-[#1683FF] text-white shadow-2xs" : "border-slate-300 bg-slate-50"
                               }`}>
-                                {isUnitSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                                {isUnitSelected && <Check className="w-3 h-3 stroke-[3]" />}
                               </div>
                             </div>
                           );
@@ -455,20 +607,20 @@ function BuatPromosiMitraContent() {
                 </div>
 
                 {/* 2. Pilih Durasi Paket Promosi */}
-                <div className="bg-white rounded-3xl p-6 sm:p-7 border border-slate-200/90 shadow-xs space-y-4">
+                <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-7 border border-slate-200/90 shadow-xs space-y-3.5 sm:space-y-4">
                   <div className="border-b border-slate-100 pb-3">
                     <h2 className="text-base sm:text-lg font-black text-slate-900">2. Pilih Paket &amp; Durasi Promosi</h2>
                     <p className="text-xs text-slate-500">Pilih jangkauan &amp; durasi spotlight tayang di ekosistem Sewa Bantuin.</p>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
                     {MITRA_PROMOTION_PACKAGES.map((pkg) => {
                       const isSelected = selectedPackageId === pkg.id;
                       return (
                         <div
                           key={pkg.id}
                           onClick={() => setSelectedPackageId(pkg.id)}
-                          className={`rounded-2xl p-4 border-2 cursor-pointer transition flex flex-col justify-between relative ${
+                          className={`rounded-2xl p-3.5 sm:p-4 border-2 cursor-pointer transition flex flex-col justify-between relative ${
                             isSelected
                               ? "border-[#1683FF] bg-blue-50/50 ring-1.5 ring-[#1683FF] shadow-xs"
                               : "border-slate-200 hover:border-slate-300 bg-white"
@@ -481,15 +633,15 @@ function BuatPromosiMitraContent() {
                             </div>
                           )}
 
-                          <div>
-                            <h4 className="font-extrabold text-xs sm:text-sm text-slate-900 mb-0.5">{pkg.name}</h4>
+                          <div className="min-w-0">
+                            <h4 className="font-extrabold text-xs sm:text-sm text-slate-900 mb-0.5 break-words">{pkg.name}</h4>
                             <div className="text-[11px] text-slate-500 flex items-center gap-1 mb-2">
-                              <Clock className="w-3 h-3 text-slate-400" />
-                              <span><strong>{pkg.durationDays} Hari</strong> Tayang</span>
+                              <Clock className="w-3 h-3 text-slate-400 shrink-0" />
+                              <span className="truncate"><strong>{pkg.durationDays} Hari</strong> Tayang</span>
                             </div>
 
-                            <div className="p-2 bg-slate-50 rounded-xl mb-2 border border-slate-100">
-                              <div className="text-base sm:text-lg font-black text-[#1683FF]">{formatIDR(pkg.price)}</div>
+                            <div className="p-2 bg-slate-50 rounded-xl mb-2 border border-slate-100 min-w-0">
+                              <div className="text-base sm:text-lg font-black text-[#1683FF] truncate">{formatIDR(pkg.price)}</div>
                               <div className="text-[9px] text-slate-400">Bebas biaya admin</div>
                             </div>
                           </div>
@@ -511,11 +663,11 @@ function BuatPromosiMitraContent() {
                 </div>
 
                 {/* 3. Kanal Pembayaran Resmi (DENGAN QRIS & NO VA LANGSUNG MUNCUL) */}
-                <div className="bg-white rounded-3xl border border-slate-200/90 p-6 sm:p-7 shadow-xs flex flex-col justify-between space-y-5">
+                <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 p-4 sm:p-7 shadow-xs flex flex-col justify-between space-y-4 sm:space-y-5">
                   <div>
                     {/* Header Title */}
-                    <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
-                      <div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
+                      <div className="min-w-0">
                         <h2 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
                           3. Kanal Pembayaran Resmi
                         </h2>
@@ -523,14 +675,14 @@ function BuatPromosiMitraContent() {
                           Pilih metode pembayaran yang akan digunakan.
                         </p>
                       </div>
-                      <span className="text-xs text-[#1683FF] font-bold flex items-center gap-1.5 bg-blue-50 px-3 py-1 rounded-full border border-blue-100">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-[#1683FF]" />
+                      <span className="text-[11px] sm:text-xs text-[#1683FF] font-bold flex items-center gap-1.5 bg-blue-50 px-2.5 sm:px-3 py-1 rounded-full border border-blue-100 shrink-0">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
                         Verifikasi Otomatis
                       </span>
                     </div>
 
                     {/* Payment Channel Selector Grid */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mt-4">
+                    <div className="flex flex-col gap-2 mt-3 sm:mt-4">
                       {paymentChannels.map((channel) => {
                         const isSelected = selectedMethod === channel.id;
                         return (
@@ -538,20 +690,20 @@ function BuatPromosiMitraContent() {
                             key={channel.id}
                             type="button"
                             onClick={() => setSelectedMethod(channel.id)}
-                            className={`p-3.5 rounded-2xl border text-left transition flex items-center gap-3.5 cursor-pointer relative ${
+                            className={`w-full p-3 sm:p-3.5 rounded-2xl border text-left transition flex items-center gap-3 cursor-pointer relative ${
                               isSelected
                                 ? "border-[#1683FF] bg-blue-50/40 shadow-xs ring-1.5 ring-[#1683FF]"
                                 : "border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50/80"
                             }`}
                           >
-                            <div className="w-16 h-10 px-2 rounded-xl border border-slate-200/80 bg-white flex items-center justify-center shrink-0 overflow-hidden shadow-2xs">
+                            <div className="w-14 sm:w-16 h-10 px-2 rounded-xl border border-slate-200/80 bg-white flex items-center justify-center shrink-0 overflow-hidden shadow-2xs">
                               {channel.logo}
                             </div>
                             <div className="min-w-0 flex-1">
-                              <div className="text-xs sm:text-sm font-bold text-slate-900 truncate leading-snug">
+                              <div className="text-xs sm:text-sm font-bold text-slate-900 leading-snug break-words">
                                 {channel.name}
                               </div>
-                              <div className="text-[11px] sm:text-xs text-slate-500 truncate mt-0.5">
+                              <div className="text-[11px] sm:text-xs text-slate-500 leading-snug break-words mt-0.5">
                                 {channel.feeText}
                               </div>
                             </div>
@@ -568,7 +720,7 @@ function BuatPromosiMitraContent() {
                     </div>
 
                     {/* Active Channel Action Area (QRIS / VA LANGSUNG AKTIF MUNCUL) */}
-                    <div className="mt-5 pt-5 border-t border-slate-100">
+                    <div className="mt-3.5 sm:mt-5 pt-3.5 sm:pt-5 border-t border-slate-100">
                       {selectedMethod === "qris" && (
                         <QrisCodeCard
                           totalAmount={totalAmount}
@@ -579,36 +731,36 @@ function BuatPromosiMitraContent() {
                       )}
 
                       {selectedMethod.endsWith("_va") && (
-                        <div className="p-5 bg-slate-50/80 rounded-2xl border border-slate-200/80 space-y-3.5">
-                          <div className="flex items-center justify-between text-xs sm:text-sm">
-                            <span className="text-slate-700 font-semibold">
+                        <div className="p-3.5 sm:p-5 bg-slate-50/80 rounded-2xl border border-slate-200/80 space-y-3 sm:space-y-3.5">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs sm:text-sm">
+                            <span className="text-slate-700 font-semibold break-words">
                               Nomor Virtual Account {selectedMethod.split("_")[0].toUpperCase()}:
                             </span>
-                            <span className="text-xs font-bold text-[#1683FF] bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100">
+                            <span className="text-[10px] sm:text-xs font-bold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100 self-start sm:self-auto shrink-0">
                               Otomatis Terverifikasi
                             </span>
                           </div>
 
-                          <div className="flex items-center justify-between gap-3 p-3.5 sm:p-4 bg-white rounded-xl border border-slate-200 shadow-2xs">
-                            <span className="font-mono text-lg sm:text-2xl font-black text-slate-900 tracking-wider select-all">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 sm:p-4 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                            <span className="font-mono text-base sm:text-2xl font-black text-slate-900 tracking-wider select-all break-all text-center sm:text-left">
                               {vaNumbers[selectedMethod] || "8802918291028371"}
                             </span>
                             <button
                               type="button"
                               onClick={() => handleCopy(vaNumbers[selectedMethod] || "8802918291028371", "va")}
-                              className="px-4 py-2 bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs sm:text-sm font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
+                              className="px-4 py-2 bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs sm:text-sm font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-xs w-full sm:w-auto"
                             >
                               <Copy className="w-4 h-4" />
                               <span>{isCopiedVA ? "Tersalin" : "Salin No VA"}</span>
                             </button>
                           </div>
 
-                          <div className="flex items-center justify-between text-xs text-slate-500 pt-1">
-                            <span>Total Tagihan: <strong className="text-slate-900 font-bold">{formatIDR(totalAmount)}</strong></span>
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs text-slate-500 pt-1">
+                            <span className="break-words">Total Tagihan: <strong className="text-slate-900 font-bold">{formatIDR(totalAmount)}</strong></span>
                             <button
                               type="button"
                               onClick={() => handleCopy(totalAmount, "nominal")}
-                              className="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-[#1683FF] border border-blue-100 text-xs font-bold rounded-md transition flex items-center gap-1 cursor-pointer"
+                              className="self-start sm:self-auto px-2.5 sm:px-3 py-1 bg-blue-50 hover:bg-blue-100 text-[#1683FF] border border-blue-100 text-xs font-bold rounded-md transition flex items-center justify-center gap-1 cursor-pointer shrink-0"
                             >
                               <Copy className="w-3.5 h-3.5" />
                               <span>{isCopiedNominal ? "Tersalin" : "Salin Nominal"}</span>
@@ -626,36 +778,36 @@ function BuatPromosiMitraContent() {
                   </div>
 
                   {/* Bottom Security Notice */}
-                  <div className="pt-3 border-t border-slate-100 flex items-center gap-2 text-xs text-slate-500">
+                  <div className="pt-3 border-t border-slate-100 flex items-center gap-2 text-[11px] sm:text-xs text-slate-500">
                     <ShieldCheck className="w-4 h-4 text-[#1683FF] shrink-0" />
-                    <span>Transaksi dilindungi Sistem Pembayaran Resmi &amp; Terverifikasi Bantuin.</span>
+                    <span className="min-w-0 break-words">Transaksi dilindungi Sistem Pembayaran Resmi &amp; Terverifikasi Bantuin.</span>
                   </div>
                 </div>
 
               </div>
 
               {/* Right Column: Rincian Tagihan & Tombol Konfirmasi (5 Cols - Sticky) */}
-              <div className="lg:col-span-5 bg-white rounded-3xl border border-slate-200/90 p-6 sm:p-7 shadow-xs flex flex-col justify-between space-y-5 lg:sticky lg:top-6">
-                <div className="space-y-4">
+              <div className="lg:col-span-5 bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 p-4 sm:p-7 shadow-xs flex flex-col justify-between space-y-4 sm:space-y-5 lg:sticky lg:top-6 min-w-0">
+                <div className="space-y-3.5 sm:space-y-4">
                   {/* Header */}
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div className="flex items-center justify-between gap-2 pb-2.5 sm:pb-3 border-b border-slate-100">
                     <h2 className="text-base sm:text-lg font-extrabold text-slate-900">
                       Rincian Tagihan Promosi
                     </h2>
-                    <span className="text-xs font-bold text-[#1683FF] bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100">
+                    <span className="text-[11px] sm:text-xs font-bold text-[#1683FF] bg-blue-50 px-2.5 py-0.5 sm:py-1 rounded-full border border-blue-100 shrink-0">
                       100% Terverifikasi
                     </span>
                   </div>
 
                   {/* Compact Item Card */}
-                  <div className="p-3.5 rounded-2xl bg-slate-50/70 border border-slate-200/80 flex items-center gap-3.5">
+                  <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-50/70 border border-slate-200/80 flex items-start sm:items-center gap-3">
                     <img
                       src={selectedTargetType === "store" ? (store?.avatar || "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=400&q=80") : (selectedUnit?.photoUrl || selectedUnit?.image || "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=400&q=80")}
                       alt={targetName}
-                      className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl object-cover shrink-0 border border-slate-200"
+                      className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl object-cover shrink-0 border border-slate-200"
                     />
                     <div className="min-w-0 flex-1">
-                      <h3 className="text-xs sm:text-sm font-bold text-slate-900 truncate">
+                      <h3 className="text-xs sm:text-sm font-bold text-slate-900 leading-snug break-words">
                         {targetName}
                       </h3>
                       <div className="flex items-center gap-2 mt-1">
@@ -663,7 +815,7 @@ function BuatPromosiMitraContent() {
                           {selectedPkg.name} ({selectedPkg.durationDays} Hari)
                         </span>
                       </div>
-                      <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-slate-200/60">
+                      <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-slate-200/60 min-w-0">
                         <Building2 className="w-3.5 h-3.5 text-[#1683FF]" />
                         <span className="text-[11px] text-slate-600 truncate">
                           Toko: <strong className="text-slate-900 font-bold">{store?.name || "Mitra Rental"}</strong>
@@ -682,28 +834,28 @@ function BuatPromosiMitraContent() {
                   </div>
 
                   {/* Info Promosi */}
-                  <div className="p-3.5 rounded-2xl bg-slate-50/70 border border-slate-200/80 space-y-2 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-500">Target Penempatan:</span>
-                      <span className="font-bold text-[#1683FF]">
+                  <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-50/70 border border-slate-200/80 space-y-2 text-xs">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                      <span className="text-slate-500 min-w-0 break-words">Target Penempatan:</span>
+                      <span className="font-bold text-[#1683FF] text-right max-w-[150px] sm:max-w-none">
                         {selectedTargetType === "store" ? "Spotlight Toko Beranda" : "Top Kategori Sewa"}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-500 flex items-center gap-1.5">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                      <span className="text-slate-500 flex items-center gap-1.5 min-w-0">
                         <Clock className="w-3.5 h-3.5 text-[#1683FF]" />
                         <span>Durasi Tayang:</span>
                       </span>
-                      <span className="font-bold text-slate-900">
+                      <span className="font-bold text-slate-900 text-right">
                         {selectedPkg.durationDays} Hari Penuh
                       </span>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-500 flex items-center gap-1.5">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+                      <span className="text-slate-500 flex items-center gap-1.5 min-w-0">
                         <Building2 className="w-3.5 h-3.5 text-[#1683FF]" />
                         <span>Mitra Pemilik:</span>
                       </span>
-                      <span className="font-bold text-slate-900">
+                      <span className="font-bold text-slate-900 text-right max-w-[150px] sm:max-w-none break-words">
                         {store?.name || "Mitra Rental"}
                       </span>
                     </div>
@@ -711,29 +863,43 @@ function BuatPromosiMitraContent() {
 
                   {/* Price Breakdown Calculation */}
                   <div className="space-y-2 pt-2 border-t border-slate-100 text-xs">
-                    <div className="flex items-center justify-between text-slate-600">
-                      <span>Biaya Paket Promosi ({selectedPkg.name})</span>
-                      <span className="font-semibold text-slate-900">{formatIDR(totalAmount)}</span>
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 text-slate-600">
+                      <span className="min-w-0 break-words">Harga Paket ({selectedPkg.name})</span>
+                      <span className="font-semibold text-slate-900 text-right max-w-[150px] sm:max-w-none">{formatIDR(selectedPkg.price)} / {selectedTargetType === 'store' ? 'toko' : 'unit'}</span>
                     </div>
 
-                    <div className="flex items-center justify-between text-slate-500 text-[11px]">
-                      <span>Biaya Sistem Terverifikasi</span>
-                      <span className="text-emerald-600 font-bold">Gratis (Rp 0)</span>
-                    </div>
+                    {selectedTargetType === "unit" && (
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 text-slate-600">
+                        <span className="min-w-0 break-words">Subtotal ({unitCount} Unit Rental)</span>
+                        <span className="font-semibold text-slate-900 text-right whitespace-nowrap">{formatIDR(subtotalAmount)}</span>
+                      </div>
+                    )}
 
-                    <div className="flex items-center justify-between text-slate-500 text-[11px]">
-                      <span>Biaya Pemrosesan Gateway</span>
-                      <span className="text-emerald-600 font-bold">Gratis (Ditanggung Platform)</span>
+                    {discountAmount > 0 && (
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 text-emerald-700 bg-emerald-50/70 p-2 rounded-xl border border-emerald-100 font-bold">
+                        <span className="flex items-start gap-1 min-w-0">
+                          <Tag className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Diskon Paket Bundling Sewa ({discountRate * 100}%)</span>
+                        </span>
+                        <span className="text-right whitespace-nowrap">- {formatIDR(discountAmount)}</span>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 text-slate-500 text-[11px]">
+                      <span className="min-w-0 break-words">Biaya Sistem &amp; Admin</span>
+                      <span className="text-emerald-600 font-bold text-right">Gratis (Rp 0)</span>
                     </div>
 
                     {/* Total Tagihan */}
-                    <div className="pt-3 border-t border-slate-200/90 flex items-baseline justify-between mt-1">
-                      <div>
+                    <div className="pt-3 border-t border-slate-200/90 flex items-start justify-between gap-3 mt-1">
+                      <div className="min-w-0">
                         <span className="font-black text-xs sm:text-sm text-slate-900 block">Total Tagihan</span>
-                        <span className="text-[10px] text-slate-400 font-normal">Diproses via Payment Gateway Resmi</span>
+                        <span className="text-[10px] text-slate-400 font-normal">
+                          {discountAmount > 0 ? `Hemat ${formatIDR(discountAmount)} dengan paket bundling sewa` : "Diproses via Gateway Resmi"}
+                        </span>
                       </div>
-                      <div className="text-right">
-                        <span className="text-[#1683FF] text-xl sm:text-2xl font-black tracking-tight">
+                      <div className="text-right shrink-0">
+                        <span className="text-[#1683FF] text-xl sm:text-2xl font-black tracking-tight whitespace-nowrap">
                           {formatIDR(totalAmount)}
                         </span>
                       </div>
@@ -741,16 +907,16 @@ function BuatPromosiMitraContent() {
                   </div>
 
                   {/* Security Banner */}
-                  <div className="p-3 rounded-2xl bg-emerald-50/60 border border-emerald-100 flex items-start gap-2.5 text-[11px] text-emerald-800 leading-snug">
+                  <div className="p-3 rounded-2xl bg-emerald-50/60 border border-emerald-100 flex items-start gap-2.5 text-[11px] text-emerald-800 leading-snug min-w-0">
                     <Lock className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                    <span>
+                    <span className="min-w-0 break-words">
                       <strong>Pembayaran Aman Bantuin:</strong> Promosi rental otomatis aktif tayang di Beranda Bantuin setelah verifikasi selesai.
                     </span>
                   </div>
                 </div>
 
                 {/* Action Buttons */}
-                <div className="space-y-2 pt-2">
+                <div className="space-y-2 pt-1 sm:pt-2">
                   <button
                     type="button"
                     onClick={handleConfirmPayment}

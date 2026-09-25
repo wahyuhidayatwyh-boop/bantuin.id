@@ -178,7 +178,20 @@ export default function MitraRegisterPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F4F7FB] text-slate-800 flex flex-col justify-between py-6 sm:py-10 px-3.5 sm:px-6 lg:px-8 font-sans relative overflow-hidden">
+    <div className="min-h-screen relative flex flex-col justify-between py-6 sm:py-10 px-3.5 sm:px-6 lg:px-8 font-sans overflow-x-hidden bg-gradient-to-br from-[#EBF3FE] via-[#F0F6FF] to-[#DEEEFC] text-slate-800">
+      {/* 1. Subtle Dot Grid Matrix Motif Overlay */}
+      <div 
+        className="absolute inset-0 pointer-events-none opacity-30"
+        style={{
+          backgroundImage: "radial-gradient(#1683FF 1.2px, transparent 1.2px)",
+          backgroundSize: "24px 24px",
+        }}
+      />
+
+      {/* 2. Ambient Soft Glow Orbs */}
+      <div className="absolute -top-24 -left-24 w-96 h-96 bg-blue-300/35 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-1/3 -right-20 w-80 h-80 bg-sky-200/40 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-20 left-1/3 w-72 h-72 bg-indigo-200/30 rounded-full blur-3xl pointer-events-none" />
       
       {/* Top Bar Navigation */}
       <div className="max-w-3xl w-full mx-auto flex items-center justify-between z-10 mb-4">

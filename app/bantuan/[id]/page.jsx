@@ -97,7 +97,7 @@ export default function RequestDetailPage() {
     <div className="min-h-screen flex flex-col bg-[#EEF2F6] text-slate-800">
       <Navbar />
 
-      <main className="flex-1 max-w-[1360px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-5">
+      <main className="flex-1 max-w-[1360px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
         
         {/* Top Breadcrumb & Category */}
         <div className="flex items-center justify-between">
@@ -119,7 +119,7 @@ export default function RequestDetailPage() {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-start">
             
             {/* 1. MAIN OVERVIEW & KEY DETAILS (Mobile: Order 1, Desktop: col-span-8) */}
-            <div className="lg:col-span-8 space-y-5 order-1">
+            <div className="lg:col-span-8 space-y-6 order-1">
               
               {/* Clean Minimalist Meta Line */}
               <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 font-medium">
@@ -139,18 +139,18 @@ export default function RequestDetailPage() {
               </div>
 
               {/* Title & Description */}
-              <div>
+              <div className="space-y-3">
                 <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 tracking-tight leading-snug">
                   {request.title}
                 </h1>
-                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed mt-2.5 whitespace-pre-line">
+                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed whitespace-pre-line">
                   {request.description}
                 </p>
               </div>
 
               {/* Foto Barang / Bukti Kebutuhan (Jika Ada) */}
               {Array.isArray(request.photos) && request.photos.length > 0 && (
-                <div className="p-4 sm:p-5 rounded-2xl bg-slate-50/90 border border-slate-200/80 space-y-3">
+                <div className="space-y-3 pt-2">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Camera className="w-4 h-4 text-[#1683FF]" />
@@ -188,65 +188,64 @@ export default function RequestDetailPage() {
                 </div>
               )}
 
-              {/* Clean Info Strip */}
-              <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-200/70 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    {request.mode === "online" ? "Format Pengerjaan" : "Lokasi / Titik Temu"}
+              {/* Clean Info Strip: Lokasi & Format Pengerjaan */}
+              <div className="pt-2 border-t border-slate-100 space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-blue-50 text-[#1683FF] flex items-center justify-center shrink-0 mt-0.5">
+                    <MapPin className="w-4 h-4" />
                   </div>
-                  <div className="text-xs sm:text-sm font-bold text-slate-900 mt-0.5">{request.locationName}</div>
-                  <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                    {request.mode === "online" ? (
-                      <span>Dapat dikerjakan dari mana saja (Online / Remote)</span>
-                    ) : (
-                      <>
-                        <span className="font-semibold text-slate-700">{distanceText}</span>
-                        <span>dari posisi Anda</span>
-                        {distanceInfo?.isRealtime && (
-                          <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200/80">
-                            GPS Aktif
-                          </span>
-                        )}
-                      </>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      {request.mode === "online" ? "Format Pengerjaan" : "Lokasi / Titik Temu"}
+                    </div>
+                    <div className="text-xs sm:text-sm font-bold text-slate-900 mt-0.5">
+                      {request.locationName}
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                      {request.mode === "online" ? (
+                        <span>Dapat dikerjakan dari mana saja (Online / Remote)</span>
+                      ) : (
+                        <>
+                          <span className="font-semibold text-slate-700">{distanceText}</span>
+                          <span>dari posisi Anda</span>
+                          {distanceInfo?.isRealtime && (
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200/80">
+                              GPS Aktif
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </div>
+
+                    {request.mode !== "online" && request.latitude && request.longitude && (
+                      <div className="mt-2.5">
+                        <a
+                          href={getNavigationUrl(
+                            request.latitude,
+                            request.longitude,
+                            userCoordinates?.latitude,
+                            userCoordinates?.longitude
+                          )}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#1683FF] hover:text-[#0F6FE5] bg-blue-50/90 hover:bg-blue-100 px-3 py-1.5 rounded-xl border border-blue-100 transition shadow-2xs"
+                        >
+                          <Navigation className="w-3 h-3" />
+                          <span>Buka Petunjuk Arah / Rute</span>
+                        </a>
+                      </div>
                     )}
                   </div>
-
-                  {request.mode !== "online" && request.latitude && request.longitude && (
-                    <div className="mt-2">
-                      <a
-                        href={getNavigationUrl(
-                          request.latitude,
-                          request.longitude,
-                          userCoordinates?.latitude,
-                          userCoordinates?.longitude
-                        )}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#1683FF] hover:text-[#0F6FE5] bg-blue-50/90 hover:bg-blue-100 px-3 py-1 rounded-xl border border-blue-100 transition shadow-2xs"
-                      >
-                        <Navigation className="w-3 h-3" />
-                        <span>Buka Petunjuk Arah / Rute</span>
-                      </a>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Budget Imbalan</div>
-                  <div className="text-base sm:text-lg font-black text-[#1683FF] mt-0.5">
-                    {request.isVoluntary ? "Sukarela" : formatIDR(request.rewardAmount)}
-                  </div>
-                  <div className="text-[11px] text-emerald-700 font-medium">Dana pembayaran terverifikasi aman</div>
                 </div>
               </div>
 
               {/* Embedded Interactive Map for Offline Request Point */}
               {request.mode !== "online" && request.latitude && request.longitude && (
-                <div className="mt-4 p-4 bg-slate-50/80 rounded-2xl border border-slate-200/70">
-                  <div className="flex items-center justify-between mb-2.5">
+                <div className="rounded-2xl border border-slate-200 overflow-hidden bg-slate-50">
+                  <div className="flex items-center justify-between p-3 border-b border-slate-200/80 bg-white">
                     <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
                       <MapPin className="w-3.5 h-3.5 text-[#1683FF]" />
-                      <span>Titik Lokasi Pertemuan & Navigasi</span>
+                      <span>Titik Lokasi Pertemuan &amp; Navigasi</span>
                     </div>
                     <a
                       href={getNavigationUrl(
@@ -285,11 +284,24 @@ export default function RequestDetailPage() {
             </div>
 
             {/* 2. PEMINTA BANTUAN & ACTION CTA (Mobile: Order 2 - Tepat di Atas Pelamar, Desktop: col-span-4) */}
-            <div className="lg:col-span-4 lg:border-l lg:border-slate-100 lg:pl-8 space-y-4 order-2">
+            <div className="lg:col-span-4 lg:border-l lg:border-slate-100 lg:pl-8 space-y-5 order-2">
               <div className="space-y-4">
                 
+                {/* Budget Imbalan Card */}
+                <div className="p-4 rounded-2xl bg-blue-50/50 border border-blue-100/80 space-y-1">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    Budget Imbalan
+                  </div>
+                  <div className="text-xl sm:text-2xl font-black text-[#1683FF]">
+                    {request.isVoluntary ? "Sukarela" : formatIDR(request.rewardAmount)}
+                  </div>
+                  <div className="text-[11px] text-emerald-700 font-medium">
+                    Dana pembayaran terverifikasi aman di sistem
+                  </div>
+                </div>
+
                 {/* Author Profile */}
-                <div>
+                <div className="pt-2">
                   <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2.5">
                     Peminta Bantuan
                   </div>
@@ -492,7 +504,7 @@ export default function RequestDetailPage() {
                               <button
                                 type="button"
                                 onClick={() => handleOpenChat(offer)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-bold text-slate-700 text-xs transition"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-bold text-slate-700 text-xs transition cursor-pointer"
                               >
                                 <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
                                 <span>Chat Dulu</span>

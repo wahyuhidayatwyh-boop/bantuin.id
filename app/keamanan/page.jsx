@@ -103,13 +103,13 @@ export default function KeamananPage() {
               desc: "Titik temu publik berCCTV yang direkomendasikan untuk serah terima aman dan terverifikasi.",
             },
           ].map((p, i) => (
-            <div key={i} className="bg-white border border-[#DCEAF7] rounded-xl p-5 flex items-start gap-3.5">
+            <div key={i} className="bg-white border border-[#DCEAF7] rounded-xl p-5 flex items-start gap-3.5 min-w-0">
               <div className={`w-9 h-9 rounded-lg ${p.bg} border ${p.border} flex items-center justify-center shrink-0`}>
                 <p.icon className={`w-4 h-4 ${p.color}`} />
               </div>
-              <div>
-                <div className="font-bold text-sm text-[#102A43]">{p.title}</div>
-                <p className="text-xs text-[#61758A] mt-0.5 leading-relaxed">{p.desc}</p>
+              <div className="min-w-0 flex-1">
+                <div className="font-bold text-sm text-[#102A43] break-words">{p.title}</div>
+                <p className="text-xs text-[#61758A] mt-0.5 leading-relaxed break-words">{p.desc}</p>
               </div>
             </div>
           ))}

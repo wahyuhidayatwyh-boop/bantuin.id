@@ -29,12 +29,12 @@ export default function SedangDibutuhkan() {
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
         <div>
           <div className="flex items-center gap-2 mb-2">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-[#1683FF] border border-blue-100">
-              <Zap className="w-3.5 h-3.5 fill-[#1683FF]" />
-              <span>TERHUBUNG CEPAT DI {activeKabupaten.toUpperCase()}</span>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-[#1683FF] border border-blue-100 max-w-full overflow-hidden">
+              <Zap className="w-3.5 h-3.5 fill-[#1683FF] shrink-0" />
+              <span className="truncate">TERHUBUNG CEPAT DI {activeKabupaten.toUpperCase()}</span>
             </span>
           </div>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+          <h2 className="text-xl sm:text-3xl font-extrabold text-slate-900 tracking-tight break-words">
             Permintaan Bantuan di <span className="text-[#1683FF]">{activeKabupaten}</span>
           </h2>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
@@ -47,7 +47,8 @@ export default function SedangDibutuhkan() {
             href="/bantuan"
             className="text-xs sm:text-sm font-bold text-[#1683FF] hover:text-[#0F6FE5] flex items-center gap-1.5 group whitespace-nowrap"
           >
-            <span>Lihat Semua Permintaan</span>
+            <span className="sm:hidden">Lihat Semua</span>
+            <span className="hidden sm:inline">Lihat Semua Permintaan</span>
             <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
           </Link>
         </div>
