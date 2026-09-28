@@ -403,6 +403,10 @@ function CreateRequestForm() {
         throw new Error(data.error || "Gagal mempublikasikan permintaan bantuan.");
       }
 
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("bantuin_activity_updated"));
+      }
+
       if (data.data?.id) {
         router.push(`/bantuan/${data.data.id}`);
       } else {
@@ -499,7 +503,7 @@ function CreateRequestForm() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs sm:text-sm font-bold text-slate-900 mb-2">
-                      Kategori Tugas
+                      Kategori Tugas <span className="text-red-500">*</span>
                     </label>
                     <select
                       value={category}
@@ -514,7 +518,7 @@ function CreateRequestForm() {
 
                   <div>
                     <label className="block text-xs sm:text-sm font-bold text-slate-900 mb-2">
-                      Mode Pelaksanaan
+                      Mode Pelaksanaan <span className="text-red-500">*</span>
                     </label>
                     <div className="grid grid-cols-2 gap-2">
                       <button
@@ -801,7 +805,7 @@ function CreateRequestForm() {
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <label className="text-xs sm:text-sm font-bold text-slate-900">
-                        Budget Imbalan (Rp)
+                        Budget Imbalan (Rp) {!isVoluntary && <span className="text-red-500">*</span>}
                       </label>
                       <label className="flex items-center gap-1.5 cursor-pointer">
                         <input
@@ -1011,7 +1015,7 @@ function CreateRequestForm() {
                         <Scale className="w-3.5 h-3.5" />
                       </div>
                       <span className="font-bold text-xs sm:text-sm text-slate-900">
-                        Deklarasi Muatan &amp; Kepatuhan Hukum
+                        Deklarasi Muatan &amp; Kepatuhan Hukum {mode === "offline" && <span className="text-red-500">*</span>}
                       </span>
                     </div>
                     <span className="text-[10px] font-bold text-[#1683FF] bg-white px-2 py-0.5 rounded-md border border-blue-100">
@@ -1022,7 +1026,7 @@ function CreateRequestForm() {
                   {mode === "offline" && (
                     <div>
                       <label className="block text-[11px] font-bold text-slate-700 mb-1.5">
-                        Jenis Muatan / Barang yang Ditangani:
+                        Jenis Muatan / Barang yang Ditangani: <span className="text-red-500">*</span>
                       </label>
                       <div className="flex flex-wrap gap-1.5">
                         {[
@@ -1058,7 +1062,7 @@ function CreateRequestForm() {
                       className="mt-0.5 rounded border-slate-300 text-[#1683FF] focus:ring-[#1683FF]"
                     />
                     <span className="text-[11px] text-slate-700 leading-relaxed select-none">
-                      Saya menyatakan dan menjamin bahwa muatan/tugas ini <strong>aman, legal menurut hukum RI</strong>, dan <strong>bebas dari narkotika, miras oplosan, senjata, atau barang curian</strong>. Segala ketidaksesuaian atau kebohongan isi muatan menjadi tanggung jawab penuh pihak pengirim sesuai peraturan perundang-undangan yang berlaku dan Syarat &amp; Ketentuan Layanan.
+                      Saya menyatakan dan menjamin bahwa muatan/tugas ini <strong>aman, legal menurut hukum RI</strong>, dan <strong>bebas dari narkotika, miras oplosan, senjata, atau barang curian</strong>. Segala ketidaksesuaian atau kebohongan isi muatan menjadi tanggung jawab penuh pihak pengirim sesuai peraturan perundang-undangan yang berlaku dan Syarat &amp; Ketentuan Layanan. {mode === "offline" && <span className="text-red-500 font-bold">*</span>}
                     </span>
                   </label>
                   {errors.legalDeclaration && (

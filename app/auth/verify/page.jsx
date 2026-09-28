@@ -16,6 +16,8 @@ import {
   CreditCard
 } from "lucide-react";
 
+import { validateFile, getAcceptAttribute } from "@/lib/utils/fileValidation";
+
 export default function VerifyPage() {
   const router = useRouter();
   const { submitKYC, currentUser } = useApp();
@@ -23,10 +25,18 @@ export default function VerifyPage() {
   const [ktpPhotoPreview, setKtpPhotoPreview] = useState(null);
   const [ktpFileName, setKtpFileName] = useState("");
   const [submitted, setSubmitted] = useState(currentUser?.verificationStatus === "pending_review");
+  const [uploadError, setUploadError] = useState("");
 
   const handleKtpUpload = (e) => {
     const file = e.target.files?.[0];
     if (file) {
+      const validation = validateFile(file, "bantuin-kyc");
+      if (!validation.valid) {
+        setUploadError(validation.error);
+        e.target.value = "";
+        return;
+      }
+      setUploadError("");
       const previewUrl = URL.createObjectURL(file);
       setKtpPhotoPreview(previewUrl);
       setKtpFileName(file.name);
@@ -116,10 +126,13 @@ export default function VerifyPage() {
                     <p className="text-xs text-slate-400 mt-1">
                       Mendukung format JPG, JPEG, PNG (Maks 5 MB). Pastikan NIK dan nama terbaca jelas.
                     </p>
+                    {uploadError && (
+                      <p className="text-xs text-rose-600 font-bold mt-2">{uploadError}</p>
+                    )}
                     <input
                       id="verify-ktp-file-input"
                       type="file"
-                      accept="image/*"
+                      accept={getAcceptAttribute("bantuin-kyc")}
                       onChange={handleKtpUpload}
                       className="hidden"
                     />

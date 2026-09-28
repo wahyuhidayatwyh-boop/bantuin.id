@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
+import { generateTokens } from "@/lib/auth/jwt";
 
 export async function POST(req) {
   try {
@@ -82,7 +83,6 @@ export async function POST(req) {
     } catch {}
 
     // 4. Susun payload user untuk sesi
-    const token = `session-jwt-${profile.id}-${Date.now()}`;
     const userPayload = {
       id: profile.id,
       email: profile.email,
@@ -104,11 +104,15 @@ export async function POST(req) {
       createdAt: profile.createdAt,
     };
 
+    // 5. Generate JWT Access Token & Refresh Token
+    const tokens = generateTokens(userPayload);
+
     return NextResponse.json({
       success: true,
       message: "Login berhasil.",
       user: userPayload,
-      token,
+      ...tokens,
+      token: tokens.accessToken, // Backward compatibility
     });
   } catch (error) {
     console.error("Login Error:", error);

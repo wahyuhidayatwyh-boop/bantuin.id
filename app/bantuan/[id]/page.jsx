@@ -37,6 +37,8 @@ import {
   Navigation,
   Camera,
   Eye,
+  Trash2,
+  AlertTriangle,
   X
 } from "lucide-react";
 import DetailSkeleton from "@/components/skeletons/DetailSkeleton";
@@ -49,13 +51,44 @@ export default function RequestDetailPage() {
     userCoordinates,
     getDistanceToUser,
     detectUserLocation,
-    startTaskInquiry
+    startTaskInquiry,
+    addToast
   } = useApp();
 
   const [request, setRequest] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
   const [selectedPhotoModal, setSelectedPhotoModal] = useState(null);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+
+  const handleCancelRequest = async () => {
+    if (!id || isCancelling) return;
+    setIsCancelling(true);
+    try {
+      const res = await fetch(`/api/requests/${id}`, {
+        method: "DELETE",
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || "Gagal membatalkan permintaan bantuan.");
+      }
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("bantuin_activity_updated"));
+      }
+      addToast?.(
+        "Permintaan Bantuan Dibatalkan",
+        "Status permintaan berhasil diubah menjadi Dibatalkan dan dipindahkan ke Riwayat Selesai.",
+        "success"
+      );
+      router.push("/activity?tab=selesai");
+    } catch (err) {
+      console.error("Cancel request error:", err);
+      addToast?.("Gagal Membatalkan", err.message || "Terjadi kesalahan saat membatalkan tugas.", "error");
+      setIsCancelling(false);
+      setShowCancelModal(false);
+    }
+  };
 
   const fetchDetail = async () => {
     if (!id) return;
@@ -111,7 +144,8 @@ export default function RequestDetailPage() {
   const isOwner = currentUser?.id === request.requesterId || currentUser?.id === request.requester?.id;
   const offersList = request.offers || [];
   const hasUserOffered = offersList.some((o) => o.helperId === currentUser?.id);
-  const isClosed = request.status === "helper_selected" || request.status === "in_progress" || request.status === "completed";
+  const isCancelled = request.status === "cancelled";
+  const isClosed = isCancelled || request.status === "helper_selected" || request.status === "in_progress" || request.status === "completed";
 
   const distanceInfo = getDistanceToUser
     ? getDistanceToUser(request.latitude, request.longitude, request.distanceMeters)
@@ -356,10 +390,14 @@ export default function RequestDetailPage() {
                           <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
                           {Number(request.requester?.rating || request.userRating || 5.0).toFixed(1)}
                         </span>
-                        {request.requester?.campus && (
+                        {(request.requester?.campus || request.locationName || currentUser?.campusName) && (
                           <>
                             <span className="text-slate-300">•</span>
-                            <span className="text-slate-500 truncate max-w-[170px]">{request.requester.campus}</span>
+                            <span className="text-slate-500 truncate max-w-[170px]">
+                              {request.requester?.campus && request.requester.campus !== "Universitas Indonesia"
+                                ? request.requester.campus
+                                : (request.locationName ? request.locationName.split(",").slice(1, 3).join(", ").trim() : (currentUser?.campusName || "Bekasi"))}
+                            </span>
                           </>
                         )}
                       </div>
@@ -368,7 +406,12 @@ export default function RequestDetailPage() {
                 </div>
 
                 {/* Action CTA Button */}
-                {isClosed ? (
+                {isCancelled ? (
+                  <div className="p-3.5 bg-rose-50 rounded-xl border border-rose-200 text-center space-y-1">
+                    <div className="text-xs font-bold text-rose-900">Permintaan Telah Dibatalkan</div>
+                    <div className="text-[11px] text-rose-700">Tugas ini sudah non-aktif dan tercatat di Riwayat Selesai akun Anda.</div>
+                  </div>
+                ) : isClosed ? (
                   <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-center">
                     <div className="text-xs font-bold text-amber-900">Helper Telah Diterima</div>
                     <div className="text-[11px] text-amber-700 mt-0.5">Tugas ini sedang dalam proses pengerjaan.</div>
@@ -389,9 +432,20 @@ export default function RequestDetailPage() {
                     </Link>
                   )
                 ) : (
-                  <div className="p-3 bg-blue-50 rounded-xl border border-blue-100 text-center">
-                    <div className="text-xs font-bold text-blue-950">Ini Permintaan Milik Anda</div>
-                    <div className="text-[11px] text-blue-700 mt-0.5">Pilih helper dari daftar pelamar di bawah.</div>
+                  <div className="space-y-2.5">
+                    <div className="p-3 bg-blue-50 rounded-xl border border-blue-100 text-center">
+                      <div className="text-xs font-bold text-blue-950">Ini Permintaan Milik Anda</div>
+                      <div className="text-[11px] text-blue-700 mt-0.5">Pilih helper dari daftar pelamar di bawah.</div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowCancelModal(true)}
+                      className="w-full py-2.5 px-4 rounded-xl border border-rose-200 bg-rose-50/60 hover:bg-rose-100 text-rose-600 hover:text-rose-700 text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-2xs active:scale-98"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                      <span>Batalkan Permintaan Bantuan</span>
+                    </button>
                   </div>
                 )}
 
@@ -622,6 +676,60 @@ export default function RequestDetailPage() {
               alt="Detail foto barang"
               className="max-h-[85vh] w-auto max-w-full rounded-2xl object-contain shadow-2xl border border-white/10"
             />
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi Pembatalan Permintaan Bantuan */}
+      {showCancelModal && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => !isCancelling && setShowCancelModal(false)}
+        >
+          <div
+            className="bg-white rounded-[24px] max-w-md w-full p-6 sm:p-7 shadow-2xl border border-slate-100 space-y-4 animate-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+
+            <div className="text-center space-y-1">
+              <h3 className="text-lg font-black text-slate-900">Batalkan Permintaan Ini?</h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Permintaan bantuan <span className="font-bold text-slate-700">&quot;{request.title}&quot;</span> akan ditandai sebagai dibatalkan dan dipindahkan ke Riwayat Selesai akun Anda.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isCancelling}
+                onClick={() => setShowCancelModal(false)}
+                className="flex-1 py-2.5 px-4 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold transition cursor-pointer disabled:opacity-50"
+              >
+                Kembali
+              </button>
+
+              <button
+                type="button"
+                disabled={isCancelling}
+                onClick={handleCancelRequest}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-50"
+              >
+                {isCancelling ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Membatalkan...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Ya, Batalkan</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

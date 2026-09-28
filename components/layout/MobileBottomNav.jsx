@@ -15,16 +15,14 @@ import {
 
 export default function MobileBottomNav() {
   const pathname = usePathname();
-  const { currentUser, orderRooms = [], notifications = [] } = useApp();
+  const { currentUser, isAuthenticated, activeActivitiesCount = 0, notifications = [] } = useApp();
 
   // Count ongoing activities and unread notifications combined for "Aktivitas" badge
-  const activeActivitiesCount = useMemo(() => {
-    const ongoing = (orderRooms || []).filter(
-      (r) => r.orderStatus !== "completed" && r.orderStatus !== "cancelled"
-    ).length;
+  const totalActivityBadgeCount = useMemo(() => {
+    if (!isAuthenticated) return 0;
     const unreadNotifs = (notifications || []).filter((n) => n.unread).length;
-    return ongoing + unreadNotifs;
-  }, [orderRooms, notifications]);
+    return (activeActivitiesCount || 0) + unreadNotifs;
+  }, [isAuthenticated, activeActivitiesCount, notifications]);
 
   // If in chat workspace, let the chat UI manage full mobile screen
   const isInsideChatRoom = pathname === "/chat";
@@ -69,7 +67,7 @@ export default function MobileBottomNav() {
       href: "/activity",
       icon: Activity,
       isActive: pathname?.startsWith("/activity"),
-      badge: activeActivitiesCount > 0 ? activeActivitiesCount : undefined,
+      badge: totalActivityBadgeCount > 0 ? totalActivityBadgeCount : undefined,
     },
   ];
 

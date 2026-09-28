@@ -9,17 +9,18 @@ import { useApp } from "@/lib/context/AppContext";
 import { INDONESIA_REGION_DATA, PROVINCE_LIST } from "@/lib/data/indonesiaRegions";
 import { detectRealtimeLocation } from "@/lib/services/gpsService";
 import CustomSelect from "@/components/ui/CustomSelect";
-import { 
-  Store, 
-  ShieldCheck, 
-  ArrowRight, 
-  ArrowLeft, 
-  MapPin, 
-  Building2, 
-  Upload, 
-  CreditCard, 
-  Phone, 
-  Mail, 
+import { validateFile, getAcceptAttribute } from "@/lib/utils/fileValidation";
+import {
+  Store,
+  ShieldCheck,
+  ArrowRight,
+  ArrowLeft,
+  MapPin,
+  Building2,
+  Upload,
+  CreditCard,
+  Phone,
+  Mail,
   CheckCircle2,
   Trash2,
   Navigation,
@@ -116,9 +117,15 @@ export default function MitraRegisterPage() {
   const handleStorePhotoUpload = (e) => {
     const file = e.target.files?.[0];
     if (file) {
+      const validation = validateFile(file, "bantuin-assets");
+      if (!validation.valid) {
+        addToast?.("Format Foto Toko Ditolak", validation.error, "error");
+        e.target.value = "";
+        return;
+      }
       const previewUrl = URL.createObjectURL(file);
-      setFormData({ 
-        ...formData, 
+      setFormData({
+        ...formData,
         storePhotoPreview: previewUrl,
         storePhotoFileName: file.name
       });
@@ -128,9 +135,15 @@ export default function MitraRegisterPage() {
   const handleKtpPhotoUpload = (e) => {
     const file = e.target.files?.[0];
     if (file) {
+      const validation = validateFile(file, "bantuin-kyc");
+      if (!validation.valid) {
+        addToast?.("Format KTP Ditolak", validation.error, "error");
+        e.target.value = "";
+        return;
+      }
       const previewUrl = URL.createObjectURL(file);
-      setFormData({ 
-        ...formData, 
+      setFormData({
+        ...formData,
         ktpPhotoPreview: previewUrl,
         ktpPhotoFileName: file.name
       });
@@ -167,7 +180,7 @@ export default function MitraRegisterPage() {
       setIsLoading(true);
       setTimeout(() => {
         addToast?.(
-          "Pendaftaran Mitra Berhasil!", 
+          "Pendaftaran Mitra Berhasil!",
           mitraKycChoice === "now"
             ? "Toko Anda telah terdaftar. Dokumen legalitas sedang dalam verifikasi admin."
             : "Toko Anda berhasil aktif! Anda dapat mulai mengunggah alat rental dan melengkapi KTP nanti di dashboard."
@@ -180,7 +193,7 @@ export default function MitraRegisterPage() {
   return (
     <div className="min-h-[100dvh] relative flex flex-col justify-between py-4 sm:py-10 px-3 sm:px-6 lg:px-8 font-sans overflow-x-hidden bg-gradient-to-br from-[#EBF3FE] via-[#F0F6FF] to-[#DEEEFC] text-slate-800">
       {/* 1. Subtle Dot Grid Matrix Motif Overlay */}
-      <div 
+      <div
         className="absolute inset-0 pointer-events-none opacity-30"
         style={{
           backgroundImage: "radial-gradient(#1683FF 1.2px, transparent 1.2px)",
@@ -192,7 +205,7 @@ export default function MitraRegisterPage() {
       <div className="absolute -top-24 -left-24 w-96 h-96 bg-blue-300/35 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute top-1/3 -right-20 w-80 h-80 bg-sky-200/40 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute -bottom-20 left-1/3 w-72 h-72 bg-indigo-200/30 rounded-full blur-3xl pointer-events-none" />
-      
+
       {/* Top Bar Navigation */}
       <div className="max-w-3xl w-full mx-auto flex items-start sm:items-center justify-between gap-3 z-10 mb-4">
         <Link href="/" className="flex items-center gap-2">
@@ -223,18 +236,18 @@ export default function MitraRegisterPage() {
 
       {/* Center Large Registration Stepper */}
       <div className="max-w-3xl w-full mx-auto my-auto z-10">
-        
+
         {/* Progress Stepper */}
         <div className="mb-5 sm:mb-6">
           <div className="flex items-center justify-between text-xs sm:text-sm font-bold text-slate-600 mb-2 gap-2">
             <span className="truncate">Langkah {step} dari 3: {
               step === 1 ? "Profil Usaha & Identitas Toko" :
-              step === 2 ? "Lokasi Fisik Toko & GPS" : "Legalitas KTP & Rekening Payout"
+                step === 2 ? "Lokasi Fisik Toko & GPS" : "Legalitas KTP & Rekening Payout"
             }</span>
             <span className="text-[#1683FF] font-extrabold shrink-0">{Math.round((step / 3) * 100)}%</span>
           </div>
           <div className="w-full h-2 sm:h-2.5 bg-slate-200 rounded-full overflow-hidden">
-            <div 
+            <div
               className="h-full bg-gradient-to-r from-[#1683FF] to-[#0F6FE5] transition-all duration-300 rounded-full"
               style={{ width: `${(step / 3) * 100}%` }}
             />
@@ -244,7 +257,7 @@ export default function MitraRegisterPage() {
         {/* Large Step Form Card */}
         <div className="bg-white rounded-2xl sm:rounded-[32px] border border-slate-200/90 p-4 sm:p-8 md:p-10 shadow-[0_16px_45px_rgba(22,131,255,0.08)]">
           <form onSubmit={handleNext} className="space-y-4 sm:space-y-5">
-            
+
             {/* STEP 1: PROFIL USAHA MITRA */}
             {step === 1 && (
               <div className="space-y-4 animate-in fade-in duration-200">
@@ -342,7 +355,7 @@ export default function MitraRegisterPage() {
                       <input
                         type="tel"
                         required
-                        placeholder="081234567890"
+                        placeholder="Misal: 081234567890"
                         value={formData.phone}
                         onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                         className="w-full bg-white border border-slate-200 text-slate-900 placeholder-slate-400 rounded-2xl pl-11 pr-4 py-3 text-xs sm:text-sm focus:outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/20"
@@ -601,11 +614,10 @@ export default function MitraRegisterPage() {
                     {/* Opsi 1: Buka Toko Dulu */}
                     <div
                       onClick={() => setMitraKycChoice("later")}
-                      className={`p-4 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
-                        mitraKycChoice === "later"
+                      className={`p-4 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${mitraKycChoice === "later"
                           ? "border-[#1683FF] bg-blue-50/60 shadow-2xs ring-2 ring-[#1683FF]/20"
                           : "border-slate-200 hover:border-slate-300 bg-white"
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-[#1683FF] flex items-center gap-1">
@@ -625,11 +637,10 @@ export default function MitraRegisterPage() {
                     {/* Opsi 2: Lengkapi KTP Sekarang */}
                     <div
                       onClick={() => setMitraKycChoice("now")}
-                      className={`p-4 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
-                        mitraKycChoice === "now"
+                      className={`p-4 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${mitraKycChoice === "now"
                           ? "border-[#1683FF] bg-blue-50/60 shadow-2xs ring-2 ring-[#1683FF]/20"
                           : "border-slate-200 hover:border-slate-300 bg-white"
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 flex items-center gap-1">

@@ -60,6 +60,7 @@ export default function Navbar() {
     markNotificationAsRead,
     markAllNotificationsAsRead,
     markChatRoomAsRead,
+    activeActivitiesCount = 0,
   } = useApp();
   const [isDetectingGPS, setIsDetectingGPS] = useState(false);
 
@@ -149,9 +150,7 @@ export default function Navbar() {
 
   const totalChatUnread = recentChats.filter((c) => c.unread).length;
   const totalNotifUnread = (notifications || []).filter((n) => n.unread).length;
-  const activeOrdersCount = (orderRooms || []).filter(
-    (r) => r.orderStatus !== "completed" && r.orderStatus !== "cancelled"
-  ).length;
+  const activeOrdersCount = isAuthenticated ? (typeof activeActivitiesCount === "number" ? activeActivitiesCount : 0) : 0;
 
   const handleChatClick = (roomId) => {
     if (markChatRoomAsRead) {
@@ -476,11 +475,25 @@ export default function Navbar() {
                   <span className="text-xs font-bold text-slate-800 max-w-[75px] truncate">
                     {currentUser.fullName.split(" ")[0]}
                   </span>
-                  <img
-                    src={currentUser.avatarUrl}
-                    alt={currentUser.fullName}
-                    className="w-7 h-7 rounded-full object-cover ring-1 ring-slate-100 shrink-0"
-                  />
+                  {currentUser.avatarUrl ? (
+                    <img
+                      src={currentUser.avatarUrl}
+                      alt={currentUser.fullName}
+                      onError={(e) => {
+                        e.currentTarget.style.display = "none";
+                        if (e.currentTarget.nextElementSibling) {
+                          e.currentTarget.nextElementSibling.style.display = "flex";
+                        }
+                      }}
+                      className="w-7 h-7 rounded-full object-cover ring-1 ring-slate-100 shrink-0"
+                    />
+                  ) : null}
+                  <div
+                    style={{ display: currentUser.avatarUrl ? "none" : "flex" }}
+                    className="w-7 h-7 rounded-full bg-blue-50 text-[#1683FF] items-center justify-center shrink-0 border border-blue-200"
+                  >
+                    <User className="w-3.5 h-3.5" />
+                  </div>
                   <ChevronDown className={`w-3.5 h-3.5 text-slate-400 mr-0.5 transition-transform duration-200 ${isProfileOpen ? "rotate-180 text-[#1683FF]" : ""}`} />
                 </button>
               </div>
@@ -547,11 +560,27 @@ export default function Navbar() {
               title="Menu Profil & Navigasi"
             >
               {isLoggedIn ? (
-                <img
-                  src={currentUser.avatarUrl}
-                  alt={currentUser.fullName}
-                  className="w-full h-full object-cover"
-                />
+                <>
+                  {currentUser.avatarUrl && (
+                    <img
+                      src={currentUser.avatarUrl}
+                      alt={currentUser.fullName}
+                      onError={(e) => {
+                        e.currentTarget.style.display = "none";
+                        if (e.currentTarget.nextElementSibling) {
+                          e.currentTarget.nextElementSibling.style.display = "flex";
+                        }
+                      }}
+                      className="w-full h-full object-cover"
+                    />
+                  )}
+                  <div
+                    style={{ display: currentUser.avatarUrl ? "none" : "flex" }}
+                    className="w-full h-full bg-blue-50 text-[#1683FF] items-center justify-center"
+                  >
+                    <User className="w-4 h-4 text-[#1683FF]" />
+                  </div>
+                </>
               ) : (
                 <User className="w-4 h-4 text-slate-700" />
               )}

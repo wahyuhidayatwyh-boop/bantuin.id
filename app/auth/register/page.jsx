@@ -11,22 +11,23 @@ import { detectRealtimeLocation } from "@/lib/services/gpsService";
 import CustomSelect from "@/components/ui/CustomSelect";
 import GoogleIcon from "@/components/common/GoogleIcon";
 import { authService, CANONICAL_ROLES } from "@/lib/services/authService";
-import { 
-  ShieldCheck, 
-  ArrowRight, 
-  ArrowLeft, 
-  User, 
-  Mail, 
-  Lock, 
-  Phone, 
-  MapPin, 
-  Upload, 
-  CheckCircle2, 
-  Briefcase, 
-  Users, 
-  Check, 
-  Plus, 
-  Trash2, 
+import { validateFile, getAcceptAttribute } from "@/lib/utils/fileValidation";
+import {
+  ShieldCheck,
+  ArrowRight,
+  ArrowLeft,
+  User,
+  Mail,
+  Lock,
+  Phone,
+  MapPin,
+  Upload,
+  CheckCircle2,
+  Briefcase,
+  Users,
+  Check,
+  Plus,
+  Trash2,
   FileBadge,
   Navigation,
   Loader2,
@@ -64,7 +65,7 @@ export default function RegisterPage() {
     password: "",
     authProvider: "local", // 'local' | 'google'
     accountType: "user", // 'user', 'provider', 'mitra'
-    
+
     // Khusus Mitra jika dipilih di Step 1
     storeName: "",
     storeCategory: "Rental Kamera & Multimedia",
@@ -168,9 +169,15 @@ export default function RegisterPage() {
   const handleKTPUpload = (e) => {
     const file = e.target.files?.[0];
     if (file) {
+      const validation = validateFile(file, "bantuin-kyc");
+      if (!validation.valid) {
+        addToast?.("Format File Ditolak", validation.error, "error");
+        e.target.value = "";
+        return;
+      }
       const previewUrl = URL.createObjectURL(file);
-      setFormData({ 
-        ...formData, 
+      setFormData({
+        ...formData,
         idCardPreview: previewUrl,
         idCardFileName: file.name
       });
@@ -298,11 +305,11 @@ export default function RegisterPage() {
           campusName: formData.address || `${formData.district}, ${formData.city}`,
           faculty: isProvider ? "Penyedia Jasa Lepas" : isMitra ? "Mitra Rental Resmi" : "Pengguna Komunitas",
           accountType: formData.accountType,
-          avatarUrl: isProvider 
+          avatarUrl: isProvider
             ? "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80"
             : isMitra
-            ? "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=400&q=80"
-            : "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=400&q=80",
+              ? "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=400&q=80"
+              : "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=400&q=80",
           verificationStatus: hasUploadedKyc ? "pending_review" : "verified",
           idNumber: formData.idNumber || "",
           idCardUrl: formData.idCardPreview || "",
@@ -317,13 +324,13 @@ export default function RegisterPage() {
           completedHelpsCount: 0,
           reliabilityScore: 100,
         };
-        
+
         setCurrentUser(registeredUser);
 
         if (isProvider) {
           addToast?.(
-            "Pendaftaran Berhasil", 
-            hasUploadedKyc 
+            "Pendaftaran Berhasil",
+            hasUploadedKyc
               ? "Profil jasa aktif. Dokumen KTP Anda sedang diproses verifikasi prioritas."
               : "Profil jasa aktif. Anda dapat mulai menawarkan keahlian dan melengkapi KTP saat penarikan saldo."
           );
@@ -360,7 +367,7 @@ export default function RegisterPage() {
   return (
     <div className="min-h-[100dvh] relative flex flex-col items-center justify-between p-3 sm:p-6 lg:p-8 overflow-x-hidden font-sans bg-gradient-to-br from-[#EBF3FE] via-[#F0F6FF] to-[#DEEEFC]">
       {/* 1. Subtle Dot Grid Matrix Motif Overlay */}
-      <div 
+      <div
         className="absolute inset-0 pointer-events-none opacity-30"
         style={{
           backgroundImage: "radial-gradient(#1683FF 1.2px, transparent 1.2px)",
@@ -388,7 +395,7 @@ export default function RegisterPage() {
       {/* Centered Main Card */}
       <div className="w-full max-w-2xl mx-auto my-auto">
         <div className="bg-white/95 backdrop-blur-md rounded-2xl sm:rounded-3xl border border-white/80 p-4 sm:p-8 shadow-[0_20px_50px_rgba(16,42,67,0.12)]">
-          
+
           {/* Header: Step Indicator & Login Link Inside Card */}
           <div className="flex items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
             <div className="min-w-0 flex items-center gap-2">
@@ -398,15 +405,15 @@ export default function RegisterPage() {
               <span className="text-xs font-semibold text-slate-500 hidden sm:inline">
                 • {
                   step === 1 ? "Pilih Peran Akun" :
-                  step === 2 ? "Informasi Akun & Kontak" :
-                  step === 3 ? (
-                    formData.accountType === "provider" 
-                      ? "Domisili & Keahlian Jasa" 
-                      : formData.accountType === "mitra"
-                      ? "Domisili & Lokasi Outlet"
-                      : "Domisili & Wilayah"
-                  ) :
-                  "Konfirmasi & Ketentuan"
+                    step === 2 ? "Informasi Akun & Kontak" :
+                      step === 3 ? (
+                        formData.accountType === "provider"
+                          ? "Domisili & Keahlian Jasa"
+                          : formData.accountType === "mitra"
+                            ? "Domisili & Lokasi Outlet"
+                            : "Domisili & Wilayah"
+                      ) :
+                        "Konfirmasi & Ketentuan"
                 }
               </span>
             </div>
@@ -420,14 +427,14 @@ export default function RegisterPage() {
 
           {/* Slim, Integrated Progress Bar */}
           <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mt-3 mb-6">
-            <div 
+            <div
               className="h-full bg-[#1683FF] transition-all duration-300 rounded-full"
               style={{ width: `${step * 25}%` }}
             />
           </div>
 
           <form onSubmit={handleNext} className="space-y-4 sm:space-y-5">
-            
+
             {/* ============================================================ */}
             {/* STEP 1: LANGSUNG 3 CARD PILIHAN PERAN (BERSIH & KONSISTEN)    */}
             {/* ============================================================ */}
@@ -443,15 +450,14 @@ export default function RegisterPage() {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 pt-1">
-                  
+
                   {/* ROLE 1: USER / PENGGUNA UMUM */}
                   <div
                     onClick={() => setFormData({ ...formData, accountType: "user" })}
-                    className={`p-4 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
-                      formData.accountType === "user"
+                    className={`p-4 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${formData.accountType === "user"
                         ? "border-[#1683FF] bg-blue-50/50 shadow-2xs ring-2 ring-[#1683FF]/20"
                         : "border-slate-200 hover:border-slate-300 bg-white"
-                    }`}
+                      }`}
                   >
                     <div className="flex items-center justify-between mb-3">
                       <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#1683FF] flex items-center justify-center">
@@ -477,11 +483,10 @@ export default function RegisterPage() {
                   {/* ROLE 2: PENYEDIA JASA (TANPA PRO) */}
                   <div
                     onClick={() => setFormData({ ...formData, accountType: "provider" })}
-                    className={`p-4 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
-                      formData.accountType === "provider"
+                    className={`p-4 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${formData.accountType === "provider"
                         ? "border-[#1683FF] bg-blue-50/50 shadow-2xs ring-2 ring-[#1683FF]/20"
                         : "border-slate-200 hover:border-slate-300 bg-white"
-                    }`}
+                      }`}
                   >
                     <div className="flex items-center justify-between mb-3">
                       <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#1683FF] flex items-center justify-center">
@@ -507,11 +512,10 @@ export default function RegisterPage() {
                   {/* ROLE 3: MITRA TOKO SEWA */}
                   <div
                     onClick={() => setFormData({ ...formData, accountType: "mitra" })}
-                    className={`p-4 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
-                      formData.accountType === "mitra"
+                    className={`p-4 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${formData.accountType === "mitra"
                         ? "border-[#1683FF] bg-blue-50/50 shadow-2xs ring-2 ring-[#1683FF]/20"
                         : "border-slate-200 hover:border-slate-300 bg-white"
-                    }`}
+                      }`}
                   >
                     <div className="flex items-center justify-between mb-3">
                       <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#1683FF] flex items-center justify-center">
@@ -626,7 +630,7 @@ export default function RegisterPage() {
                       <input
                         type="tel"
                         required
-                        placeholder="081234567890"
+                        placeholder="Misal: 081234567890"
                         value={formData.phone}
                         onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                         className="w-full text-xs sm:text-sm pl-11 pr-4 py-3 rounded-2xl border border-slate-200 focus:outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/20"
@@ -883,11 +887,10 @@ export default function RegisterPage() {
                               key={skill}
                               type="button"
                               onClick={() => toggleSkill(skill)}
-                              className={`text-xs px-3.5 py-2 rounded-full border transition font-medium flex items-center gap-1.5 cursor-pointer ${
-                                isSelected
+                              className={`text-xs px-3.5 py-2 rounded-full border transition font-medium flex items-center gap-1.5 cursor-pointer ${isSelected
                                   ? "bg-[#1683FF] text-white border-[#1683FF] shadow-2xs"
                                   : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-                              }`}
+                                }`}
                             >
                               {isSelected && <Check className="w-3.5 h-3.5" />}
                               <span>{skill}</span>
@@ -898,11 +901,10 @@ export default function RegisterPage() {
                         <button
                           type="button"
                           onClick={() => setFormData({ ...formData, showCustomSkillInput: !formData.showCustomSkillInput })}
-                          className={`text-xs px-3.5 py-2 rounded-full border transition font-bold flex items-center gap-1.5 cursor-pointer ${
-                            formData.showCustomSkillInput || formData.customSkill
+                          className={`text-xs px-3.5 py-2 rounded-full border transition font-bold flex items-center gap-1.5 cursor-pointer ${formData.showCustomSkillInput || formData.customSkill
                               ? "bg-blue-50 text-[#1683FF] border-blue-300"
                               : "bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200"
-                          }`}
+                            }`}
                         >
                           <Plus className="w-3.5 h-3.5" />
                           <span>+ Keahlian Lainnya...</span>
@@ -930,11 +932,10 @@ export default function RegisterPage() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div
                           onClick={() => setProviderKycChoice("later")}
-                          className={`p-3.5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
-                            providerKycChoice === "later"
+                          className={`p-3.5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${providerKycChoice === "later"
                               ? "border-[#1683FF] bg-blue-50/50 shadow-2xs ring-1 ring-[#1683FF]/30"
                               : "border-slate-200 hover:border-slate-300 bg-white"
-                          }`}
+                            }`}
                         >
                           <div className="flex items-center justify-between mb-1.5">
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-[#1683FF] flex items-center gap-1">
@@ -953,11 +954,10 @@ export default function RegisterPage() {
 
                         <div
                           onClick={() => setProviderKycChoice("now")}
-                          className={`p-3.5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
-                            providerKycChoice === "now"
+                          className={`p-3.5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${providerKycChoice === "now"
                               ? "border-[#1683FF] bg-blue-50/50 shadow-2xs ring-1 ring-[#1683FF]/30"
                               : "border-slate-200 hover:border-slate-300 bg-white"
-                          }`}
+                            }`}
                         >
                           <div className="flex items-center justify-between mb-1.5">
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-[#1683FF] flex items-center gap-1">
@@ -1099,11 +1099,11 @@ export default function RegisterPage() {
                   <div className="flex justify-between py-1 border-b border-slate-100">
                     <span className="text-slate-500">Peran Akun:</span>
                     <span className="font-bold text-[#1683FF]">
-                      {formData.accountType === "provider" 
-                        ? "Penyedia Jasa" 
+                      {formData.accountType === "provider"
+                        ? "Penyedia Jasa"
                         : formData.accountType === "mitra"
-                        ? `Mitra Toko Sewa (${formData.storeName || "Toko Rental"})`
-                        : "Pengguna Umum"}
+                          ? `Mitra Toko Sewa (${formData.storeName || "Toko Rental"})`
+                          : "Pengguna Umum"}
                     </span>
                   </div>
                   <div className="flex justify-between py-1">
@@ -1211,9 +1211,8 @@ export default function RegisterPage() {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className={`ml-auto px-8 py-3.5 rounded-2xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm shadow-sm transition active:scale-95 flex items-center gap-2 cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed ${
-                  step === 1 ? "w-full justify-center" : "w-full sm:w-auto justify-center"
-                }`}
+                className={`ml-auto px-8 py-3.5 rounded-2xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm shadow-sm transition active:scale-95 flex items-center gap-2 cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed ${step === 1 ? "w-full justify-center" : "w-full sm:w-auto justify-center"
+                  }`}
               >
                 {isSubmitting ? (
                   <>
@@ -1223,12 +1222,12 @@ export default function RegisterPage() {
                 ) : (
                   <>
                     <span>
-                      {step === 4 
-                        ? (formData.accountType === "provider" 
-                            ? "Selesaikan & Buka Dashboard Jasa" 
-                            : formData.accountType === "mitra"
+                      {step === 4
+                        ? (formData.accountType === "provider"
+                          ? "Selesaikan & Buka Dashboard Jasa"
+                          : formData.accountType === "mitra"
                             ? "Selesaikan & Buka Dashboard Mitra"
-                            : "Selesaikan & Mulai Jelajah") 
+                            : "Selesaikan & Mulai Jelajah")
                         : "Lanjutkan"}
                     </span>
                     <ArrowRight className="w-4 h-4 shrink-0" />
@@ -1237,7 +1236,7 @@ export default function RegisterPage() {
               </button>
             </div>
 
-            </form>
+          </form>
         </div>
       </div>
 

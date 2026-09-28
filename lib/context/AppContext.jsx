@@ -35,6 +35,43 @@ export function AppProvider({ children }) {
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
+  // ─── Real User Activities & Badges ──────────────────────────────────────────
+  const [userActivities, setUserActivities] = useState([]);
+  const [activeActivitiesCount, setActiveActivitiesCount] = useState(0);
+  const [completedActivitiesCount, setCompletedActivitiesCount] = useState(0);
+
+  const refreshUserActivities = async () => {
+    try {
+      const token = await authService.getValidAccessToken();
+      if (!token) {
+        setUserActivities([]);
+        setActiveActivitiesCount(0);
+        setCompletedActivitiesCount(0);
+        return;
+      }
+      const res = await fetch("/api/user/activities", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        const items = json.data || [];
+        setUserActivities(items);
+        const ongoing = items.filter((i) => i.isOngoing).length;
+        const completed = items.filter((i) => i.isCompleted).length;
+        setActiveActivitiesCount(ongoing);
+        setCompletedActivitiesCount(completed);
+      } else {
+        setUserActivities([]);
+        setActiveActivitiesCount(0);
+        setCompletedActivitiesCount(0);
+      }
+    } catch {
+      setUserActivities([]);
+      setActiveActivitiesCount(0);
+      setCompletedActivitiesCount(0);
+    }
+  };
+
   // A visitor is a guest until a valid persisted session is found. This avoids
   // treating the mock profile as an authenticated account.
   useEffect(() => {
@@ -43,10 +80,15 @@ export function AppProvider({ children }) {
       setCurrentUser(session?.user || INITIAL_USER);
       setIsAuthenticated(Boolean(session?.user));
       setIsAuthReady(true);
+      refreshUserActivities();
     };
     syncAuthSession();
     window.addEventListener("bantuin_auth_changed", syncAuthSession);
-    return () => window.removeEventListener("bantuin_auth_changed", syncAuthSession);
+    window.addEventListener("bantuin_activity_updated", refreshUserActivities);
+    return () => {
+      window.removeEventListener("bantuin_auth_changed", syncAuthSession);
+      window.removeEventListener("bantuin_activity_updated", refreshUserActivities);
+    };
   }, []);
 
   // ─── Voucher State ──────────────────────────────────────────────────────────
@@ -662,7 +704,7 @@ export function AppProvider({ children }) {
       // Also update currentUser location for realism
       setCurrentUser((prev) => ({
         ...prev,
-        campusName: loc.fullAddress || displayLoc,
+        campusName: loc.city || displayLoc,
       }));
 
       addToast("Lokasi GPS Terdeteksi", `Lokasi Anda: ${displayLoc}`);
@@ -2750,6 +2792,11 @@ export function AppProvider({ children }) {
         adminAddVoucher,
         adminToggleVoucher,
         adminDeleteVoucher,
+        // Real User Activities & Badges
+        userActivities,
+        activeActivitiesCount,
+        completedActivitiesCount,
+        refreshUserActivities,
       }}
     >
       {children}

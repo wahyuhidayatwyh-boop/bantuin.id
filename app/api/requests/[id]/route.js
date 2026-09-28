@@ -73,7 +73,9 @@ export async function GET(req, { params }) {
         name: request.requester?.fullName || "Pengguna Bantuin",
         fullName: request.requester?.fullName || "Pengguna Bantuin",
         role: request.requester?.accountRole === "user" ? "Pengguna Terverifikasi" : (request.requester?.accountRole || "Pengguna Terverifikasi"),
-        campus: request.requester?.campusName || "Pasar Rebo, Jakarta Timur",
+        campus: request.requester?.campusName && request.requester.campusName !== "Universitas Indonesia"
+          ? request.requester.campusName
+          : (request.locationName ? request.locationName.split(",").slice(1, 3).join(", ").trim() : "Bekasi, Jawa Barat"),
         avatar: request.requester?.avatarUrl || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80",
         avatarUrl: request.requester?.avatarUrl || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80",
         rating: Number(request.requester?.ratingAvg) || 5.0,
@@ -160,6 +162,31 @@ export async function PATCH(req, { params }) {
     console.error("PATCH /api/requests/[id] Error:", error);
     return NextResponse.json(
       { error: error.message || "Gagal memperbarui status permintaan bantuan." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(req, { params }) {
+  try {
+    const { id } = await params;
+
+    const updated = await prisma.request.update({
+      where: { id },
+      data: {
+        status: "cancelled",
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: "Permintaan bantuan berhasil dibatalkan.",
+      data: updated,
+    });
+  } catch (error) {
+    console.error("DELETE /api/requests/[id] Error:", error);
+    return NextResponse.json(
+      { error: error.message || "Gagal membatalkan permintaan bantuan." },
       { status: 500 }
     );
   }

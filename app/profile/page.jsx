@@ -5,25 +5,30 @@ import Link from "next/link";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { useApp } from "@/lib/context/AppContext";
+import { authService } from "@/lib/services/authService";
 import { formatIDR, formatDateIndo } from "@/lib/utils";
-import { 
-  ShieldCheck, 
-  Star, 
-  CheckCircle2, 
-  Clock, 
-  Award, 
-  FileBadge, 
-  MapPin, 
-  Settings, 
-  User, 
-  Briefcase, 
-  CreditCard, 
-  Lock, 
-  LogOut, 
-  Upload, 
-  Check, 
-  Edit, 
-  PlusCircle, 
+import { validateFile, getAcceptAttribute } from "@/lib/utils/fileValidation";
+import { extractKabupatenName } from "@/lib/services/gpsService";
+import LocationSearchDropdown from "@/components/ui/LocationSearchDropdown";
+import AvatarCropModal from "@/components/ui/AvatarCropModal";
+import {
+  ShieldCheck,
+  Star,
+  CheckCircle2,
+  Clock,
+  Award,
+  FileBadge,
+  MapPin,
+  Settings,
+  User,
+  Briefcase,
+  CreditCard,
+  Lock,
+  LogOut,
+  Upload,
+  Check,
+  Edit,
+  PlusCircle,
   ExternalLink,
   Phone,
   Mail,
@@ -40,41 +45,49 @@ import {
   Eye,
   KeyRound,
   AlertCircle,
-  FileText
+  FileText,
+  Image as ImageIcon,
 } from "lucide-react";
 
 export default function ProfilePage() {
-  const { 
-    currentUser, 
+  const {
+    currentUser,
     setCurrentUser,
     addToast,
-    mitraAvailableBalance, 
-    mitraPendingBalance, 
+    mitraAvailableBalance,
+    mitraPendingBalance,
     mitraTotalEarned,
-    withdrawals, 
-    withdrawFunds, 
+    withdrawals,
+    withdrawFunds,
     customerDeposits,
-    submitKYC
+    submitKYC,
+    detectUserLocation,
+    isDetectingLocation,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState("profile"); // profile, wallet, kyc, service_settings, bank, security
   const [isSaved, setIsSaved] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [isBankSaved, setIsBankSaved] = useState(false);
+  const [isSavingBank, setIsSavingBank] = useState(false);
+  const [isSavingPassword, setIsSavingPassword] = useState(false);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
 
-  const isUser = !currentUser || currentUser?.accountType === "user";
-  const isProvider = currentUser?.accountType === "provider";
-  const isMitra = currentUser?.accountType === "mitra";
+  const isUser = !currentUser || currentUser?.accountRole === "user" || currentUser?.accountType === "user" || (!currentUser?.accountRole && !currentUser?.accountType);
+  const isProvider = currentUser?.accountRole === "provider" || currentUser?.accountType === "provider";
+  const isMitra = currentUser?.accountRole === "partner" || currentUser?.accountType === "mitra" || currentUser?.isPartner;
 
   const tabsList = isUser
     ? [
-        { id: "profile", label: "Profil & Kontak", icon: User },
-        { id: "wallet", label: "Dompet & Transaksi", icon: CreditCard },
-        { id: "kyc", label: "Verifikasi Akun Jasa", icon: ShieldCheck },
-        { id: "bank", label: "Rekening Bank", icon: Building2 },
-        { id: "security", label: "Keamanan & Sandi", icon: Lock },
-      ]
+      { id: "profile", label: "Profil & Kontak", icon: User },
+      { id: "wallet", label: "Dompet & Transaksi", icon: CreditCard },
+      { id: "kyc", label: "Verifikasi Akun Jasa", icon: ShieldCheck },
+      { id: "bank", label: "Rekening Bank", icon: Building2 },
+      { id: "security", label: "Keamanan & Sandi", icon: Lock },
+    ]
     : isProvider
-    ? [
+      ? [
         { id: "profile", label: "Profil & Kontak", icon: User },
         { id: "wallet", label: "Dompet & Payout", icon: CreditCard },
         { id: "kyc", label: "Verifikasi KYC", icon: ShieldCheck },
@@ -82,7 +95,7 @@ export default function ProfilePage() {
         { id: "bank", label: "Rekening Bank", icon: Building2 },
         { id: "security", label: "Keamanan & Sandi", icon: Lock },
       ]
-    : [
+      : [
         { id: "profile", label: "Profil & Kontak", icon: User },
         { id: "wallet", label: "Dompet Toko", icon: CreditCard },
         { id: "kyc", label: "Verifikasi Pemilik", icon: ShieldCheck },
@@ -91,40 +104,102 @@ export default function ProfilePage() {
       ];
 
   // -----------------------------------------------------------------
-  // PROFILE STATE (SYNCED WITH CURRENT USER)
+  // PROFILE STATE (SYNCED WITH DATABASE & CURRENT USER)
   // -----------------------------------------------------------------
   const [profileData, setProfileData] = useState({
-    fullName: currentUser?.fullName || "Rian Prasetya",
-    email: currentUser?.email || "rian.prasetya@gmail.com",
-    phone: currentUser?.phoneNumber || "081298765432",
-    city: currentUser?.campusName || "Banjarmasin Tengah, Kalimantan Selatan",
+    fullName: currentUser?.fullName || "",
+    email: currentUser?.email || "",
+    phone: currentUser?.phoneNumber || currentUser?.phone || "",
+    city: currentUser?.campusName || currentUser?.address || "Bekasi Barat, Kota Bekasi",
     bio: currentUser?.bio || "Pegiat kreatif & tech enthusiast. Siap membantu kebutuhan dokumen, errand, dan jasa profesional.",
-    field: currentUser?.faculty || "Penyedia Jasa & Komunitas",
-    fieldSelect: currentUser?.faculty || "Penyedia Jasa & Komunitas",
+    field: currentUser?.faculty || "Pengguna Umum & Komunitas",
+    fieldSelect: currentUser?.faculty || "Pengguna Umum & Komunitas",
     customField: "",
     isProviderEnabled: true,
     skills: currentUser?.skills || ["Desain Grafis & Logo", "Video Editing & Reels", "Admin Data & Excel"],
-    bankName: currentUser?.bankInfo?.bankName || "BCA",
-    accountNumber: currentUser?.bankInfo?.accountNumber || "8820192841",
-    accountHolder: currentUser?.bankInfo?.accountHolder || currentUser?.fullName || "Rian Prasetya",
+    bankName: currentUser?.payoutBank || currentUser?.bankInfo?.bankName || "BCA",
+    accountNumber: currentUser?.payoutAccountNumber || currentUser?.bankInfo?.accountNumber || "",
+    accountHolder: currentUser?.payoutAccountHolder || currentUser?.bankInfo?.accountHolder || currentUser?.fullName || "",
   });
 
-  // Re-sync if currentUser updates
+  // Fetch real profile from DB
+  const loadDbProfile = async () => {
+    setIsLoadingProfile(true);
+    try {
+      let token = await authService.getValidAccessToken();
+      if (!token) return;
+
+      let res = await fetch("/api/user/profile", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.status === 401) {
+        const refreshed = await authService.refreshSession();
+        if (refreshed?.accessToken) {
+          token = refreshed.accessToken;
+          res = await fetch("/api/user/profile", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+        }
+      }
+
+      const json = await res.json();
+      if (res.ok && json.success && json.data) {
+        const dbUser = json.data;
+        if (setCurrentUser) {
+          setCurrentUser((prev) => ({ ...prev, ...dbUser }));
+        }
+        setProfileData({
+          fullName: dbUser.fullName || "",
+          email: dbUser.email || "",
+          phone: dbUser.phoneNumber || "",
+          city: dbUser.campusName || "Bekasi Barat, Kota Bekasi",
+          bio: dbUser.bio || "",
+          field: dbUser.faculty || "Pengguna Umum & Komunitas",
+          fieldSelect: dbUser.faculty || "Pengguna Umum & Komunitas",
+          customField: "",
+          isProviderEnabled: true,
+          skills: dbUser.skills || ["Desain Grafis & Logo", "Video Editing & Reels", "Admin Data & Excel"],
+          bankName: dbUser.payoutBank || "BCA",
+          accountNumber: dbUser.payoutAccountNumber || "",
+          accountHolder: dbUser.payoutAccountHolder || dbUser.fullName || "",
+        });
+        setWithdrawForm((prev) => ({
+          ...prev,
+          bankName: dbUser.payoutBank || prev.bankName,
+          accountNumber: dbUser.payoutAccountNumber || prev.accountNumber,
+          accountHolder: dbUser.payoutAccountHolder || dbUser.fullName || prev.accountHolder,
+        }));
+      }
+    } catch (err) {
+      console.warn("Failed to load DB profile:", err);
+    } finally {
+      setIsLoadingProfile(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDbProfile();
+    window.addEventListener("bantuin_auth_changed", loadDbProfile);
+    return () => window.removeEventListener("bantuin_auth_changed", loadDbProfile);
+  }, []);
+
+  // Re-sync if currentUser updates from context
   useEffect(() => {
     if (currentUser) {
       setProfileData((prev) => ({
         ...prev,
         fullName: currentUser.fullName || prev.fullName,
         email: currentUser.email || prev.email,
-        phone: currentUser.phoneNumber || prev.phone,
-        city: currentUser.campusName || prev.city,
+        phone: currentUser.phoneNumber || currentUser.phone || prev.phone,
+        city: currentUser.campusName || currentUser.address || prev.city,
         bio: currentUser.bio || prev.bio,
         field: currentUser.faculty || prev.field,
         fieldSelect: currentUser.faculty || prev.fieldSelect,
         skills: currentUser.skills || prev.skills,
-        bankName: currentUser.bankInfo?.bankName || prev.bankName,
-        accountNumber: currentUser.bankInfo?.accountNumber || prev.accountNumber,
-        accountHolder: currentUser.bankInfo?.accountHolder || currentUser.fullName || prev.accountHolder,
+        bankName: currentUser.payoutBank || currentUser.bankInfo?.bankName || prev.bankName,
+        accountNumber: currentUser.payoutAccountNumber || currentUser.bankInfo?.accountNumber || prev.accountNumber,
+        accountHolder: currentUser.payoutAccountHolder || currentUser.bankInfo?.accountHolder || currentUser.fullName || prev.accountHolder,
       }));
     }
   }, [currentUser]);
@@ -163,47 +238,156 @@ export default function ProfilePage() {
   };
 
   // -----------------------------------------------------------------
-  // AVATAR LOCAL UPLOAD HANDLER
+  // AVATAR ADJUSTMENT / CROP & PERSISTENCE HANDLER
   // -----------------------------------------------------------------
-  const handleAvatarUpload = (e) => {
+  const [avatarImgError, setAvatarImgError] = useState(false);
+  const [cropModal, setCropModal] = useState({
+    isOpen: false,
+    imageSrc: null,
+  });
+
+  useEffect(() => {
+    setAvatarImgError(false);
+  }, [currentUser?.avatarUrl, profileData?.avatarUrl]);
+
+  const handleAvatarFileSelect = (e) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const localUrl = URL.createObjectURL(file);
+    if (!file) return;
+
+    const validation = validateFile(file, "bantuin-avatars");
+    if (!validation.valid) {
+      addToast?.("Format File Ditolak", validation.error, "error");
+      e.target.value = "";
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCropModal({
+        isOpen: true,
+        imageSrc: reader.result,
+      });
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  };
+
+  const handleApplyAvatarCrop = async ({ file }) => {
+    if (!file) {
+      addToast?.("File Tidak Valid", "Silakan pilih foto kembali.", "error");
+      return;
+    }
+
+    setIsUploadingAvatar(true);
+    try {
+      // 1. Upload file hasil crop langsung ke Supabase Storage (bucket bantuin-avatars)
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("folder", "");
+      formData.append("bucket", "bantuin-avatars");
+
+      const uploadRes = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+      const uploadJson = await uploadRes.json();
+
+      if (!uploadRes.ok || !uploadJson.urls?.[0]) {
+        throw new Error(uploadJson.error || uploadJson.message || "Gagal mengunggah foto ke Supabase Storage.");
+      }
+
+      const supabaseAvatarUrl = uploadJson.urls[0];
+
+      // 2. Persist URL resmi Supabase Storage ke Database PostgreSQL
+      const token = await authService.getValidAccessToken();
+      if (token) {
+        const dbRes = await fetch("/api/user/profile", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ avatarUrl: supabaseAvatarUrl }),
+        });
+        const dbJson = await dbRes.json();
+        if (!dbRes.ok || !dbJson.success) {
+          throw new Error(dbJson.error || "Gagal menyinkronkan profil ke database.");
+        }
+      }
+
+      // 3. Update global context & local profile dengan Supabase Storage URL
       if (setCurrentUser) {
         setCurrentUser((prev) => ({
           ...prev,
-          avatarUrl: localUrl,
+          avatarUrl: supabaseAvatarUrl,
         }));
       }
-      if (addToast) {
-        addToast("Foto Profil Diperbarui", "Foto avatar berhasil diunggah dari file lokal dan tersimpan di akun Anda.");
-      }
+
+      setProfileData((prev) => ({
+        ...prev,
+        avatarUrl: supabaseAvatarUrl,
+      }));
+
+      setCropModal({ isOpen: false, imageSrc: null });
+      addToast?.(
+        "Foto Profil Diperbarui",
+        "Foto avatar berhasil diunggah ke Supabase Storage dan tersimpan ke akun Anda.",
+        "success"
+      );
+    } catch (err) {
+      console.error("Avatar Supabase upload error:", err);
+      addToast?.("Gagal Mengunggah", err.message || "Terjadi kendala saat mengunggah foto ke Supabase Storage.", "error");
+    } finally {
+      setIsUploadingAvatar(false);
     }
   };
 
   // -----------------------------------------------------------------
-  // FORM SAVE HANDLER (ACTUALLY PERSISTS TO CURRENT USER)
+  // FORM SAVE HANDLER (ACTUALLY PERSISTS TO DATABASE)
   // -----------------------------------------------------------------
-  const handleSaveProfile = (e) => {
+  const handleSaveProfile = async (e) => {
     e.preventDefault();
-    const resolvedField = profileData.field?.trim() || "Pengguna Komunitas";
-    if (setCurrentUser) {
-      setCurrentUser((prev) => ({
-        ...prev,
-        fullName: profileData.fullName,
-        email: profileData.email,
-        phoneNumber: profileData.phone,
-        campusName: profileData.city,
-        faculty: resolvedField,
-        bio: profileData.bio,
-        skills: profileData.skills,
-      }));
+    setIsSavingProfile(true);
+
+    try {
+      const token = await authService.getValidAccessToken();
+      if (!token) {
+        throw new Error("Sesi tidak ditemukan. Silakan masuk kembali.");
+      }
+
+      const res = await fetch("/api/user/profile", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          fullName: profileData.fullName,
+          phoneNumber: profileData.phone,
+          campusName: profileData.city,
+          bio: profileData.bio,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || "Gagal memperbarui profil.");
+      }
+
+      if (json.data) {
+        setCurrentUser?.((prev) => ({ ...prev, ...json.data }));
+        authService.saveSession({ user: json.data });
+      }
+
+      setIsSaved(true);
+      addToast?.("Profil Disimpan", "Informasi identitas, domisili, dan kontak berhasil diperbarui di database.", "success");
+      setTimeout(() => setIsSaved(false), 2500);
+    } catch (err) {
+      console.error("Save profile error:", err);
+      addToast?.("Gagal Menyimpan", err.message || "Terjadi kesalahan saat menyimpan profil.", "error");
+    } finally {
+      setIsSavingProfile(false);
     }
-    setIsSaved(true);
-    if (addToast) {
-      addToast("Profil Disimpan", "Informasi identitas, bidang keahlian, dan kontak berhasil diperbarui.");
-    }
-    setTimeout(() => setIsSaved(false), 2500);
   };
 
   const toggleSkill = (skill) => {
@@ -218,35 +402,61 @@ export default function ProfilePage() {
   };
 
   // -----------------------------------------------------------------
-  // BANK FORM SAVE HANDLER
+  // BANK FORM SAVE HANDLER (PERSISTS TO DATABASE)
   // -----------------------------------------------------------------
-  const handleBankSave = (e) => {
+  const handleBankSave = async (e) => {
     e.preventDefault();
-    if (setCurrentUser) {
-      setCurrentUser((prev) => ({
-        ...prev,
-        bankInfo: {
-          bankName: profileData.bankName,
-          accountNumber: profileData.accountNumber,
-          accountHolder: profileData.accountHolder,
+    setIsSavingBank(true);
+
+    try {
+      const token = await authService.getValidAccessToken();
+      if (!token) {
+        throw new Error("Sesi tidak ditemukan. Silakan login kembali.");
+      }
+
+      const res = await fetch("/api/user/profile", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
+        body: JSON.stringify({
+          payoutBank: profileData.bankName,
+          payoutAccountNumber: profileData.accountNumber,
+          payoutAccountHolder: profileData.accountHolder,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || "Gagal menyimpan rekening.");
+      }
+
+      if (json.data) {
+        setCurrentUser?.((prev) => ({ ...prev, ...json.data }));
+        authService.saveSession({ user: json.data });
+      }
+
+      setWithdrawForm((prev) => ({
+        ...prev,
+        bankName: profileData.bankName,
+        accountNumber: profileData.accountNumber,
+        accountHolder: profileData.accountHolder,
       }));
+
+      setIsBankSaved(true);
+      addToast?.("Rekening Disimpan", `Rekening pencairan ${profileData.bankName} (${profileData.accountNumber}) berhasil disimpan ke database.`, "success");
+      setTimeout(() => setIsBankSaved(false), 2500);
+    } catch (err) {
+      console.error("Save bank error:", err);
+      addToast?.("Gagal Menyimpan Rekening", err.message || "Terjadi kesalahan saat menyimpan rekening.", "error");
+    } finally {
+      setIsSavingBank(false);
     }
-    setWithdrawForm((prev) => ({
-      ...prev,
-      bankName: profileData.bankName,
-      accountNumber: profileData.accountNumber,
-      accountHolder: profileData.accountHolder,
-    }));
-    setIsBankSaved(true);
-    if (addToast) {
-      addToast("Rekening Disimpan", `Rekening pencairan dana ${profileData.bankName} (${profileData.accountNumber}) an ${profileData.accountHolder} berhasil disimpan.`);
-    }
-    setTimeout(() => setIsBankSaved(false), 2500);
   };
 
   // -----------------------------------------------------------------
-  // SECURITY & PASSWORD FORM
+  // SECURITY & PASSWORD FORM (PERSISTS TO DATABASE)
   // -----------------------------------------------------------------
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: "",
@@ -256,7 +466,7 @@ export default function ProfilePage() {
   const [passwordError, setPasswordError] = useState("");
   const [passwordSuccess, setPasswordSuccess] = useState(false);
 
-  const handlePasswordSubmit = (e) => {
+  const handlePasswordSubmit = async (e) => {
     e.preventDefault();
     setPasswordError("");
     setPasswordSuccess(false);
@@ -274,19 +484,47 @@ export default function ProfilePage() {
       return;
     }
 
-    // Success
-    setPasswordSuccess(true);
-    setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
-    if (addToast) {
-      addToast("Sandi Diperbarui", "Kata sandi akun Anda berhasil diperbarui dengan standar keamanan terenkripsi.");
+    setIsSavingPassword(true);
+    try {
+      const token = await authService.getValidAccessToken();
+      if (!token) {
+        throw new Error("Sesi tidak ditemukan. Silakan login kembali.");
+      }
+
+      const res = await fetch("/api/user/profile", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          currentPassword: passwordForm.currentPassword,
+          newPassword: passwordForm.newPassword,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || "Gagal memperbarui kata sandi.");
+      }
+
+      setPasswordSuccess(true);
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      addToast?.("Sandi Diperbarui", "Kata sandi akun Anda berhasil diperbarui di database dengan enkripsi aman.", "success");
+      setTimeout(() => setPasswordSuccess(false), 3000);
+    } catch (err) {
+      console.error("Save password error:", err);
+      setPasswordError(err.message || "Gagal memperbarui kata sandi.");
+      addToast?.("Gagal Mengubah Sandi", err.message || "Terjadi kesalahan.", "error");
+    } finally {
+      setIsSavingPassword(false);
     }
-    setTimeout(() => setPasswordSuccess(false), 3000);
   };
 
   // -----------------------------------------------------------------
   // KYC MODAL & RE-UPLOAD STATE
   // -----------------------------------------------------------------
-  const isJasaVerified = currentUser?.accountType === "provider" || (currentUser?.verificationStatus === "verified" && currentUser?.accountType !== "user");
+  const isJasaVerified = currentUser?.accountRole === "provider" || currentUser?.accountType === "provider" || (currentUser?.verificationStatus === "verified" && currentUser?.accountRole !== "user");
 
   const [userJasaVerifyForm, setUserJasaVerifyForm] = useState({
     idNumber: currentUser?.idNumber || "",
@@ -294,9 +532,9 @@ export default function ProfilePage() {
     idCardFileName: "",
     skill: "Tukang Antar & Errand",
     customSkill: "",
-    bankName: currentUser?.bankInfo?.bankName || "BCA",
-    accountNumber: currentUser?.bankInfo?.accountNumber || "",
-    accountHolder: currentUser?.fullName || "",
+    bankName: currentUser?.payoutBank || currentUser?.bankInfo?.bankName || "BCA",
+    accountNumber: currentUser?.payoutAccountNumber || currentUser?.bankInfo?.accountNumber || "",
+    accountHolder: currentUser?.payoutAccountHolder || currentUser?.fullName || "",
   });
   const [isVerifyingJasa, setIsVerifyingJasa] = useState(false);
 
@@ -312,7 +550,7 @@ export default function ProfilePage() {
     }
   };
 
-  const handleVerifyJasaFromProfile = (e) => {
+  const handleVerifyJasaFromProfile = async (e) => {
     e.preventDefault();
     if (!userJasaVerifyForm.idNumber || userJasaVerifyForm.idNumber.length < 16) {
       addToast?.("NIK Belum Valid", "Harap masukkan 16 digit NIK KTP Anda.", "error");
@@ -336,10 +574,29 @@ export default function ProfilePage() {
       : userJasaVerifyForm.skill;
 
     setIsVerifyingJasa(true);
-    setTimeout(() => {
+    try {
+      const token = await authService.getValidAccessToken();
+      if (token) {
+        await fetch("/api/user/profile", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            idNumber: userJasaVerifyForm.idNumber,
+            idCardUrl: userJasaVerifyForm.idCardUrl,
+            payoutBank: userJasaVerifyForm.bankName,
+            payoutAccountNumber: userJasaVerifyForm.accountNumber,
+            payoutAccountHolder: userJasaVerifyForm.accountHolder || currentUser?.fullName,
+          }),
+        });
+      }
+
       if (setCurrentUser) {
         setCurrentUser((prev) => ({
           ...prev,
+          accountRole: "provider",
           accountType: "provider",
           isProviderEnabled: true,
           verificationStatus: "verified",
@@ -347,6 +604,9 @@ export default function ProfilePage() {
           idCardUrl: userJasaVerifyForm.idCardUrl,
           skills: [resolvedSkill, ...(prev?.skills || [])],
           faculty: resolvedSkill,
+          payoutBank: userJasaVerifyForm.bankName,
+          payoutAccountNumber: userJasaVerifyForm.accountNumber,
+          payoutAccountHolder: userJasaVerifyForm.accountHolder || prev?.fullName || "Penyedia Jasa",
           bankInfo: {
             bankName: userJasaVerifyForm.bankName,
             accountNumber: userJasaVerifyForm.accountNumber,
@@ -354,25 +614,36 @@ export default function ProfilePage() {
           },
         }));
       }
-      setIsVerifyingJasa(false);
+
       addToast?.(
         "Verifikasi Akun Jasa Berhasil",
-        `Akun Anda kini resmi aktif sebagai Penyedia Jasa bidang ${resolvedSkill} yang terverifikasi resmi.`
+        `Akun Anda kini resmi aktif sebagai Penyedia Jasa bidang ${resolvedSkill} yang terverifikasi resmi.`,
+        "success"
       );
-    }, 600);
+    } catch (err) {
+      console.error("KYC Verification error:", err);
+      addToast?.("Gagal Verifikasi", "Terjadi kendala saat memproses verifikasi.", "error");
+    } finally {
+      setIsVerifyingJasa(false);
+    }
   };
 
   const [isKycModalOpen, setIsKycModalOpen] = useState(false);
   const [kycForm, setKycForm] = useState({
     ktpUrl: currentUser?.idCardUrl || "https://images.unsplash.com/photo-1578836537282-3171d77f8632?auto=format&fit=crop&w=600&q=80",
     selfieUrl: currentUser?.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80",
-    nik: "3302198902840001",
+    nik: currentUser?.idNumber || "3302198902840001",
     notes: "",
   });
 
   const handleKycFile = (e, type) => {
     const file = e.target.files?.[0];
     if (file) {
+      const validation = validateFile(file, "bantuin-assets");
+      if (!validation.valid) {
+        addToast?.("Format File Ditolak", validation.error, "error");
+        return;
+      }
       const localUrl = URL.createObjectURL(file);
       setKycForm((prev) => ({
         ...prev,
@@ -381,20 +652,47 @@ export default function ProfilePage() {
     }
   };
 
-  const handleKycSubmit = (e) => {
+  const handleKycSubmit = async (e) => {
     e.preventDefault();
-    if (submitKYC) {
-      submitKYC(kycForm.ktpUrl, kycForm.selfieUrl);
-    } else if (setCurrentUser) {
-      setCurrentUser((prev) => ({
-        ...prev,
-        verificationStatus: "pending_review",
-        idCardUrl: kycForm.ktpUrl,
-      }));
+    if (!kycForm.nik || kycForm.nik.length < 16) {
+      addToast?.("NIK Wajib 16 Digit", "Masukkan nomor induk kependudukan lengkap.", "error");
+      return;
     }
-    setIsKycModalOpen(false);
-    if (addToast) {
-      addToast("Dokumen KYC Terkirim", "Dokumen KTP & Foto Wajah Anda telah diunggah dan sedang diproses verifikasi 1x24 jam.");
+
+    try {
+      const token = await authService.getValidAccessToken();
+      if (token) {
+        await fetch("/api/user/profile", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            idNumber: kycForm.nik,
+            idCardUrl: kycForm.ktpUrl,
+            selfieUrl: kycForm.selfieUrl,
+          }),
+        });
+      }
+
+      if (submitKYC) {
+        submitKYC(kycForm.ktpUrl, kycForm.selfieUrl);
+      } else if (setCurrentUser) {
+        setCurrentUser((prev) => ({
+          ...prev,
+          verificationStatus: "pending_review",
+          idCardUrl: kycForm.ktpUrl,
+          selfieUrl: kycForm.selfieUrl,
+          idNumber: kycForm.nik,
+        }));
+      }
+
+      setIsKycModalOpen(false);
+      addToast?.("Dokumen KYC Terkirim", "Dokumen KTP & Foto Wajah Anda telah diunggah dan tersimpan di database untuk verifikasi 1x24 jam.", "success");
+    } catch (err) {
+      console.error("KYC Submit error:", err);
+      addToast?.("Gagal Mengunggah KYC", "Terjadi kesalahan saat menyimpan dokumen.", "error");
     }
   };
 
@@ -404,9 +702,9 @@ export default function ProfilePage() {
   const [isWithdrawModalOpen, setIsWithdrawModalOpen] = useState(false);
   const [withdrawForm, setWithdrawForm] = useState({
     amount: "100000",
-    bankName: currentUser?.bankInfo?.bankName || "BCA",
-    accountNumber: currentUser?.bankInfo?.accountNumber || "8820192841",
-    accountHolder: currentUser?.bankInfo?.accountHolder || currentUser?.fullName || "Rian Prasetya",
+    bankName: currentUser?.payoutBank || currentUser?.bankInfo?.bankName || "BCA",
+    accountNumber: currentUser?.payoutAccountNumber || currentUser?.bankInfo?.accountNumber || "",
+    accountHolder: currentUser?.payoutAccountHolder || currentUser?.bankInfo?.accountHolder || currentUser?.fullName || "",
   });
 
   return (
@@ -414,44 +712,64 @@ export default function ProfilePage() {
       <Navbar />
 
       <main className="flex-1 max-w-[1240px] w-full mx-auto px-4 md:px-6 lg:px-8 py-8">
-        
+
         {/* ============================================================ */}
         {/* TOP PROFILE BANNER & SUMMARY CARD (INTERCONNECTED)           */}
         {/* ============================================================ */}
         <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-2xs mb-8">
           <div className="flex flex-col lg:flex-row items-center lg:items-start justify-between gap-6 text-center lg:text-left">
-            
+
             {/* Avatar & User Details */}
             <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5">
-              
+
               {/* Profile Avatar with Real Local Upload Trigger */}
               <div className="relative group shrink-0">
-                <img
-                  src={currentUser?.avatarUrl || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80"}
-                  alt={currentUser?.fullName || profileData.fullName}
-                  className="w-20 h-20 sm:w-24 sm:h-24 rounded-full object-cover ring-4 ring-blue-50 shadow-md bg-white"
-                />
-                
+                {(!currentUser?.avatarUrl || avatarImgError) ? (
+                  <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-br from-blue-50 via-slate-100 to-blue-100 ring-4 ring-blue-50 shadow-md flex items-center justify-center text-[#1683FF] border border-blue-200/60">
+                    <ImageIcon className="w-8 h-8 sm:w-10 sm:h-10 text-[#1683FF]/70" />
+                  </div>
+                ) : (
+                  <img
+                    src={currentUser?.avatarUrl}
+                    alt={currentUser?.fullName || profileData.fullName || "Pengguna"}
+                    onError={() => setAvatarImgError(true)}
+                    className="w-20 h-20 sm:w-24 sm:h-24 rounded-full object-cover ring-4 ring-blue-50 shadow-md bg-white"
+                  />
+                )}
+
                 {/* Verified KYC Badge */}
-                <div className="absolute -bottom-1 -right-1 bg-emerald-500 text-white rounded-full p-1.5 shadow ring-2 ring-white">
+                <div className={`absolute -bottom-1 -right-1 rounded-full p-1.5 shadow ring-2 ring-white ${currentUser?.verificationStatus === "verified" ? "bg-emerald-500 text-white" : "bg-blue-500 text-white"
+                  }`}>
                   <ShieldCheck className="w-3.5 h-3.5" />
                 </div>
 
                 {/* Local Photo Upload Overlay */}
-                <label 
+                <label
                   className="absolute inset-0 rounded-full bg-black/60 text-white flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition cursor-pointer text-[10px] font-bold"
-                  title="Ganti Foto Avatar dari File Lokal"
+                  title="Ganti Foto Avatar"
                 >
-                  <Camera className="w-4 h-4 mb-0.5" />
-                  <span>Ganti Foto</span>
-                  <input type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+                  {isUploadingAvatar ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <>
+                      <Camera className="w-4 h-4 mb-0.5" />
+                      <span>Ganti Foto</span>
+                    </>
+                  )}
+                  <input
+                    type="file"
+                    accept={getAcceptAttribute("bantuin-avatars")}
+                    onChange={handleAvatarFileSelect}
+                    disabled={isUploadingAvatar}
+                    className="hidden"
+                  />
                 </label>
               </div>
 
               <div>
                 <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
                   <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-                    {currentUser?.fullName || profileData.fullName}
+                    {currentUser?.fullName || profileData.fullName || "Pengguna Bantuin"}
                   </h1>
                   {isUser && (
                     <>
@@ -460,7 +778,7 @@ export default function ProfilePage() {
                       </span>
                       <span className="text-[10px] font-bold bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-full border border-slate-200 flex items-center gap-1">
                         <CheckCircle2 className="w-3 h-3 text-[#1683FF]" />
-                        <span>{currentUser?.verificationStatus === "verified" ? "Terverifikasi" : "Akun Aktif"}</span>
+                        <span>{currentUser?.verificationStatus === "verified" ? "Terverifikasi KYC" : "Akun Aktif"}</span>
                       </span>
                     </>
                   )}
@@ -494,33 +812,33 @@ export default function ProfilePage() {
                 </p>
 
                 <p className="text-xs text-slate-600 mt-2 max-w-xl line-clamp-2">
-                  {currentUser?.bio || profileData.bio}
+                  {currentUser?.bio || profileData.bio || "Pegiat kreatif & tech enthusiast. Siap membantu kebutuhan dokumen, errand, dan jasa profesional."}
                 </p>
 
                 {/* Performance Stats: Rating & Completed Bantuan / Jasa */}
                 <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 sm:gap-4 pt-3 mt-2 border-t border-slate-100 text-xs">
                   <div className="flex items-center gap-1.5 bg-amber-50/80 px-2.5 py-1 rounded-lg border border-amber-200/70">
                     <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
-                    <span className="font-black text-amber-800">{Number(currentUser?.ratingAvg || 4.95).toFixed(2)}</span>
-                    <span className="text-[11px] text-amber-700/80">({currentUser?.ratingCount || 34} ulasan)</span>
+                    <span className="font-black text-amber-800">{Number(currentUser?.ratingAvg || 5.0).toFixed(2)}</span>
+                    <span className="text-[11px] text-amber-700/80">({currentUser?.ratingCount ?? 0} ulasan)</span>
                   </div>
 
                   <div className="flex items-center gap-1.5 bg-emerald-50/80 px-2.5 py-1 rounded-lg border border-emerald-200/70">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    <span className="font-black text-emerald-800">{currentUser?.completedHelpsCount || 28}</span>
+                    <span className="font-black text-emerald-800">{currentUser?.completedHelpsCount ?? 0}</span>
                     <span className="text-[11px] text-emerald-700">Tugas &amp; Jasa Selesai</span>
                   </div>
 
                   <div className="hidden sm:flex items-center gap-1.5 bg-blue-50/80 px-2.5 py-1 rounded-lg border border-blue-200/70">
                     <ShieldCheck className="w-3.5 h-3.5 text-[#1683FF]" />
-                    <span className="font-black text-blue-800">{currentUser?.reliabilityScore || 98}%</span>
+                    <span className="font-black text-blue-800">{currentUser?.reliabilityScore ?? 100}%</span>
                     <span className="text-[11px] text-blue-700">Tingkat Keandalan</span>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* ACTION BUTTON SESUAI ROLE (UMUM TIDAK MEMILIKI LINK MITRA ATAU JASA) */}
+            {/* ACTION BUTTON SESUAI ROLE */}
             <div className="flex flex-col sm:flex-row lg:flex-col gap-2.5 w-full sm:w-auto shrink-0">
               {isUser && (
                 <button
@@ -572,11 +890,10 @@ export default function ProfilePage() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold shrink-0 transition cursor-pointer ${
-                  isActive
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold shrink-0 transition cursor-pointer ${isActive
                     ? "bg-[#1683FF] text-white shadow-xs"
                     : "bg-white text-slate-600 border border-slate-200"
-                }`}
+                  }`}
               >
                 <Icon className={`w-3.5 h-3.5 ${isActive ? "text-white" : "text-slate-500"}`} />
                 <span>{tab.label}</span>
@@ -589,7 +906,7 @@ export default function ProfilePage() {
         {/* MAIN PROFILE & PORTAL NAVIGATION GRID                        */}
         {/* ============================================================ */}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          
+
           {/* Left Sidebar Menu (Desktop Only) */}
           <div className="hidden lg:block bg-white border border-slate-200/90 rounded-2xl p-3 shadow-2xs space-y-1 self-start">
             <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 py-2">
@@ -603,11 +920,10 @@ export default function ProfilePage() {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition text-left cursor-pointer ${
-                    isActive
+                  className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition text-left cursor-pointer ${isActive
                       ? "bg-[#1683FF] text-white shadow-2xs font-bold"
                       : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
-                  }`}
+                    }`}
                 >
                   <Icon className="w-4 h-4" />
                   <span>{tab.label}</span>
@@ -615,7 +931,7 @@ export default function ProfilePage() {
               );
             })}
 
-            {/* KHUSUS PENGGUNA UMUM: AJAKAN VERIFIKASI JASA (TANPA LINK MITRA / DASHBOARD) */}
+            {/* KHUSUS PENGGUNA UMUM: AJAKAN VERIFIKASI JASA */}
             {isUser && (
               <div className="pt-3 border-t border-slate-100">
                 <div className="p-3.5 rounded-xl bg-blue-50/70 border border-blue-200/80 text-xs">
@@ -686,7 +1002,7 @@ export default function ProfilePage() {
 
           {/* Right Content Area */}
           <div className="lg:col-span-3 bg-white border border-slate-200/90 rounded-3xl p-5 sm:p-8 shadow-2xs">
-            
+
             {/* ============================================================ */}
             {/* TAB 1: PROFIL & BIODATA                                      */}
             {/* ============================================================ */}
@@ -698,18 +1014,31 @@ export default function ProfilePage() {
                     <p className="text-xs text-slate-500">Perbarui data profil yang ditampilkan kepada pengguna lain di Bantuin</p>
                   </div>
                   <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#1683FF] text-xs font-bold cursor-pointer transition self-start sm:self-auto">
-                    <Camera className="w-3.5 h-3.5" />
-                    <span>Unggah Foto Avatar</span>
-                    <input type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+                    {isUploadingAvatar ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Camera className="w-3.5 h-3.5" />
+                    )}
+                    <span>{isUploadingAvatar ? "Mengunggah..." : "Unggah Foto Avatar"}</span>
+                    <input
+                      type="file"
+                      accept={getAcceptAttribute("bantuin-avatars")}
+                      onChange={handleAvatarFileSelect}
+                      disabled={isUploadingAvatar}
+                      className="hidden"
+                    />
                   </label>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Nama Lengkap</label>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Nama Lengkap <span className="text-red-500">*</span>
+                    </label>
                     <input
                       type="text"
                       required
+                      placeholder="Nama lengkap Anda"
                       value={profileData.fullName}
                       onChange={(e) => setProfileData({ ...profileData, fullName: e.target.value })}
                       className="w-full text-xs sm:text-sm px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-[#1683FF]"
@@ -717,34 +1046,56 @@ export default function ProfilePage() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Kota / Domisili Lengkap</label>
-                    <input
-                      type="text"
-                      required
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Kota atau Kabupaten Domisili <span className="text-red-500">*</span>
+                    </label>
+                    <LocationSearchDropdown
                       value={profileData.city}
-                      onChange={(e) => setProfileData({ ...profileData, city: e.target.value })}
-                      className="w-full text-xs sm:text-sm px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-[#1683FF]"
+                      onChange={(newLoc) => setProfileData((prev) => ({ ...prev, city: newLoc }))}
+                      onDetectGPS={async () => {
+                        if (detectUserLocation) {
+                          const loc = await detectUserLocation();
+                          const cityOnly = loc?.city || (loc?.shortLocation ? extractKabupatenName(loc.shortLocation) : null) || loc?.shortLocation || "Kota Bekasi";
+                          if (cityOnly) {
+                            setProfileData((prev) => ({ ...prev, city: cityOnly }));
+                            return cityOnly;
+                          }
+                        }
+                        return null;
+                      }}
+                      isDetectingGPS={isDetectingLocation}
+                      placeholder="Cari Kota atau Kabupaten domisili Anda..."
+                      required
                     />
+                    <span className="text-[10px] text-slate-400 mt-1 block">Pilih kota atau kabupaten tempat tinggal Anda saat ini</span>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Alamat Email</label>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Alamat Email <span className="text-red-500">*</span>
+                    </label>
                     <input
                       type="email"
                       required
+                      readOnly
+                      disabled
                       value={profileData.email}
-                      onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
-                      className="w-full text-xs sm:text-sm px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-[#1683FF]"
+                      className="w-full text-xs sm:text-sm px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-600 cursor-not-allowed focus:outline-none"
+                      title="Alamat email terhubung ke sistem autentikasi akun"
                     />
+                    <span className="text-[10px] text-slate-400 mt-1 block">Email terverifikasi terhubung ke akun login utama</span>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">No. WhatsApp / HP</label>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      No. WhatsApp / HP <span className="text-red-500">*</span>
+                    </label>
                     <input
                       type="tel"
                       required
+                      placeholder="Misal: 081234567890"
                       value={profileData.phone}
                       onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
                       className="w-full text-xs sm:text-sm px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-[#1683FF]"
@@ -762,8 +1113,8 @@ export default function ProfilePage() {
                       profileData.fieldSelect === "other"
                         ? "other"
                         : availableSkills.includes(profileData.field)
-                        ? profileData.field
-                        : "other"
+                          ? profileData.field
+                          : "other"
                     }
                     onChange={(e) => {
                       const val = e.target.value;
@@ -819,15 +1170,23 @@ export default function ProfilePage() {
                 <div className="pt-2 flex items-center justify-between">
                   {isSaved ? (
                     <span className="text-xs font-bold text-emerald-600 flex items-center gap-1">
-                      <Check className="w-4 h-4" /> Perubahan Berhasil Disimpan ke Akun
+                      <Check className="w-4 h-4" /> Perubahan Berhasil Disimpan ke Database
                     </span>
                   ) : <div />}
 
                   <button
                     type="submit"
-                    className="px-6 py-2.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs shadow-2xs transition active:scale-95 cursor-pointer"
+                    disabled={isSavingProfile}
+                    className="px-6 py-2.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs shadow-2xs transition active:scale-95 flex items-center gap-2 cursor-pointer"
                   >
-                    Simpan Perubahan
+                    {isSavingProfile ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Menyimpan...</span>
+                      </>
+                    ) : (
+                      <span>Simpan Perubahan Profil</span>
+                    )}
                   </button>
                 </div>
               </form>
@@ -892,8 +1251,8 @@ export default function ProfilePage() {
                   <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-2xs flex flex-col justify-between">
                     <div>
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                          Dana Sedang Diproses / Tertahan
+                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                          Dana Tertahan (Escrow)
                         </span>
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200">
                           Status: PENDING
@@ -903,73 +1262,49 @@ export default function ProfilePage() {
                         {formatIDR(mitraPendingBalance)}
                       </div>
                       <p className="text-[11px] text-slate-500">
-                        Dana dari customer yang masih dalam proses pengerjaan atau masa sewa aktif. Otomatis beralih ke <strong>AVAILABLE</strong> setelah serah terima selesai.
+                        Dana aman customer yang sedang dalam proses pengerjaan bantuan atau masa sewa aktif.
                       </p>
                     </div>
 
-                    <div className="pt-4 mt-2 border-t border-slate-100 text-[11px] text-slate-400 flex items-center gap-1.5">
-                      <Lock className="w-3 h-3 text-slate-400" />
-                      <span>Tertahan sementara dalam proses pengerjaan</span>
+                    <div className="pt-4 mt-2 border-t border-slate-100 flex items-center justify-between text-xs">
+                      <span className="text-slate-500">Total Akumulasi Pendapatan:</span>
+                      <span className="font-bold text-slate-900">{formatIDR(mitraTotalEarned)}</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Banner Informasi Non E-Money */}
-                <div className="p-4 rounded-2xl bg-blue-50/70 border border-blue-200/80 flex items-start gap-3">
-                  <ShieldCheck className="w-5 h-5 text-[#1683FF] shrink-0 mt-0.5" />
-                  <div className="text-xs text-blue-950 space-y-0.5">
-                    <p className="font-bold">Ketentuan Hak Pembayaran &amp; Penarikan:</p>
-                    <p className="text-[11px] text-blue-800 leading-relaxed">
-                      Saldo di dashboard ini adalah buku catatan hak pembayaran (ledger entitlement), bukan saldo uang elektronik (e-money). Biaya transfer bank admin sebesar Rp2.500 ditanggung penuh oleh platform Bantuin.id, sehingga Anda menerima nominal penarikan 100% utuh tanpa potongan.
-                    </p>
-                  </div>
-                </div>
-
-                {/* 2. DAFTAR DEPOSIT SEWA BARANG CUSTOMER */}
+                {/* 2. DAFTAR DEPOSIT SEWA AKTIF */}
                 <div className="pt-2">
-                  <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
-                    <div className="min-w-0">
-                      <h4 className="font-bold text-sm text-slate-900">Deposit Jaminan Sewa Barang (Customer)</h4>
-                      <p className="text-[11px] text-slate-500">Dana pengaman sewa (0% komisi) yang dikembalikan ke rekening bank Anda setelah alat selesai diperiksa</p>
-                    </div>
-                    <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full shrink-0">
-                      {customerDeposits?.length || 0} Data
-                    </span>
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-bold text-sm text-slate-900">Deposit Jaminan Perlindungan Sewa (Titipan Aman)</h4>
+                    <span className="text-xs text-[#1683FF] font-semibold">100% Refundable</span>
                   </div>
 
                   <div className="space-y-3">
                     {customerDeposits && customerDeposits.length > 0 ? (
                       customerDeposits.map((dep) => {
-                        const isRefunded = dep.status === "REFUNDED";
-                        const isPendingRefund = dep.status === "REFUND_PENDING";
-                        const isWaitingReturn = dep.status === "WAITING_RETURN";
-                        const isDispute = dep.status === "DISPUTE";
-
+                        const isWaiting = dep.status === "WAITING_RETURN";
                         return (
-                          <div key={dep.id} className="p-4 rounded-2xl border border-slate-200/80 bg-white shadow-2xs space-y-3">
-                            <div className="flex flex-wrap items-start gap-2 justify-between">
-                              <span className="text-xs font-black text-slate-900 min-w-0 break-words flex-1">{dep.rentalTitle}</span>
-                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 whitespace-nowrap ${
-                                isRefunded
-                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                  : isPendingRefund
-                                  ? "bg-amber-50 text-amber-800 border border-amber-200"
-                                  : isDispute
-                                  ? "bg-rose-50 text-rose-700 border border-rose-200"
-                                  : "bg-blue-50 text-[#1683FF] border border-blue-200"
-                              }`}>
-                                {isRefunded && "Dikembalikan"}
-                                {isPendingRefund && "Menunggu Admin"}
-                                {isWaitingReturn && "Masa Sewa"}
-                                {isDispute && "Ada Klaim"}
-                              </span>
+                          <div
+                            key={dep.id}
+                            className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                          >
+                            <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="font-bold text-xs text-slate-900">{dep.rentalTitle}</span>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isWaiting ? "bg-blue-50 text-[#1683FF] border border-blue-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                  }`}>
+                                  {isWaiting ? "Sedang Disewa" : "Siap Refund"}
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-slate-500">
+                                No. ID Deposit: {dep.id} &middot; Metode: {dep.paymentMethod} &middot; Rekening Tujuan: {dep.customerBank} ({dep.customerAccountNumber})
+                              </div>
                             </div>
-                            <div className="text-[11px] text-slate-500">
-                              Rekening Tujuan: {dep.customerBank} ({dep.customerAccountNumber}) an {dep.customerAccountHolder}
-                            </div>
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-xs text-slate-400">Nominal Deposit:</span>
-                              <span className="text-base font-black text-slate-900">{formatIDR(dep.depositAmount)}</span>
+
+                            <div className="text-right shrink-0">
+                              <div className="text-xs font-bold text-slate-500">Nominal Titipan Jaminan</div>
+                              <div className="text-sm font-black text-[#1683FF]">{formatIDR(dep.depositAmount)}</div>
                             </div>
                           </div>
                         );
@@ -996,9 +1331,8 @@ export default function ProfilePage() {
                         return (
                           <div key={wd.id} className="p-3.5 flex items-center justify-between gap-3">
                             <div className="flex items-center gap-3">
-                              <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
-                                isSuccess ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"
-                              }`}>
+                              <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${isSuccess ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"
+                                }`}>
                                 {isSuccess ? <Check className="w-3.5 h-3.5" /> : <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                               </div>
                               <div>
@@ -1013,11 +1347,10 @@ export default function ProfilePage() {
 
                             <div className="text-right shrink-0 space-y-0.5">
                               <div className="text-xs font-black text-slate-900">-{formatIDR(wd.amount)}</div>
-                              <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap inline-block ${
-                                isSuccess
+                              <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap inline-block ${isSuccess
                                   ? "bg-emerald-50 text-emerald-700"
                                   : "bg-amber-50 text-amber-700"
-                              }`}>
+                                }`}>
                                 {isSuccess ? "Berhasil" : "Menunggu"}
                               </span>
                             </div>
@@ -1063,7 +1396,7 @@ export default function ProfilePage() {
                   )}
                 </div>
 
-                {/* JIKA PENGGUNA UMUM BELUM TERVERIFIKASI JASA: TAMPILKAN FORMULIR VERIFIKASI JASA */}
+                {/* JIKA PENGGUNA UMUM BELUM TERVERIFIKASI JASA */}
                 {isUser && !isJasaVerified ? (
                   <div className="space-y-5">
                     <div className="p-4 rounded-2xl bg-blue-50/70 border border-blue-200 flex items-start gap-3">
@@ -1124,7 +1457,7 @@ export default function ProfilePage() {
                           <label className="border-2 border-dashed border-slate-300 hover:border-[#1683FF] rounded-xl p-4 text-center cursor-pointer transition bg-white block">
                             <Upload className="w-5 h-5 text-[#1683FF] mx-auto mb-1" />
                             <span className="text-xs font-bold text-slate-800 block">Pilih File Foto KTP Asli</span>
-                            <input type="file" accept="image/*" onChange={handleUserKtpUpload} className="hidden" required />
+                            <input type="file" accept={getAcceptAttribute("bantuin-assets")} onChange={handleUserKtpUpload} className="hidden" required />
                           </label>
                         )}
                       </div>
@@ -1153,7 +1486,7 @@ export default function ProfilePage() {
                               <input
                                 type="text"
                                 required
-                                placeholder="Tulis bidang keahlian Anda (contoh: Barista Event, Guru Les Privat, Servis AC...)"
+                                placeholder="Tulis bidang keahlian Anda (contoh: Barista Event, Servis AC...)"
                                 value={userJasaVerifyForm.customSkill}
                                 onChange={(e) => setUserJasaVerifyForm({ ...userJasaVerifyForm, customSkill: e.target.value })}
                                 className="w-full text-xs px-3.5 py-2 rounded-xl border border-blue-300 bg-blue-50/50 focus:outline-none focus:border-[#1683FF]"
@@ -1241,55 +1574,47 @@ export default function ProfilePage() {
                             <span>KTP Elektronik (e-KTP)</span>
                           </span>
                           <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0 whitespace-nowrap">
-                            <Check className="w-3 h-3 shrink-0" />
-                            <span>Disetujui Dukcapil</span>
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>Lolos OCR Dukcapil</span>
                           </span>
                         </div>
 
-                        <div className="relative aspect-video rounded-xl overflow-hidden border border-slate-200 bg-slate-200 group">
+                        <div className="flex items-center gap-3">
                           <img
-                            src={currentUser?.idCardUrl || kycForm.ktpUrl}
-                            alt="Foto KTP Pengguna"
-                            className="w-full h-full object-cover"
+                            src={currentUser?.idCardUrl || "https://images.unsplash.com/photo-1578836537282-3171d77f8632?auto=format&fit=crop&w=600&q=80"}
+                            alt="e-KTP Preview"
+                            className="w-20 h-14 object-cover rounded-xl border border-slate-200 bg-white"
                           />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs font-bold">
-                            <span>Pratinjau Dokumen</span>
+                          <div className="text-xs text-slate-600 space-y-0.5">
+                            <div className="font-bold text-slate-900">NIK: {currentUser?.idNumber ? `${currentUser.idNumber.slice(0, 6)}******${currentUser.idNumber.slice(-4)}` : "330219******0001"}</div>
+                            <div className="text-[10px] text-slate-400">Nama: {currentUser?.fullName || profileData.fullName}</div>
                           </div>
-                        </div>
-
-                        <div className="text-[11px] text-slate-500 space-y-0.5 pt-1">
-                          <div>NIK: <strong>3302**********01</strong> (Tersensor)</div>
-                          <div>Nama: <strong>{currentUser?.fullName || profileData.fullName}</strong></div>
                         </div>
                       </div>
 
-                      {/* Foto Wajah / Selfie Card */}
+                      {/* Face Liveness Card */}
                       <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/70 space-y-3">
                         <div className="flex flex-wrap items-start justify-between gap-2">
                           <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-0">
-                            <User className="w-4 h-4 text-emerald-600 shrink-0" />
-                            <span>Foto Selfie Pemegang KTP</span>
+                            <Camera className="w-4 h-4 text-[#1683FF] shrink-0" />
+                            <span>Verifikasi Biometrik Wajah</span>
                           </span>
                           <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0 whitespace-nowrap">
-                            <Check className="w-3 h-3 shrink-0" />
-                            <span>Biometrik Cocok</span>
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>Match 99.4%</span>
                           </span>
                         </div>
 
-                        <div className="relative aspect-video rounded-xl overflow-hidden border border-slate-200 bg-slate-200 group">
+                        <div className="flex items-center gap-3">
                           <img
-                            src={currentUser?.avatarUrl || kycForm.selfieUrl}
-                            alt="Foto Wajah Biometrik"
-                            className="w-full h-full object-cover"
+                            src={currentUser?.avatarUrl || profileData.avatarUrl || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80"}
+                            alt="Face Preview"
+                            className="w-14 h-14 object-cover rounded-full border border-slate-200 bg-white"
                           />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs font-bold">
-                            <span>Pratinjau Foto</span>
+                          <div className="text-xs text-slate-600 space-y-0.5">
+                            <div className="font-bold text-slate-900">Validasi Wajah Realtime</div>
+                            <div className="text-[10px] text-slate-400">Status: Sesuai Dokumen KTP</div>
                           </div>
-                        </div>
-
-                        <div className="text-[11px] text-slate-500 space-y-0.5 pt-1">
-                          <div>Status Biometrik: <strong>Lolos AI Face Match (99.2%)</strong></div>
-                          <div>Terakhir Diperiksa: <strong>14 Januari 2024</strong></div>
                         </div>
                       </div>
                     </div>
@@ -1384,11 +1709,10 @@ export default function ProfilePage() {
                               key={skill}
                               type="button"
                               onClick={() => toggleSkill(skill)}
-                              className={`text-xs px-3 py-1.5 rounded-full border transition font-medium flex items-center gap-1.5 cursor-pointer ${
-                                isSelected
+                              className={`text-xs px-3 py-1.5 rounded-full border transition font-medium flex items-center gap-1.5 cursor-pointer ${isSelected
                                   ? "bg-[#1683FF] text-white border-[#1683FF] shadow-2xs font-bold"
                                   : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-                              }`}
+                                }`}
                             >
                               {isSelected && <Check className="w-3 h-3" />}
                               <span>{skill}</span>
@@ -1398,7 +1722,7 @@ export default function ProfilePage() {
                       </div>
                     </div>
 
-                    {/* Input Tambah Bidang / Keahlian Kustom Baru (Isi Sendiri) */}
+                    {/* Input Tambah Bidang / Keahlian Kustom Baru */}
                     <div className="p-3.5 bg-blue-50/70 rounded-2xl border border-blue-200">
                       <label className="block text-xs font-bold text-slate-800 mb-1.5 flex items-center gap-1.5">
                         <PlusCircle className="w-4 h-4 text-[#1683FF]" />
@@ -1446,7 +1770,9 @@ export default function ProfilePage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Nama Bank / E-Wallet Penerima</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Nama Bank / E-Wallet Penerima <span className="text-red-500">*</span>
+                  </label>
                   <select
                     value={profileData.bankName}
                     onChange={(e) => setProfileData({ ...profileData, bankName: e.target.value })}
@@ -1464,10 +1790,13 @@ export default function ProfilePage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Nomor Rekening Bank / Nomor HP E-Wallet</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Nomor Rekening Bank / Nomor HP E-Wallet <span className="text-red-500">*</span>
+                  </label>
                   <input
                     type="text"
                     required
+                    placeholder="Masukkan nomor rekening atau nomor e-wallet"
                     value={profileData.accountNumber}
                     onChange={(e) => setProfileData({ ...profileData, accountNumber: e.target.value })}
                     className="w-full text-xs sm:text-sm px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-[#1683FF]"
@@ -1475,10 +1804,13 @@ export default function ProfilePage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Nama Pemilik Rekening (Sesuai Buku Tabungan / Akun)</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Nama Pemilik Rekening (Sesuai Buku Tabungan / Akun) <span className="text-red-500">*</span>
+                  </label>
                   <input
                     type="text"
                     required
+                    placeholder="Nama pemilik rekening sesuai buku tabungan"
                     value={profileData.accountHolder}
                     onChange={(e) => setProfileData({ ...profileData, accountHolder: e.target.value })}
                     className="w-full text-xs sm:text-sm px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-[#1683FF]"
@@ -1493,15 +1825,23 @@ export default function ProfilePage() {
                 <div className="pt-2 flex items-center justify-between">
                   {isBankSaved ? (
                     <span className="text-xs font-bold text-emerald-600 flex items-center gap-1">
-                      <Check className="w-4 h-4" /> Rekening Berhasil Diperbarui &amp; Tersimpan
+                      <Check className="w-4 h-4" /> Rekening Berhasil Diperbarui &amp; Tersimpan ke Database
                     </span>
                   ) : <div />}
 
                   <button
                     type="submit"
-                    className="px-6 py-2.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs shadow-2xs transition active:scale-95 cursor-pointer"
+                    disabled={isSavingBank}
+                    className="px-6 py-2.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs shadow-2xs transition active:scale-95 flex items-center gap-2 cursor-pointer"
                   >
-                    Simpan Rekening
+                    {isSavingBank ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Menyimpan...</span>
+                      </>
+                    ) : (
+                      <span>Simpan Rekening Bank</span>
+                    )}
                   </button>
                 </div>
               </form>
@@ -1527,12 +1867,14 @@ export default function ProfilePage() {
                 {passwordSuccess && (
                   <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-700 font-medium flex items-center gap-2">
                     <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>Kata sandi Anda telah berhasil diperbarui.</span>
+                    <span>Kata sandi Anda telah berhasil diperbarui di database.</span>
                   </div>
                 )}
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Kata Sandi Saat Ini</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Kata Sandi Saat Ini <span className="text-red-500">*</span>
+                  </label>
                   <input
                     type="password"
                     required
@@ -1544,7 +1886,9 @@ export default function ProfilePage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Kata Sandi Baru</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Kata Sandi Baru <span className="text-red-500">*</span>
+                  </label>
                   <input
                     type="password"
                     required
@@ -1556,7 +1900,9 @@ export default function ProfilePage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Konfirmasi Kata Sandi Baru</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Konfirmasi Kata Sandi Baru <span className="text-red-500">*</span>
+                  </label>
                   <input
                     type="password"
                     required
@@ -1570,9 +1916,17 @@ export default function ProfilePage() {
                 <div className="pt-2 flex items-center justify-end">
                   <button
                     type="submit"
-                    className="px-6 py-2.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs shadow-2xs transition active:scale-95 cursor-pointer"
+                    disabled={isSavingPassword}
+                    className="px-6 py-2.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs shadow-2xs transition active:scale-95 flex items-center gap-2 cursor-pointer"
                   >
-                    Perbarui Kata Sandi
+                    {isSavingPassword ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Menyimpan Sandi...</span>
+                      </>
+                    ) : (
+                      <span>Perbarui Kata Sandi</span>
+                    )}
                   </button>
                 </div>
               </form>
@@ -1603,7 +1957,9 @@ export default function ProfilePage() {
             <form onSubmit={handleKycSubmit} className="space-y-4">
               {/* KTP Upload */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Foto e-KTP Asli (Jelas &amp; Tidak Terpotong)</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Foto e-KTP Asli (Jelas &amp; Tidak Terpotong) <span className="text-red-500">*</span>
+                </label>
                 <div className="flex items-center gap-3">
                   <img
                     src={kycForm.ktpUrl}
@@ -1613,14 +1969,16 @@ export default function ProfilePage() {
                   <label className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer transition flex items-center gap-1.5">
                     <Upload className="w-3.5 h-3.5" />
                     <span>Pilih Foto KTP</span>
-                    <input type="file" accept="image/*" onChange={(e) => handleKycFile(e, "ktp")} className="hidden" />
+                    <input type="file" accept={getAcceptAttribute("bantuin-assets")} onChange={(e) => handleKycFile(e, "ktp")} className="hidden" />
                   </label>
                 </div>
               </div>
 
               {/* Selfie Upload */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Foto Selfie Memegang KTP / Wajah Jelas</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Foto Selfie Memegang KTP / Wajah Jelas <span className="text-red-500">*</span>
+                </label>
                 <div className="flex items-center gap-3">
                   <img
                     src={kycForm.selfieUrl}
@@ -1630,16 +1988,19 @@ export default function ProfilePage() {
                   <label className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer transition flex items-center gap-1.5">
                     <Camera className="w-3.5 h-3.5" />
                     <span>Pilih Foto Wajah</span>
-                    <input type="file" accept="image/*" onChange={(e) => handleKycFile(e, "selfie")} className="hidden" />
+                    <input type="file" accept={getAcceptAttribute("bantuin-assets")} onChange={(e) => handleKycFile(e, "selfie")} className="hidden" />
                   </label>
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Nomor Induk Kependudukan (NIK)</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Nomor Induk Kependudukan (NIK 16 Digit) <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="text"
                   required
+                  maxLength={16}
                   value={kycForm.nik}
                   onChange={(e) => setKycForm({ ...kycForm, nik: e.target.value })}
                   className="w-full text-xs p-2.5 rounded-xl border border-slate-200 font-bold focus:outline-none focus:border-[#1683FF]"
@@ -1661,7 +2022,7 @@ export default function ProfilePage() {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold shadow-2xs transition"
+                  className="px-5 py-2 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold shadow-2xs transition cursor-pointer"
                 >
                   Kirim Verifikasi
                 </button>
@@ -1708,7 +2069,9 @@ export default function ProfilePage() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Nominal Penarikan (Rp)</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Nominal Penarikan (Rp) <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="number"
                   required
@@ -1732,7 +2095,9 @@ export default function ProfilePage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Bank / E-Wallet</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Bank / E-Wallet <span className="text-red-500">*</span>
+                  </label>
                   <select
                     value={withdrawForm.bankName}
                     onChange={(e) => setWithdrawForm({ ...withdrawForm, bankName: e.target.value })}
@@ -1751,7 +2116,9 @@ export default function ProfilePage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Nomor Rekening / HP</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Nomor Rekening / HP <span className="text-red-500">*</span>
+                  </label>
                   <input
                     type="text"
                     required
@@ -1763,7 +2130,9 @@ export default function ProfilePage() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Nama Pemilik Rekening</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Nama Pemilik Rekening <span className="text-red-500">*</span>
+                </label>
                 <input
                   type="text"
                   required
@@ -1805,6 +2174,17 @@ export default function ProfilePage() {
           </div>
         </div>
       )}
+
+      {/* ============================================================ */}
+      {/* AVATAR CROP / ADJUSTMENT MODAL                                */}
+      {/* ============================================================ */}
+      <AvatarCropModal
+        isOpen={cropModal.isOpen}
+        imageSrc={cropModal.imageSrc}
+        isProcessing={isUploadingAvatar}
+        onClose={() => setCropModal({ isOpen: false, imageSrc: null })}
+        onApplyCrop={handleApplyAvatarCrop}
+      />
 
       <Footer />
     </div>

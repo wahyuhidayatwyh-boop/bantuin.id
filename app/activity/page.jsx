@@ -1,11 +1,12 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useRef, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { useApp } from "@/lib/context/AppContext";
+import { authService } from "@/lib/services/authService";
 import { formatIDR } from "@/lib/utils";
 import {
   Activity,
@@ -26,7 +27,9 @@ import {
   Camera,
   HandHeart,
   Briefcase,
-  X,
+  AlertCircle,
+  LogIn,
+  RotateCw,
 } from "lucide-react";
 
 // ─── Status Badge Logic ──────────────────────────────────────────────────────
@@ -34,7 +37,7 @@ function getStatusBadge(order) {
   const status = (order.orderStatus || order.status || "").toLowerCase();
   const orderType = (order.orderType || order.categoryType || "").toLowerCase();
 
-  if (status === "completed") {
+  if (status === "completed" || status === "verified_settled") {
     return {
       label: "Selesai",
       color: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -43,21 +46,47 @@ function getStatusBadge(order) {
     };
   }
 
+  if (status === "cancelled" || status === "batal") {
+    return {
+      label: "Dibatalkan",
+      color: "bg-rose-50 text-rose-700 border-rose-200",
+      dot: "bg-rose-500",
+      icon: AlertCircle,
+    };
+  }
+
+  if (status === "disputed") {
+    return {
+      label: "Dalam Sengketa",
+      color: "bg-rose-50 text-rose-700 border-rose-200",
+      dot: "bg-rose-500 animate-pulse",
+      icon: AlertCircle,
+    };
+  }
+
   if (orderType === "rental" || orderType === "sewa") {
     if (status === "returned") {
       return {
-        label: "Unit Kembali · Refund Deposit",
+        label: "Unit Kembali · Refund Selesai",
         color: "bg-[#EAF4FF] text-[#1683FF] border-[#DCEAF7]",
         dot: "bg-[#1683FF]",
         icon: Clock,
       };
     }
-    if (status === "item_handed_over" || status === "handed_over") {
+    if (status === "item_handed_over" || status === "handed_over" || status === "in_use") {
       return {
         label: "Masa Sewa Berlangsung",
         color: "bg-[#EAF4FF] text-[#1683FF] border-[#DCEAF7]",
         dot: "bg-[#1683FF] animate-pulse",
         icon: Loader2,
+      };
+    }
+    if (status === "confirmed_by_owner") {
+      return {
+        label: "Dikonfirmasi · Siap Diambil",
+        color: "bg-amber-50 text-amber-800 border-amber-200",
+        dot: "bg-amber-500 animate-pulse",
+        icon: Clock,
       };
     }
     return {
@@ -83,6 +112,30 @@ function getStatusBadge(order) {
         color: "bg-[#EAF4FF] text-[#1683FF] border-[#DCEAF7]",
         dot: "bg-[#1683FF] animate-pulse",
         icon: Loader2,
+      };
+    }
+    if (status === "task_delivered" || status === "proof_submitted") {
+      return {
+        label: "Tugas Selesai · Menunggu Konfirmasi",
+        color: "bg-indigo-50 text-indigo-700 border-indigo-200",
+        dot: "bg-indigo-500 animate-pulse",
+        icon: Clock,
+      };
+    }
+    if (status === "has_offers") {
+      return {
+        label: "Tawaran Masuk · Pilih Helper",
+        color: "bg-blue-50 text-blue-700 border-blue-200",
+        dot: "bg-blue-500 animate-pulse",
+        icon: User,
+      };
+    }
+    if (status === "published") {
+      return {
+        label: "Mencari Helper · Terpublikasi",
+        color: "bg-amber-50 text-amber-800 border-amber-200",
+        dot: "bg-amber-500 animate-pulse",
+        icon: Clock,
       };
     }
     return {
@@ -121,13 +174,26 @@ function getCategoryStyle(cat) {
 
 // ─── Activity Card ────────────────────────────────────────────────────────────
 function ActivityCard({ item }) {
+  const isStandaloneRequest = !item.orderRoomId && item.orderType !== "rental";
+  const targetLink = isStandaloneRequest
+    ? `/bantuan/${item.requestId || item.id}`
+    : `/chat?room=${item.chatRoomId || item.id}`;
+
+  const ctaLabel = item.isCancelled
+    ? "Detail Batal"
+    : isStandaloneRequest
+    ? "Lihat Detail"
+    : item.isCompleted
+    ? "Chat Selesai"
+    : "Chat & Lacak";
+
   return (
     <div className="bg-white border border-[#DCEAF7] hover:border-[#1683FF]/50 rounded-xl sm:rounded-2xl transition-all duration-200 shadow-2xs hover:shadow-md group overflow-hidden flex flex-col sm:flex-row min-w-0">
       {/* Thumbnail */}
       <div className="relative w-full sm:w-44 aspect-[4/3] sm:aspect-auto sm:h-auto shrink-0 bg-slate-100 overflow-hidden">
         <img
           src={item.image}
-          alt={item.requestTitle || "Foto transaksi"}
+          alt={item.requestTitle || item.title || "Foto transaksi"}
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
         />
         {/* Kategori overlay on photo */}
@@ -144,7 +210,7 @@ function ActivityCard({ item }) {
           {/* Title + Status */}
           <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-1 sm:gap-3 mb-1 min-w-0">
             <h3 className="font-bold text-xs sm:text-[15px] text-[#102A43] leading-snug group-hover:text-[#1683FF] transition line-clamp-2 min-h-[30px] sm:min-h-0 break-words flex-1">
-              {item.requestTitle || item.rentalDetails?.unitName || "Transaksi"}
+              {item.requestTitle || item.title || item.rentalDetails?.unitName || "Transaksi"}
             </h3>
 
             {/* Status badge */}
@@ -176,10 +242,10 @@ function ActivityCard({ item }) {
               </div>
             )}
 
-            {item.isBantuan && (
+            {item.pickupPoint && (
               <div className="flex items-center gap-1 truncate">
                 <MapPin className="w-3 h-3 shrink-0 text-[#1683FF]" />
-                <span className="truncate">{item.pickupPoint || "Banyumas"}</span>
+                <span className="truncate">{item.pickupPoint}</span>
               </div>
             )}
 
@@ -213,12 +279,15 @@ function ActivityCard({ item }) {
           </div>
 
           <Link
-            href={`/chat?room=${item.id}`}
+            href={targetLink}
             className="w-full sm:w-auto flex items-center justify-center gap-1 sm:gap-1.5 px-2.5 sm:px-4 py-1.5 sm:py-2.5 rounded-lg sm:rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] active:scale-95 text-white text-[11px] sm:text-xs font-bold transition shadow-2xs shrink-0"
           >
-            <MessageSquare className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
-            <span>Chat</span>
-            <span className="hidden sm:inline">{item.isCompleted ? " Selesai" : " & Lacak"}</span>
+            {isStandaloneRequest ? (
+              <User className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+            ) : (
+              <MessageSquare className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+            )}
+            <span>{ctaLabel}</span>
             <ChevronRight className="w-3.5 h-3.5 hidden sm:inline" />
           </Link>
         </div>
@@ -229,9 +298,14 @@ function ActivityCard({ item }) {
 
 // ─── Main Content ─────────────────────────────────────────────────────────────
 function ActivityContent() {
-  const { orderRooms = [], currentUser } = useApp();
+  const { currentUser, isAuthReady, isAuthenticated } = useApp();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const tabParam = searchParams?.get("tab");
+
+  const [activities, setActivities] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
 
   const [mainTab, setMainTab] = useState(
     tabParam === "selesai" ? "completed" : "ongoing"
@@ -239,6 +313,72 @@ function ActivityContent() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [isNewOrderOpen, setIsNewOrderOpen] = useState(false);
   const newOrderRef = useRef(null);
+
+  // Fetch real activities from database via secure API route
+  const loadUserActivities = async () => {
+    setIsLoading(true);
+    setFetchError(null);
+
+    let token = await authService.getValidAccessToken();
+    if (!token) {
+      setActivities([]);
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      let response = await fetch("/api/user/activities", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      // If 401 (token expired), auto refresh and retry once
+      if (response.status === 401) {
+        try {
+          const refreshed = await authService.refreshSession();
+          if (refreshed?.accessToken) {
+            token = refreshed.accessToken;
+            response = await fetch("/api/user/activities", {
+              method: "GET",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+            });
+          }
+        } catch {}
+      }
+
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        setActivities(result.data || []);
+      } else {
+        if (response.status === 401) {
+          setActivities([]);
+        } else {
+          setFetchError(result.error || "Gagal memuat daftar aktivitas.");
+        }
+      }
+    } catch (err) {
+      console.error("Gagal mengambil aktivitas user:", err);
+      setFetchError("Terjadi kendala koneksi ke server.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadUserActivities();
+    const handleAuthChange = () => {
+      loadUserActivities();
+    };
+    window.addEventListener("bantuin_auth_changed", handleAuthChange);
+    return () => window.removeEventListener("bantuin_auth_changed", handleAuthChange);
+  }, []);
 
   useEffect(() => {
     function handleClickOutside(e) {
@@ -258,37 +398,21 @@ function ActivityContent() {
   }, [tabParam]);
 
   const allActivities = useMemo(() => {
-    return (orderRooms || []).map((room) => {
-      const isRental = room.orderType === "rental" || room.categoryType === "sewa";
-      const isJasa = room.orderType === "service" || room.categoryType === "jasa";
-      const isBantuan = room.orderType === "task" || room.categoryType === "bantuan";
-      const categoryPill = isRental ? "Sewa" : isJasa ? "Jasa" : "Bantuan";
-      const isCompleted = room.orderStatus === "completed";
-      const isOngoing = !isCompleted && room.orderStatus !== "cancelled";
-
-      const image =
-        room.rentalDetails?.photoUrl ||
-        room.serviceDetails?.serviceImage ||
-        room.proofPhotos?.[0] ||
-        room.helper?.avatar ||
-        "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=600&q=80";
-      const partner =
-        room.requester?.id === currentUser?.id ? room.helper : room.requester;
+    return activities.map((item) => {
+      const status = (item.orderStatus || item.status || "").toLowerCase();
+      const isCancelled = status === "cancelled" || status === "batal" || Boolean(item.isCancelled);
+      const isCompleted = isCancelled || item.isCompleted || status === "completed" || status === "verified_settled" || status === "returned";
+      const isOngoing = !isCompleted && !isCancelled;
 
       return {
-        ...room,
-        isRental,
-        isJasa,
-        isBantuan,
-        categoryPill,
+        ...item,
+        isCancelled,
         isCompleted,
         isOngoing,
-        image,
-        partner,
-        statusMeta: getStatusBadge(room),
+        statusMeta: getStatusBadge(item),
       };
     });
-  }, [orderRooms, currentUser]);
+  }, [activities]);
 
   const ongoingItems = useMemo(() => allActivities.filter((i) => i.isOngoing), [allActivities]);
   const completedItems = useMemo(() => allActivities.filter((i) => i.isCompleted), [allActivities]);
@@ -335,7 +459,16 @@ function ActivityContent() {
             </div>
 
             {/* Quick Action: + Pesanan Baru */}
-            <div ref={newOrderRef} className="relative shrink-0">
+            <div ref={newOrderRef} className="relative shrink-0 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={loadUserActivities}
+                title="Muat Ulang Data"
+                className="p-2 sm:p-2.5 rounded-xl border border-slate-200 hover:border-slate-300 bg-white text-slate-600 hover:text-[#1683FF] shadow-2xs transition active:scale-95 cursor-pointer"
+              >
+                <RotateCw className={`w-3.5 h-3.5 sm:w-4 sm:h-4 ${isLoading ? "animate-spin text-[#1683FF]" : ""}`} />
+              </button>
+
               <button
                 type="button"
                 onClick={() => setIsNewOrderOpen(!isNewOrderOpen)}
@@ -474,8 +607,57 @@ function ActivityContent() {
           })}
         </div>
 
-        {/* ── Items Grid (2 cols on mobile, 1 col on desktop) ── */}
-        {displayedItems.length === 0 ? (
+        {/* ── Loading State ── */}
+        {isLoading ? (
+          <div className="bg-white rounded-2xl border border-[#DCEAF7] p-12 text-center space-y-3 shadow-xs">
+            <Loader2 className="w-8 h-8 text-[#1683FF] animate-spin mx-auto" />
+            <div className="text-xs sm:text-sm font-bold text-[#102A43]">
+              Sinkronisasi data aktivitas dari database...
+            </div>
+            <p className="text-[11px] text-[#61758A]">
+              Memeriksa transaksi terverifikasi akun Anda.
+            </p>
+          </div>
+        ) : !isAuthenticated && isAuthReady ? (
+          /* ── Unauthenticated State ── */
+          <div className="bg-white rounded-2xl border border-[#DCEAF7] p-10 sm:p-14 text-center space-y-4 shadow-xs">
+            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-blue-50 text-[#1683FF] flex items-center justify-center mx-auto border border-[#DCEAF7]">
+              <LogIn className="w-6 h-6 sm:w-7 sm:h-7" />
+            </div>
+            <div>
+              <h3 className="font-bold text-sm sm:text-base text-[#102A43]">
+                Masuk untuk Melihat Aktivitas Anda
+              </h3>
+              <p className="text-xs text-[#61758A] max-w-xs mx-auto mt-1">
+                Seluruh riwayat sewa alat, pesanan bantuan tugas, dan transaksi jasa tersimpan aman di akun Anda.
+              </p>
+            </div>
+            <div className="pt-2">
+              <Link
+                href="/auth/login?redirect=/activity"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs sm:text-sm font-bold transition shadow-xs"
+              >
+                <LogIn className="w-4 h-4" />
+                <span>Masuk ke Akun Saya</span>
+              </Link>
+            </div>
+          </div>
+        ) : fetchError ? (
+          /* ── Error State ── */
+          <div className="bg-white rounded-2xl border border-red-200 p-8 text-center space-y-3 shadow-xs">
+            <AlertCircle className="w-8 h-8 text-red-500 mx-auto" />
+            <div className="text-xs sm:text-sm font-bold text-red-800">
+              {fetchError}
+            </div>
+            <button
+              onClick={loadUserActivities}
+              className="px-4 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold transition cursor-pointer"
+            >
+              Coba Lagi
+            </button>
+          </div>
+        ) : displayedItems.length === 0 ? (
+          /* ── Empty State ── */
           <div className="bg-white rounded-2xl border border-[#DCEAF7] p-10 sm:p-14 text-center space-y-4 shadow-xs">
             <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-[#EAF4FF] text-[#1683FF] flex items-center justify-center mx-auto border border-[#DCEAF7]">
               <Package className="w-6 h-6 sm:w-7 sm:h-7" />
@@ -488,7 +670,7 @@ function ActivityContent() {
               </h3>
               <p className="text-xs text-[#61758A] max-w-xs mx-auto mt-1">
                 {mainTab === "ongoing"
-                  ? "Semua transaksimu sudah selesai atau belum ada pesanan baru yang aktif."
+                  ? "Semua transaksimu sudah selesai atau belum ada pesanan baru yang aktif di akun ini."
                   : "Transaksi yang sudah rampung akan tercatat di sini secara otomatis."}
               </p>
             </div>
@@ -516,6 +698,7 @@ function ActivityContent() {
             )}
           </div>
         ) : (
+          /* ── Items Grid ── */
           <div className="grid grid-cols-2 sm:grid-cols-1 gap-2.5 sm:gap-3.5">
             {displayedItems.map((item) => (
               <ActivityCard key={item.id} item={item} />

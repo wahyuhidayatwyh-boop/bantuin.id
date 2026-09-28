@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
+import { generateTokens } from "@/lib/auth/jwt";
 
 export async function POST(req) {
   try {
@@ -110,11 +111,17 @@ export async function POST(req) {
 
     // 6. Sinkronkan juga ke model User jika diperlukan
     try {
-      await prisma.user.create({
-        data: {
+      await prisma.user.upsert({
+        where: { email: normalizedEmail },
+        update: {
+          name: fullName || "Pengguna Baru",
+          verified: verificationStatus === "verified" || authProvider === "google",
+        },
+        create: {
           email: normalizedEmail,
           name: fullName || "Pengguna Baru",
           password: hashedPassword,
+          verified: verificationStatus === "verified" || authProvider === "google",
         },
       });
     } catch {
@@ -122,7 +129,6 @@ export async function POST(req) {
     }
 
     // 7. Format data user untuk frontend
-    const token = `session-jwt-${profile.id}-${Date.now()}`;
     const userPayload = {
       id: profile.id,
       email: profile.email,
@@ -143,11 +149,15 @@ export async function POST(req) {
       createdAt: profile.createdAt,
     };
 
+    // 8. Generate JWT Access Token & Refresh Token
+    const tokens = generateTokens(userPayload);
+
     return NextResponse.json({
       success: true,
       message: "Pendaftaran akun berhasil.",
       user: userPayload,
-      token,
+      ...tokens,
+      token: tokens.accessToken, // Backward compatibility
     });
   } catch (error) {
     console.error("Register Error:", error);

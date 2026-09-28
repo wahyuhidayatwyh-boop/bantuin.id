@@ -118,8 +118,14 @@ function BantuanContent() {
 
   // Counts for scope tabs
   const countAll = useMemo(() => {
-    return dbRequests.filter((r) => r.status !== "closed" && r.status !== "completed").length;
-  }, [dbRequests]);
+    return dbRequests.filter((r) => {
+      const isClosed = r.status === "closed" || r.status === "completed";
+      if (isClosed) return false;
+      const isMine = r.requesterId === currentUser?.id || (currentUser?.fullName && r.userName === currentUser?.fullName);
+      if (filterByKabupaten && !isMine && !isItemInCurrentKabupaten(r)) return false;
+      return true;
+    }).length;
+  }, [dbRequests, filterByKabupaten, isItemInCurrentKabupaten, currentUser]);
 
   const countMyRequests = useMemo(() => {
     return dbRequests.filter((r) => r.requesterId === currentUser?.id || (currentUser?.fullName && r.userName === currentUser?.fullName)).length;

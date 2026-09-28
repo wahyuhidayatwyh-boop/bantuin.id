@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { generateTokens } from "@/lib/auth/jwt";
 
 export async function POST(req) {
   try {
@@ -33,7 +34,24 @@ export async function POST(req) {
       });
     }
 
-    const token = `session-google-${profile.id}-${Date.now()}`;
+    // 2. Sinkronkan ke tabel User dengan kolom verified: true
+    try {
+      await prisma.user.upsert({
+        where: { email: normalizedEmail },
+        update: {
+          name: fullName || profile.fullName || "Pengguna Google",
+          verified: true,
+        },
+        create: {
+          email: normalizedEmail,
+          name: fullName || "Pengguna Google",
+          verified: true,
+        },
+      });
+    } catch (userSyncErr) {
+      console.warn("Sinkronisasi tabel User warning:", userSyncErr);
+    }
+
     const userPayload = {
       id: profile.id,
       email: profile.email,
@@ -44,8 +62,8 @@ export async function POST(req) {
       isPartner: profile.isPartner || false,
       isAdmin: profile.isAdmin || false,
       storeName: profile.partnerBusinessName || "",
-      campusName: profile.campusName || "Universitas Indonesia",
-      address: profile.partnerAddress || profile.campusName || "",
+      campusName: profile.campusName || "Bekasi, Jawa Barat",
+      address: profile.partnerAddress || profile.campusName || "Bekasi, Jawa Barat",
       avatarUrl: profile.avatarUrl,
       verificationStatus: profile.verificationStatus || "verified",
       authProvider: "google",
@@ -54,11 +72,15 @@ export async function POST(req) {
       createdAt: profile.createdAt,
     };
 
+    // 3. Generate JWT Access Token & Refresh Token
+    const tokens = generateTokens(userPayload);
+
     return NextResponse.json({
       success: true,
       message: "Login Google berhasil.",
       user: userPayload,
-      token,
+      ...tokens,
+      token: tokens.accessToken, // Backward compatibility
     });
   } catch (error) {
     console.error("Google Auth Error:", error);
