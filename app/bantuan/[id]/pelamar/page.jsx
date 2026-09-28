@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Navbar from "@/components/layout/Navbar";
@@ -48,7 +48,6 @@ export default function PelamarListPage() {
   const { id } = useParams();
   const router = useRouter();
   const { 
-    requests, 
     currentUser, 
     selectHelper, 
     submitOffer, 
@@ -58,6 +57,33 @@ export default function PelamarListPage() {
     getDistanceToUser,
     startTaskInquiry
   } = useApp();
+
+  const [request, setRequest] = useState(null);
+  const [isLoadingRequest, setIsLoadingRequest] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const fetchRequestDetail = async () => {
+    if (!id) return;
+    setIsLoadingRequest(true);
+    setErrorMsg("");
+    try {
+      const res = await fetch(`/api/requests/${id}`);
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || "Permintaan bantuan tidak ditemukan.");
+      }
+      setRequest(json.data);
+    } catch (err) {
+      console.error("Fetch request error in pelamar page:", err);
+      setErrorMsg(err.message);
+    } finally {
+      setIsLoadingRequest(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRequestDetail();
+  }, [id]);
 
   const [searchFilter, setSearchFilter] = useState("");
   const [sortBy, setSortBy] = useState("recommended"); // 'recommended' | 'price_low' | 'price_high' | 'rating'
@@ -84,7 +110,6 @@ export default function PelamarListPage() {
   // Preview Document Modal state
   const [previewDoc, setPreviewDoc] = useState(null);
 
-  const request = requests.find((r) => r.id === id);
   const offersList = useMemo(() => request?.offers || [], [request?.offers]);
 
   // Filter & Sort Applicants (Declared unconditionally before any return)
@@ -93,8 +118,8 @@ export default function PelamarListPage() {
       .filter((offer) => {
         const matchesSearch =
           !searchFilter ||
-          offer.helperName.toLowerCase().includes(searchFilter.toLowerCase()) ||
-          offer.pitchMessage.toLowerCase().includes(searchFilter.toLowerCase());
+          offer.helperName?.toLowerCase().includes(searchFilter.toLowerCase()) ||
+          offer.pitchMessage?.toLowerCase().includes(searchFilter.toLowerCase());
 
         const matchesPortfolio = !filterWithPortfolio || !!(offer.portfolioName || offer.portfolioUrl);
         const matchesCV = !filterWithCV || !!offer.cvName;
@@ -109,13 +134,26 @@ export default function PelamarListPage() {
       });
   }, [offersList, searchFilter, sortBy, filterWithPortfolio, filterWithCV]);
 
-  if (!request) {
+  if (isLoadingRequest) {
+    return (
+      <div className="min-h-screen flex flex-col bg-[#EEF2F6]">
+        <Navbar />
+        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+          <Loader2 className="w-8 h-8 text-[#1683FF] animate-spin mb-3" />
+          <p className="text-sm font-semibold text-slate-600">Memuat data pelamar...</p>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
+
+  if (!request || errorMsg) {
     return (
       <div className="min-h-screen flex flex-col bg-[#EEF2F6]">
         <Navbar />
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
           <h2 className="text-xl font-black text-slate-900">Permintaan Bantuan Tidak Ditemukan</h2>
-          <p className="text-sm text-slate-500 mt-1 mb-4">Mungkin permintaan sudah ditutup atau diselesaikan.</p>
+          <p className="text-sm text-slate-500 mt-1 mb-4">{errorMsg || "Mungkin permintaan sudah ditutup atau diselesaikan."}</p>
           <Link href="/bantuan" className="px-5 py-2.5 bg-[#1683FF] text-white rounded-2xl text-xs font-bold shadow-md">
             Kembali ke Daftar Bantuan
           </Link>

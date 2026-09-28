@@ -1,0 +1,671 @@
+// ============================================================================
+// BANTUIN.ID — PRISMA ORM SCHEMA
+// Master Schema Definition untuk Ekosistem Platform Bantuin.id
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  name      String?
+  password  String?
+  createdAt DateTime @default(now())
+}
+
+// ============================================================================
+// 1. ENUMS
+// ============================================================================
+
+enum VerificationStatus {
+  unverified
+  pending_review
+  verified
+  rejected
+  suspended
+
+  @@map("verification_status")
+}
+
+enum RequestMode {
+  offline
+  online
+
+  @@map("request_mode")
+}
+
+enum RequestStatus {
+  draft
+  published
+  has_offers
+  helper_selected
+  in_progress
+  awaiting_confirmation
+  completed
+  cancelled
+  disputed
+
+  @@map("request_status")
+}
+
+enum OfferStatus {
+  submitted
+  accepted
+  rejected
+  cancelled
+
+  @@map("offer_status")
+}
+
+enum OrderStatus {
+  room_created
+  on_the_way
+  item_picked_up
+  task_delivered
+  proof_submitted
+  completed
+  disputed
+  cancelled
+
+  @@map("order_status")
+}
+
+enum BookingStatus {
+  temp_locked
+  confirmed_by_owner
+  payment_held
+  handed_over
+  in_use
+  returned
+  verified_settled
+  cancelled
+  disputed
+
+  @@map("booking_status")
+}
+
+enum WithdrawalStatus {
+  pending
+  approved
+  processing
+  completed
+  failed
+  cancelled
+  reversed
+
+  @@map("withdrawal_status")
+}
+
+enum PromotionStatus {
+  draft
+  pending_payment
+  paid
+  active
+  expired
+  cancelled
+
+  @@map("promotion_status")
+}
+
+enum PromotionTarget {
+  service
+  rental
+  store
+
+  @@map("promotion_target")
+}
+
+enum ReachType {
+  around
+  city
+  all
+
+  @@map("reach_type")
+}
+
+enum NotificationType {
+  order
+  payment
+  verification
+  promotion
+  report
+  announcement
+  general
+
+  @@map("notification_type")
+}
+
+enum AnnouncementType {
+  info
+  warning
+  promo
+
+  @@map("announcement_type")
+}
+
+enum AudienceType {
+  all
+  user
+  provider
+  partner
+
+  @@map("audience_type")
+}
+
+// ============================================================================
+// 2. MODELS & ENTITIES
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// PROFILES (Syncs with Supabase Auth Users)
+// ----------------------------------------------------------------------------
+model Profile {
+  id                    String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email                 String             @unique
+  fullName              String             @map("full_name")
+  phoneNumber           String?            @map("phone_number")
+  avatarUrl             String?            @map("avatar_url")
+  bio                   String?
+  campusName            String?            @default("Universitas Indonesia") @map("campus_name")
+  
+  // Autentikasi & Password
+  password              String?            @map("password")
+  authProvider          String?            @default("local") @map("auth_provider")
+  
+  // Role Akun: 'user', 'provider', 'partner', 'admin'
+  accountRole           String?            @default("user") @map("account_role")
+  isPartner             Boolean            @default(false) @map("is_partner")
+  partnerBusinessName   String?            @map("partner_business_name")
+  partnerAddress        String?            @map("partner_address")
+  isAdmin               Boolean            @default(false) @map("is_admin")
+  verificationStatus    VerificationStatus @default(unverified) @map("verification_status")
+
+  // KYC Vault (NIK / NIM & Dokumen Terenkripsi)
+  idNumber              String?            @map("id_number")
+  idCardUrl             String?            @map("id_card_url")
+  selfieUrl             String?            @map("selfie_url")
+  verificationNotes     String?            @map("verification_notes")
+
+  // Rekening Pencairan (Payout / Withdrawal)
+  payoutBank            String?            @map("payout_bank")
+  payoutAccountNumber   String?            @map("payout_account_number")
+  payoutAccountHolder   String?            @map("payout_account_holder")
+
+  // Metrik & Reputasi
+  ratingAvg             Decimal            @default(5.00) @map("rating_avg") @db.Decimal(3, 2)
+  ratingCount           Int                @default(0) @map("rating_count")
+  completedHelpsCount   Int                @default(0) @map("completed_helps_count")
+  reliabilityScore      Int                @default(100) @map("reliability_score")
+  responseTimeMinutes   Int                @default(15) @map("response_time_minutes")
+
+  createdAt             DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relasi
+  requestsCreated       Request[]          @relation("Requester")
+  requestsHelped        Request[]          @relation("SelectedHelper")
+  offers                Offer[]
+  requesterOrderRooms   OrderRoom[]        @relation("RequesterRooms")
+  helperOrderRooms      OrderRoom[]        @relation("HelperRooms")
+  chatMessages          ChatMessage[]
+  rentals               Rental[]           @relation("RentalOwner")
+  renterBookings        RentalBooking[]    @relation("Renter")
+  ownerBookings         RentalBooking[]    @relation("BookingOwner")
+  services              Service[]
+  reviewsGiven          Review[]           @relation("Reviewer")
+  reviewsReceived       Review[]           @relation("Reviewee")
+  reportsCreated        Report[]           @relation("Reporter")
+  reportsTargeted       Report[]           @relation("ReportedUser")
+  auditLogs             AuditLog[]
+  withdrawals           Withdrawal[]
+  promotions            Promotion[]
+  notifications         Notification[]
+
+  @@map("profiles")
+}
+
+// ----------------------------------------------------------------------------
+// BANTUIN POINTS (Titik Temu Aman Kampus)
+// ----------------------------------------------------------------------------
+model BantuinPoint {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name              String
+  category          String    // 'campus_gate', 'minimarket', 'library', 'partner_hub'
+  campus            String
+  address           String
+  latitude          Float
+  longitude         Float
+  isVerifiedSafe    Boolean   @default(true) @map("is_verified_safe")
+  operationalHours  String    @default("07:00 - 21:00 WIB") @map("operational_hours")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  requests          Request[]
+
+  @@map("bantuin_points")
+}
+
+// ----------------------------------------------------------------------------
+// REQUESTS (Permintaan Bantuan & Errands)
+// ----------------------------------------------------------------------------
+model Request {
+  id                  String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  requesterId         String         @map("requester_id") @db.Uuid
+  category            String         // 'Ambil Dokumen', 'Print & Fotokopi', 'Antar Barang', dll.
+  title               String
+  description         String
+  mode                RequestMode    @default(offline)
+
+  // Lokasi
+  locationName        String         @map("location_name")
+  latitude            Float?
+  longitude           Float?
+  bantuinPointId      String?        @map("bantuin_point_id") @db.Uuid
+  isPublicLocation    Boolean        @default(true) @map("is_public_location")
+
+  // Waktu & Budget
+  deadline            DateTime       @db.Timestamptz
+  rewardAmount        Decimal        @map("reward_amount") @db.Decimal(12, 2)
+  isVoluntary         Boolean        @default(false) @map("is_voluntary")
+
+  // Status & Matching
+  status              RequestStatus  @default(published)
+  selectedHelperId    String?        @map("selected_helper_id") @db.Uuid
+  attachments         String[]       @default([])
+  cancellationReason  String?        @map("cancellation_reason")
+
+  createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relasi
+  requester           Profile        @relation("Requester", fields: [requesterId], references: [id], onDelete: Cascade)
+  selectedHelper      Profile?       @relation("SelectedHelper", fields: [selectedHelperId], references: [id])
+  bantuinPoint        BantuinPoint?  @relation(fields: [bantuinPointId], references: [id])
+  offers              Offer[]
+  orderRoom           OrderRoom?
+  reports             Report[]
+
+  @@map("requests")
+}
+
+// ----------------------------------------------------------------------------
+// OFFERS (Tawaran / Bidding dari Helper)
+// ----------------------------------------------------------------------------
+model Offer {
+  id                      String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  requestId               String       @map("request_id") @db.Uuid
+  helperId                String       @map("helper_id") @db.Uuid
+  pitchMessage            String       @map("pitch_message")
+  proposedPrice           Decimal?     @map("proposed_price") @db.Decimal(12, 2)
+  estimatedArrivalMinutes Int?         @map("estimated_arrival_minutes")
+  status                  OfferStatus  @default(submitted)
+  createdAt               DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt               DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  request                 Request      @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  helper                  Profile      @relation(fields: [helperId], references: [id], onDelete: Cascade)
+
+  @@unique([requestId, helperId])
+  @@map("offers")
+}
+
+// ----------------------------------------------------------------------------
+// ORDER ROOMS (Bilik Transaksi Terkunci & Escrow)
+// ----------------------------------------------------------------------------
+model OrderRoom {
+  id                    String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  requestId             String        @unique @map("request_id") @db.Uuid
+  requesterId           String        @map("requester_id") @db.Uuid
+  helperId              String        @map("helper_id") @db.Uuid
+  lockedAmount          Decimal       @map("locked_amount") @db.Decimal(12, 2)
+  platformFee           Decimal       @default(0.00) @map("platform_fee") @db.Decimal(12, 2)
+  helperPayoutAmount    Decimal       @map("helper_payout_amount") @db.Decimal(12, 2)
+
+  orderStatus           OrderStatus   @default(room_created) @map("order_status")
+  
+  // Payment Gateways
+  xenditInvoiceId       String?       @map("xendit_invoice_id")
+  xenditPaymentStatus   String        @default("PENDING") @map("xendit_payment_status")
+  xenditDisbursementId  String?       @map("xendit_disbursement_id")
+  tripayReference       String?       @map("tripay_reference")
+
+  // Checkpoint & Bukti Pengerjaan
+  startedAt             DateTime?     @map("started_at") @db.Timestamptz
+  proofPhotoUrls        String[]      @default([]) @map("proof_photo_urls")
+  proofNotes            String?       @map("proof_notes")
+  proofSubmittedAt      DateTime?     @map("proof_submitted_at") @db.Timestamptz
+  autoApproveDeadline   DateTime?     @map("auto_approve_deadline") @db.Timestamptz
+  completedAt           DateTime?     @map("completed_at") @db.Timestamptz
+
+  // Sengketa
+  disputeReason         String?       @map("dispute_reason")
+  disputeOpenedBy       String?       @map("dispute_opened_by") @db.Uuid
+
+  createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  request               Request       @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  requester             Profile       @relation("RequesterRooms", fields: [requesterId], references: [id])
+  helper                Profile       @relation("HelperRooms", fields: [helperId], references: [id])
+  chatMessages          ChatMessage[]
+
+  @@map("order_rooms")
+}
+
+// ----------------------------------------------------------------------------
+// CHAT MESSAGES (Pesan Terikat Transaksi dengan Anti-Disintermediasi)
+// ----------------------------------------------------------------------------
+model ChatMessage {
+  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderRoomId     String     @map("order_room_id") @db.Uuid
+  senderId        String     @map("sender_id") @db.Uuid
+  message         String
+  attachmentUrls  String[]   @default([]) @map("attachment_urls")
+  hasWarningFlag  Boolean    @default(false) @map("has_warning_flag")
+  warningReason   String?    @map("warning_reason")
+  isRead          Boolean    @default(false) @map("is_read")
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz
+
+  orderRoom       OrderRoom  @relation(fields: [orderRoomId], references: [id], onDelete: Cascade)
+  sender          Profile    @relation(fields: [senderId], references: [id])
+
+  @@map("chat_messages")
+}
+
+// ----------------------------------------------------------------------------
+// RENTALS (Katalog Alat & Barang Sewa)
+// ----------------------------------------------------------------------------
+model Rental {
+  id                 String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerId            String          @map("owner_id") @db.Uuid
+  title              String
+  category           String          // 'Kamera & Lensa', 'Laptop & Gadget', 'Audio & Sound', dll.
+  description        String
+  dailyPrice         Decimal         @map("daily_price") @db.Decimal(12, 2)
+  depositAmount      Decimal         @default(0) @map("deposit_amount") @db.Decimal(12, 2)
+  photoUrls          String[]        @default([]) @map("photo_urls")
+  termsAndConditions String?         @map("terms_and_conditions")
+  pickupLocation     String          @map("pickup_location")
+  latitude           Float?
+  longitude          Float?
+  isAvailable        Boolean         @default(true) @map("is_available")
+  isVerifiedItem     Boolean         @default(false) @map("is_verified_item")
+  ratingAvg          Decimal         @default(5.00) @map("rating_avg") @db.Decimal(3, 2)
+  ratingCount        Int             @default(0) @map("rating_count")
+  createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  owner              Profile         @relation("RentalOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  bookings           RentalBooking[]
+  reports            Report[]
+  promotions         Promotion[]
+
+  @@map("rentals")
+}
+
+// ----------------------------------------------------------------------------
+// RENTAL BOOKINGS (Transaksi Penyewaan Barang)
+// ----------------------------------------------------------------------------
+model RentalBooking {
+  id                     String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  rentalId               String         @map("rental_id") @db.Uuid
+  renterId               String         @map("renter_id") @db.Uuid
+  ownerId                String         @map("owner_id") @db.Uuid
+  startDate              DateTime       @map("start_date") @db.Date
+  endDate                DateTime       @map("end_date") @db.Date
+  totalDays              Int            @map("total_days")
+  rentalFee              Decimal        @map("rental_fee") @db.Decimal(12, 2)
+  depositFee             Decimal        @map("deposit_fee") @db.Decimal(12, 2)
+  totalAmount            Decimal        @map("total_amount") @db.Decimal(12, 2)
+
+  bookingStatus          BookingStatus  @default(temp_locked) @map("booking_status")
+  lockExpiresAt          DateTime?      @map("lock_expires_at") @db.Timestamptz
+
+  // Checklist & Bukti Kondisi Fisik
+  initialConditionNotes  String?        @map("initial_condition_notes")
+  initialConditionPhotos String[]       @default([]) @map("initial_condition_photos")
+  returnConditionNotes   String?        @map("return_condition_notes")
+  returnConditionPhotos  String[]       @default([]) @map("return_condition_photos")
+
+  // Pengembalian Uang Jaminan
+  depositRefundAmount    Decimal?       @map("deposit_refund_amount") @db.Decimal(12, 2)
+  depositDeductionReason String?        @map("deposit_deduction_reason")
+
+  createdAt              DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt              DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  rental                 Rental         @relation(fields: [rentalId], references: [id], onDelete: Cascade)
+  renter                 Profile        @relation("Renter", fields: [renterId], references: [id])
+  owner                  Profile        @relation("BookingOwner", fields: [ownerId], references: [id])
+
+  @@map("rental_bookings")
+}
+
+// ----------------------------------------------------------------------------
+// SERVICES (Jasa Keahlian & Freelance Mahasiswa)
+// ----------------------------------------------------------------------------
+model Service {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  providerId      String       @map("provider_id") @db.Uuid
+  title           String
+  category        String       // 'Desain Grafis', 'Fotografi & Videografi', 'Web & Programming', dll.
+  description     String
+  startingPrice   Decimal      @map("starting_price") @db.Decimal(12, 2)
+  portfolioUrls   String[]     @default([]) @map("portfolio_urls")
+  tags            String[]     @default([])
+  ratingAvg       Decimal      @default(5.00) @map("rating_avg") @db.Decimal(3, 2)
+  ratingCount     Int          @default(0) @map("rating_count")
+  completedOrders Int          @default(0) @map("completed_orders")
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  provider        Profile      @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  promotions      Promotion[]
+
+  @@map("services")
+}
+
+// ----------------------------------------------------------------------------
+// REVIEWS (Rating & Ulasan Selesai Transaksi)
+// ----------------------------------------------------------------------------
+model Review {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  transactionId   String    @map("transaction_id") @db.Uuid
+  transactionType String    @map("transaction_type") // 'request', 'rental', 'service'
+  reviewerId      String    @map("reviewer_id") @db.Uuid
+  revieweeId      String    @map("reviewee_id") @db.Uuid
+  rating          Int
+  tags            String[]  @default([])
+  comment         String?
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  reviewer        Profile   @relation("Reviewer", fields: [reviewerId], references: [id])
+  reviewee        Profile   @relation("Reviewee", fields: [revieweeId], references: [id])
+
+  @@map("reviews")
+}
+
+// ----------------------------------------------------------------------------
+// REPORTS (Trust, Safety & Laporan Pelanggaran)
+// ----------------------------------------------------------------------------
+model Report {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  reporterId      String    @map("reporter_id") @db.Uuid
+  targetUserId    String?   @map("target_user_id") @db.Uuid
+  targetRequestId String?   @map("target_request_id") @db.Uuid
+  targetRentalId  String?   @map("target_rental_id") @db.Uuid
+  category        String    // 'penipuan', 'pelecehan', 'barang_rusak', 'disintermediasi', 'konten_ilegal'
+  description     String
+  evidenceUrls    String[]  @default([]) @map("evidence_urls")
+  status          String    @default("pending") // 'pending', 'investigating', 'resolved', 'dismissed'
+  adminNotes      String?   @map("admin_notes")
+  resolvedBy      String?   @map("resolved_by") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  resolvedAt      DateTime? @map("resolved_at") @db.Timestamptz
+
+  reporter        Profile   @relation("Reporter", fields: [reporterId], references: [id])
+  targetUser      Profile?  @relation("ReportedUser", fields: [targetUserId], references: [id])
+  targetRequest   Request?  @relation(fields: [targetRequestId], references: [id])
+  targetRental    Rental?   @relation(fields: [targetRentalId], references: [id])
+
+  @@map("reports")
+}
+
+// ----------------------------------------------------------------------------
+// AUDIT LOGS (Immutable Trail Aksi Admin & Platform)
+// ----------------------------------------------------------------------------
+model AuditLog {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  actorId      String?   @map("actor_id") @db.Uuid
+  actorEmail   String?   @map("actor_email")
+  action       String    // 'user.verify', 'user.suspend', 'dispute.resolve', 'payout.release'
+  targetEntity String    @map("target_entity")
+  targetId     String?   @map("target_id") @db.Uuid
+  payload      Json?     @default("{}")
+  ipAddress    String?   @map("ip_address")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  actor        Profile?  @relation(fields: [actorId], references: [id])
+
+  @@map("audit_logs")
+}
+
+// ----------------------------------------------------------------------------
+// WITHDRAWALS (Penarikan Dana / Payout Provider & Partner)
+// ----------------------------------------------------------------------------
+model Withdrawal {
+  id                  String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerId             String           @map("owner_id") @db.Uuid
+  ownerName           String           @map("owner_name")
+  ownerType           String           @map("owner_type") // 'provider', 'partner'
+  amount              Decimal          @db.Decimal(12, 2)
+  destinationType     String           @map("destination_type") // BCA, Mandiri, BRI, BNI, BSI
+  destinationAccount  String           @map("destination_account")
+  destinationHolder   String           @map("destination_holder")
+  status              WithdrawalStatus @default(pending)
+  transferReference   String?          @map("transfer_reference")
+  proofUrl            String?          @map("proof_url")
+  rejectionReason     String?          @map("rejection_reason")
+  requestedAt         DateTime         @default(now()) @map("requested_at") @db.Timestamptz
+  processedAt         DateTime?        @map("processed_at") @db.Timestamptz
+  processedBy         String?          @map("processed_by")
+
+  owner               Profile          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@map("withdrawals")
+}
+
+// ----------------------------------------------------------------------------
+// PROMOTION PACKAGES (Konfigurasi Paket Promosi Unggulan)
+// ----------------------------------------------------------------------------
+model PromotionPackage {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String
+  type          String      // 'jasa', 'rental', 'store'
+  durationDays  Int         @map("duration_days")
+  price         Decimal     @db.Decimal(12, 2)
+  reachOptions  String[]    @default(["around", "city", "all"]) @map("reach_options")
+  placements    String[]    @default([])
+  priority      Int         @default(1)
+  slotLimit     Int         @default(5) @map("slot_limit")
+  benefits      String[]    @default([])
+  description   String?
+  status        String      @default("active")
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz
+
+  promotions    Promotion[]
+
+  @@map("promotion_packages")
+}
+
+// ----------------------------------------------------------------------------
+// PROMOTIONS (Promosi Aktif / Riwayat Pembelian Iklan)
+// ----------------------------------------------------------------------------
+model Promotion {
+  id           String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerId      String            @map("owner_id") @db.Uuid
+  packageId    String?           @map("package_id") @db.Uuid
+  targetType   PromotionTarget   @map("target_type")
+  targetId     String?           @map("target_id") @db.Uuid
+  serviceId    String?           @map("service_id") @db.Uuid
+  rentalId     String?           @map("rental_id") @db.Uuid
+  reachType    ReachType         @default(around) @map("reach_type")
+  status       PromotionStatus   @default(draft)
+  amount       Decimal           @db.Decimal(12, 2)
+  startsAt     DateTime?         @map("starts_at") @db.Timestamptz
+  expiresAt    DateTime?         @map("expires_at") @db.Timestamptz
+  viewsCount   Int               @default(0) @map("views_count")
+  clicksCount  Int               @default(0) @map("clicks_count")
+  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  owner        Profile           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  package      PromotionPackage? @relation(fields: [packageId], references: [id])
+  service      Service?          @relation(fields: [serviceId], references: [id])
+  rental       Rental?           @relation(fields: [rentalId], references: [id])
+
+  @@map("promotions")
+}
+
+// ----------------------------------------------------------------------------
+// VOUCHERS (Diskon & Promo Transaksi Checkout)
+// ----------------------------------------------------------------------------
+model Voucher {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code           String    @unique
+  title          String
+  description    String?
+  discountType   String    @map("discount_type") // 'percentage' | 'fixed'
+  discountValue  Decimal   @map("discount_value") @db.Decimal(12, 2)
+  minTransaction Decimal   @default(0) @map("min_transaction") @db.Decimal(12, 2)
+  maxDiscount    Decimal?  @map("max_discount") @db.Decimal(12, 2)
+  quota          Int       @default(100)
+  usedCount      Int       @default(0) @map("used_count")
+  appliesTo      String    @default("all") @map("applies_to") // 'all', 'sewa', 'bantuan', 'jasa'
+  targetLocation String?   @map("target_location")
+  isActive       Boolean   @default(true) @map("is_active")
+  startsAt       DateTime  @map("starts_at") @db.Timestamptz
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("vouchers")
+}
+
+// ----------------------------------------------------------------------------
+// ANNOUNCEMENTS (Pengumuman Resmi & Broadcast Platform)
+// ----------------------------------------------------------------------------
+model Announcement {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title       String
+  content     String
+  type        AnnouncementType @default(info)
+  audience    AudienceType     @default(all)
+  status      String           @default("active")
+  publishedAt DateTime         @default(now()) @map("published_at") @db.Timestamptz
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("announcements")
+}
+
+// ----------------------------------------------------------------------------
+// NOTIFICATIONS (Notifikasi In-App Pengguna)
+// ----------------------------------------------------------------------------
+model Notification {
+  id        String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  title     String
+  message   String
+  type      NotificationType @default(general)
+  link      String?
+  isRead    Boolean          @default(false) @map("is_read")
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  user      Profile          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}

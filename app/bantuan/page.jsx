@@ -11,6 +11,8 @@ import { useApp } from "@/lib/context/AppContext";
 import { formatIDR, formatDeadlineWithHour } from "@/lib/utils";
 import CategoryIcon from "@/components/common/CategoryIcon";
 import { BANTUAN_CATEGORIES, matchesCategory } from "@/lib/categories";
+import { ItemGridSkeleton } from "@/components/skeletons/ItemGridSkeleton";
+import BantuanLoading from "./loading";
 import { 
   Search, 
   Map, 
@@ -52,11 +54,8 @@ function BantuanContent() {
   const initialCategory = searchParams.get("category") || "Semua";
 
   const { 
-    requests, 
     currentUser, 
     bantuinPoints, 
-    submitOffer,
-    getDistanceToUser,
     userCoordinates,
     activeKabupaten,
     filterByKabupaten,
@@ -64,8 +63,30 @@ function BantuanContent() {
     isItemInCurrentKabupaten
   } = useApp();
 
+  const [dbRequests, setDbRequests] = useState([]);
+  const [isLoadingRequests, setIsLoadingRequests] = useState(true);
+
+  const fetchRequests = async () => {
+    setIsLoadingRequests(true);
+    try {
+      const res = await fetch("/api/requests");
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setDbRequests(json.data);
+      }
+    } catch (e) {
+      console.error("Fetch requests failed:", e);
+    } finally {
+      setIsLoadingRequests(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRequests();
+  }, []);
+
   const [searchQuery, setSearchQuery] = useState(initialQuery);
-  const [scopeFilter, setScopeFilter] = useState("others"); // 'others' | 'my_requests'
+  const [scopeFilter, setScopeFilter] = useState("all"); // 'all' | 'my_requests'
   const [selectedCategory, setSelectedCategory] = useState(() => BANTUAN_CATEGORIES.some((item) => item.id === initialCategory) ? initialCategory : "Semua");
   const [sortBy, setSortBy] = useState("terbaru");
   const [activeModal, setActiveModal] = useState(null); // null | 'kategori' | 'wilayah' | 'urutkan'
@@ -77,8 +98,6 @@ function BantuanContent() {
   // Close desktop dropdowns on outside click or escape
   useEffect(() => {
     function handleClickOutside(event) {
-      // On mobile the filters open in a bottom sheet outside controlsRef;
-      // its controls must not be dismissed by the desktop outside-click logic.
       if (window.innerWidth < 640) return;
       if (controlsRef.current && !controlsRef.current.contains(event.target)) {
         setActiveModal(null);
@@ -97,31 +116,24 @@ function BantuanContent() {
     };
   }, []);
 
-  // Modal offer state for list view
-  const [selectedTask, setSelectedTask] = useState(null);
-  const [pitchMessage, setPitchMessage] = useState("");
-  const [proposedPrice, setProposedPrice] = useState(15000);
-  const [submitted, setSubmitted] = useState(false);
-
   // Counts for scope tabs
-  const countOthers = useMemo(() => {
-    return requests.filter((r) => r.requester?.id !== currentUser?.id && r.status !== "closed" && r.status !== "completed").length;
-  }, [requests, currentUser]);
+  const countAll = useMemo(() => {
+    return dbRequests.filter((r) => r.status !== "closed" && r.status !== "completed").length;
+  }, [dbRequests]);
 
   const countMyRequests = useMemo(() => {
-    return requests.filter((r) => r.requester?.id === currentUser?.id).length;
-  }, [requests, currentUser]);
+    return dbRequests.filter((r) => r.requesterId === currentUser?.id || (currentUser?.fullName && r.userName === currentUser?.fullName)).length;
+  }, [dbRequests, currentUser]);
 
   // Unified categories for dropdown from canonical source of truth
   const categories = BANTUAN_CATEGORIES;
 
   // Filtered Requests Logic
   const filteredRequests = useMemo(() => {
-    let list = requests.filter((item) => {
-      const isMine = item.requester?.id === currentUser?.id;
+    let list = dbRequests.filter((item) => {
+      const isMine = item.requesterId === currentUser?.id || (currentUser?.fullName && item.userName === currentUser?.fullName);
 
-      // Filter Scope: 'others' vs 'my_requests'
-      if (scopeFilter === "others" && isMine) return false;
+      // Filter Scope: 'all' vs 'my_requests'
       if (scopeFilter === "my_requests" && !isMine) return false;
 
       // Exclude requests where a helper has already finished/closed unless viewing my own requests
@@ -162,7 +174,7 @@ function BantuanContent() {
     }
 
     return list;
-  }, [requests, currentUser, scopeFilter, searchQuery, selectedCategory, filterByKabupaten, isItemInCurrentKabupaten, sortBy]);
+  }, [dbRequests, currentUser, scopeFilter, searchQuery, selectedCategory, filterByKabupaten, isItemInCurrentKabupaten, sortBy]);
 
   const currentCat = categories.find((c) => c.id === selectedCategory) || categories[0];
   const currentCatName = currentCat?.name || currentCat?.label || "Semua Kategori";
@@ -280,16 +292,16 @@ function BantuanContent() {
             <div className="flex items-center p-0.5 bg-slate-200/70 rounded-xl text-[11px] sm:text-xs font-bold shrink-0">
               <button
                 type="button"
-                onClick={() => { setScopeFilter("others"); setCurrentPage(1); }}
+                onClick={() => { setScopeFilter("all"); setCurrentPage(1); }}
                 className={`px-2.5 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer ${
-                  scopeFilter === "others"
+                  scopeFilter === "all"
                     ? "bg-white text-[#1683FF] shadow-2xs font-extrabold"
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
                 <span>Semua</span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-blue-50 text-[#1683FF]">
-                  {countOthers}
+                  {countAll}
                 </span>
               </button>
 
@@ -712,7 +724,11 @@ function BantuanContent() {
         )}
 
         {/* Layer 3: Daftar Bantuan (Format List Rapi & Nyaman - Maksimal 10 Bantuan per Halaman) */}
-        {filteredRequests.length > 0 ? (
+        {isLoadingRequests ? (
+          <div className="py-2">
+            <ItemGridSkeleton count={6} type="request" />
+          </div>
+        ) : filteredRequests.length > 0 ? (
           <div>
             <div className="space-y-3.5 sm:space-y-4">
               {paginatedRequests.map((req) => (
@@ -844,7 +860,7 @@ function BantuanContent() {
 
 export default function BantuanPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<BantuanLoading />}>
       <BantuanContent />
     </Suspense>
   );

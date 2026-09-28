@@ -131,7 +131,7 @@ export default function LocationPickerMap({
   };
 
   return (
-    <div className="relative w-full rounded-2xl overflow-hidden border border-slate-200/90 shadow-sm bg-slate-100">
+    <div className="relative w-full rounded-2xl overflow-hidden border border-slate-200/90 shadow-sm bg-slate-100 isolate z-0">
       {/* Map Canvas */}
       <div 
         ref={mapRef} 

@@ -144,7 +144,7 @@ export default function LoginPage() {
           <form className="space-y-4" onSubmit={handleLogin}>
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                Alamat Email
+                Alamat Email <span className="text-rose-500 font-bold">*</span>
               </label>
               <div className="relative">
                 <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -161,7 +161,7 @@ export default function LoginPage() {
 
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                Kata Sandi
+                Kata Sandi <span className="text-rose-500 font-bold">*</span>
               </label>
               <div className="relative">
                 <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -191,8 +191,17 @@ export default function LoginPage() {
               disabled={loading || googleLoading}
               className="w-full py-2.5 sm:py-3 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs sm:text-sm font-bold shadow-xs transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 active:scale-[0.99]"
             >
-              <span>{loading ? "Memproses Verifikasi..." : "Masuk Sekarang"}</span>
-              <ArrowRight className="w-4 h-4" />
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                  <span>Memverifikasi Akun...</span>
+                </>
+              ) : (
+                <>
+                  <span>Masuk Sekarang</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
             </button>
           </form>
 

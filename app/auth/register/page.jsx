@@ -50,6 +50,8 @@ export default function RegisterPage() {
   const [gpsSuccessMsg, setGpsSuccessMsg] = useState("");
   const [gpsErrorMsg, setGpsErrorMsg] = useState("");
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   // Progressive KYC Mode for Provider: 'later' (default: Daftar Cepat) or 'now' (Lengkapi Sekarang)
   const [providerKycChoice, setProviderKycChoice] = useState("later");
 
@@ -238,20 +240,70 @@ export default function RegisterPage() {
       const isMitra = formData.accountType === "mitra";
       const hasUploadedKyc = formData.idCardPreview && (isProvider ? providerKycChoice === "now" : formData.userWantsOptionalKyc);
 
-      let authResult;
-      if (formData.authProvider === "google") {
-        authResult = await authService.registerWithGoogle({
+      setIsSubmitting(true);
+      try {
+        let authResult;
+        if (formData.authProvider === "google") {
+          authResult = await authService.registerWithGoogle({
+            fullName: formData.fullName || (isProvider ? "Penyedia Jasa Baru" : isMitra ? "Mitra Toko Sewa" : "Pengguna Baru"),
+            email: formData.email,
+            phone: formData.phone,
+            role: formData.accountType,
+            address: formData.address,
+            province: formData.province,
+            city: formData.city,
+            district: formData.district,
+            storeName: formData.storeName,
+            storeCategory: formData.storeCategory,
+            skills: allSkills,
+            idNumber: formData.idNumber || "",
+            idCardUrl: formData.idCardPreview || "",
+            bankInfo: {
+              bankName: formData.bankName,
+              accountNumber: formData.accountNumber,
+              accountHolder: formData.accountHolder || formData.fullName,
+            },
+            verificationStatus: hasUploadedKyc ? "pending_review" : "verified",
+          });
+        } else {
+          authResult = await authService.register({
+            fullName: formData.fullName || (isProvider ? "Penyedia Jasa Baru" : isMitra ? "Mitra Toko Sewa" : "Pengguna Baru"),
+            email: formData.email,
+            phone: formData.phone,
+            role: formData.accountType,
+            password: formData.password,
+            address: formData.address,
+            province: formData.province,
+            city: formData.city,
+            district: formData.district,
+            storeName: formData.storeName,
+            storeCategory: formData.storeCategory,
+            skills: allSkills,
+            idNumber: formData.idNumber || "",
+            idCardUrl: formData.idCardPreview || "",
+            bankInfo: {
+              bankName: formData.bankName,
+              accountNumber: formData.accountNumber,
+              accountHolder: formData.accountHolder || formData.fullName,
+            },
+            verificationStatus: hasUploadedKyc ? "pending_review" : "verified",
+          });
+        }
+
+        const registeredUser = authResult?.user || {
+          id: `user-${Date.now()}`,
           fullName: formData.fullName || (isProvider ? "Penyedia Jasa Baru" : isMitra ? "Mitra Toko Sewa" : "Pengguna Baru"),
           email: formData.email,
-          phone: formData.phone,
-          role: formData.accountType,
-          address: formData.address,
-          province: formData.province,
-          city: formData.city,
-          district: formData.district,
-          storeName: formData.storeName,
-          storeCategory: formData.storeCategory,
-          skills: allSkills,
+          phoneNumber: formData.phone,
+          campusName: formData.address || `${formData.district}, ${formData.city}`,
+          faculty: isProvider ? "Penyedia Jasa Lepas" : isMitra ? "Mitra Rental Resmi" : "Pengguna Komunitas",
+          accountType: formData.accountType,
+          avatarUrl: isProvider 
+            ? "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80"
+            : isMitra
+            ? "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=400&q=80"
+            : "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=400&q=80",
+          verificationStatus: hasUploadedKyc ? "pending_review" : "verified",
           idNumber: formData.idNumber || "",
           idCardUrl: formData.idCardPreview || "",
           bankInfo: {
@@ -259,77 +311,34 @@ export default function RegisterPage() {
             accountNumber: formData.accountNumber,
             accountHolder: formData.accountHolder || formData.fullName,
           },
-          verificationStatus: hasUploadedKyc ? "pending_review" : "verified",
-        });
-      } else {
-        authResult = await authService.register({
-          fullName: formData.fullName || (isProvider ? "Penyedia Jasa Baru" : isMitra ? "Mitra Toko Sewa" : "Pengguna Baru"),
-          email: formData.email,
-          phone: formData.phone,
-          role: formData.accountType,
-          password: formData.password,
-          address: formData.address,
-          province: formData.province,
-          city: formData.city,
-          district: formData.district,
-          storeName: formData.storeName,
-          storeCategory: formData.storeCategory,
           skills: allSkills,
-          idNumber: formData.idNumber || "",
-          idCardUrl: formData.idCardPreview || "",
-          bankInfo: {
-            bankName: formData.bankName,
-            accountNumber: formData.accountNumber,
-            accountHolder: formData.accountHolder || formData.fullName,
-          },
-          verificationStatus: hasUploadedKyc ? "pending_review" : "verified",
-        });
-      }
+          ratingAvg: 5.0,
+          ratingCount: 0,
+          completedHelpsCount: 0,
+          reliabilityScore: 100,
+        };
+        
+        setCurrentUser(registeredUser);
 
-      const registeredUser = authResult?.user || {
-        id: `user-${Date.now()}`,
-        fullName: formData.fullName || (isProvider ? "Penyedia Jasa Baru" : isMitra ? "Mitra Toko Sewa" : "Pengguna Baru"),
-        email: formData.email,
-        phoneNumber: formData.phone,
-        campusName: formData.address || `${formData.district}, ${formData.city}`,
-        faculty: isProvider ? "Penyedia Jasa Lepas" : isMitra ? "Mitra Rental Resmi" : "Pengguna Komunitas",
-        accountType: formData.accountType,
-        avatarUrl: isProvider 
-          ? "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80"
-          : isMitra
-          ? "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=400&q=80"
-          : "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=400&q=80",
-        verificationStatus: hasUploadedKyc ? "pending_review" : "verified",
-        idNumber: formData.idNumber || "",
-        idCardUrl: formData.idCardPreview || "",
-        bankInfo: {
-          bankName: formData.bankName,
-          accountNumber: formData.accountNumber,
-          accountHolder: formData.accountHolder || formData.fullName,
-        },
-        skills: allSkills,
-        ratingAvg: 5.0,
-        ratingCount: 0,
-        completedHelpsCount: 0,
-        reliabilityScore: 100,
-      };
-      
-      setCurrentUser(registeredUser);
-
-      if (isProvider) {
-        addToast?.(
-          "Pendaftaran Berhasil", 
-          hasUploadedKyc 
-            ? "Profil jasa aktif. Dokumen KTP Anda sedang diproses verifikasi prioritas."
-            : "Profil jasa aktif. Anda dapat mulai menawarkan keahlian dan melengkapi KTP saat penarikan saldo."
-        );
-        router.push("/jasa/dashboard");
-      } else if (isMitra) {
-        addToast?.("Selamat Datang Mitra Toko", "Outlet sewa Anda berhasil didaftarkan. Anda dapat mulai menambahkan unit rental.");
-        router.push("/mitra/dashboard");
-      } else {
-        addToast?.("Selamat Datang di Bantuin", "Akun aktif tanpa KTP. Anda langsung dapat mencari bantuan dan memesan jasa.");
-        router.push("/bantuan");
+        if (isProvider) {
+          addToast?.(
+            "Pendaftaran Berhasil", 
+            hasUploadedKyc 
+              ? "Profil jasa aktif. Dokumen KTP Anda sedang diproses verifikasi prioritas."
+              : "Profil jasa aktif. Anda dapat mulai menawarkan keahlian dan melengkapi KTP saat penarikan saldo."
+          );
+          router.push("/jasa/dashboard");
+        } else if (isMitra) {
+          addToast?.("Selamat Datang Mitra Toko", "Outlet sewa Anda berhasil didaftarkan. Anda dapat mulai menambahkan unit rental.");
+          router.push("/mitra/dashboard");
+        } else {
+          addToast?.("Selamat Datang di Bantuin", "Akun aktif tanpa KTP. Anda langsung dapat mencari bantuan dan memesan jasa.");
+          router.push("/bantuan");
+        }
+      } catch (err) {
+        addToast?.("Pendaftaran Gagal", err.message || "Terjadi kesalahan saat mendaftarkan akun.", "error");
+      } finally {
+        setIsSubmitting(false);
       }
     }
   };
@@ -575,7 +584,7 @@ export default function RegisterPage() {
                 {/* Form Input Dasar */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Nama Lengkap Anda
+                    Nama Lengkap Anda <span className="text-rose-500 font-bold">*</span>
                   </label>
                   <div className="relative">
                     <User className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
@@ -593,7 +602,7 @@ export default function RegisterPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      Alamat Email Aktif
+                      Alamat Email Aktif <span className="text-rose-500 font-bold">*</span>
                     </label>
                     <div className="relative">
                       <Mail className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
@@ -610,7 +619,7 @@ export default function RegisterPage() {
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      Nomor WhatsApp / HP Aktif
+                      Nomor WhatsApp / HP Aktif <span className="text-rose-500 font-bold">*</span>
                     </label>
                     <div className="relative">
                       <Phone className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
@@ -654,7 +663,7 @@ export default function RegisterPage() {
                   <>
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                        Kata Sandi Akun
+                        Kata Sandi Akun <span className="text-rose-500 font-bold">*</span>
                       </label>
                       <div className="relative">
                         <Lock className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
@@ -704,7 +713,7 @@ export default function RegisterPage() {
                   <div className="pt-3 border-t border-slate-100 space-y-3 animate-in fade-in">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                        Nama Toko / Usaha Rental Anda
+                        Nama Toko / Usaha Rental Anda <span className="text-rose-500 font-bold">*</span>
                       </label>
                       <input
                         type="text"
@@ -718,7 +727,7 @@ export default function RegisterPage() {
 
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                        Kategori Utama Barang Rental
+                        Kategori Utama Barang Rental <span className="text-rose-500 font-bold">*</span>
                       </label>
                       <select
                         value={formData.storeCategory}
@@ -808,6 +817,7 @@ export default function RegisterPage() {
                   <CustomSelect
                     label="Provinsi Domisili (38 Provinsi Indonesia)"
                     icon={MapPin}
+                    required={true}
                     value={formData.province}
                     options={PROVINCE_LIST}
                     placeholder="Pilih Provinsi..."
@@ -829,6 +839,7 @@ export default function RegisterPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <CustomSelect
                     label="Kabupaten / Kota"
+                    required={true}
                     value={formData.city}
                     options={cityOptions}
                     placeholder="Pilih Kabupaten/Kota..."
@@ -844,6 +855,7 @@ export default function RegisterPage() {
 
                   <CustomSelect
                     label="Kecamatan"
+                    required={true}
                     value={formData.district}
                     options={districtOptions}
                     placeholder="Pilih Kecamatan..."
@@ -969,7 +981,7 @@ export default function RegisterPage() {
                       <div className="p-4 rounded-2xl bg-slate-50/90 border border-slate-200 space-y-3 animate-in fade-in">
                         <div>
                           <label className="block text-xs font-bold text-slate-700 mb-1">
-                            Nomor Induk Kependudukan (NIK 16 Digit)
+                            Nomor Induk Kependudukan (NIK 16 Digit) <span className="text-rose-500 font-bold">*</span>
                           </label>
                           <input
                             type="text"
@@ -984,7 +996,7 @@ export default function RegisterPage() {
 
                         <div>
                           <label className="block text-xs font-bold text-slate-700 mb-1">
-                            Foto KTP Asli
+                            Foto KTP Asli <span className="text-rose-500 font-bold">*</span>
                           </label>
                           {formData.idCardPreview ? (
                             <div className="flex items-center justify-between p-3 bg-blue-50 rounded-xl border border-blue-200">
@@ -1023,7 +1035,9 @@ export default function RegisterPage() {
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                           <div>
-                            <label className="block text-xs font-bold text-slate-700 mb-1">Bank Payout</label>
+                            <label className="block text-xs font-bold text-slate-700 mb-1">
+                              Bank Payout <span className="text-rose-500 font-bold">*</span>
+                            </label>
                             <select
                               value={formData.bankName}
                               onChange={(e) => setFormData({ ...formData, bankName: e.target.value })}
@@ -1038,7 +1052,9 @@ export default function RegisterPage() {
                             </select>
                           </div>
                           <div>
-                            <label className="block text-xs font-bold text-slate-700 mb-1">No. Rekening / E-Wallet</label>
+                            <label className="block text-xs font-bold text-slate-700 mb-1">
+                              No. Rekening / E-Wallet <span className="text-rose-500 font-bold">*</span>
+                            </label>
                             <input
                               type="text"
                               required
@@ -1183,8 +1199,9 @@ export default function RegisterPage() {
               {step > 1 && (
                 <button
                   type="button"
+                  disabled={isSubmitting}
                   onClick={() => setStep(step - 1)}
-                  className="w-full sm:w-auto justify-center px-5 py-3 rounded-xl sm:rounded-2xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs sm:text-sm font-bold transition flex items-center gap-1.5 cursor-pointer"
+                  className="w-full sm:w-auto justify-center px-5 py-3 rounded-xl sm:rounded-2xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs sm:text-sm font-bold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <ArrowLeft className="w-4 h-4" />
                   <span>Kembali</span>
@@ -1193,20 +1210,30 @@ export default function RegisterPage() {
 
               <button
                 type="submit"
-                className={`ml-auto px-8 py-3.5 rounded-2xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm shadow-sm transition active:scale-95 flex items-center gap-2 cursor-pointer ${
+                disabled={isSubmitting}
+                className={`ml-auto px-8 py-3.5 rounded-2xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm shadow-sm transition active:scale-95 flex items-center gap-2 cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed ${
                   step === 1 ? "w-full justify-center" : "w-full sm:w-auto justify-center"
                 }`}
               >
-                <span>
-                  {step === 4 
-                    ? (formData.accountType === "provider" 
-                        ? "Selesaikan & Buka Dashboard Jasa" 
-                        : formData.accountType === "mitra"
-                        ? "Selesaikan & Buka Dashboard Mitra"
-                        : "Selesaikan & Mulai Jelajah") 
-                    : "Lanjutkan"}
-                </span>
-                <ArrowRight className="w-4 h-4" />
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                    <span>Mendaftarkan Akun ke Database...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>
+                      {step === 4 
+                        ? (formData.accountType === "provider" 
+                            ? "Selesaikan & Buka Dashboard Jasa" 
+                            : formData.accountType === "mitra"
+                            ? "Selesaikan & Buka Dashboard Mitra"
+                            : "Selesaikan & Mulai Jelajah") 
+                        : "Lanjutkan"}
+                    </span>
+                    <ArrowRight className="w-4 h-4 shrink-0" />
+                  </>
+                )}
               </button>
             </div>
 

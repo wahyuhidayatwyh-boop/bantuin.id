@@ -696,8 +696,6 @@ export default function JasaCheckoutDetailPage() {
                             latitude={coords?.latitude || -7.4243}
                             longitude={coords?.longitude || 109.2304}
                             onChange={handleMapLocationChange}
-                            onUseGps={handleUseMyGPS}
-                            isDetectingGPS={isDetectingGPS}
                             height="200px"
                           />
 

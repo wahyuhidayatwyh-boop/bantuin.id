@@ -310,7 +310,7 @@ export default function MapComponent({
   };
 
   return (
-    <div className="w-full relative rounded-2xl overflow-hidden border border-[#DCEAF7] shadow-inner bg-slate-100 group">
+    <div className="w-full relative rounded-2xl overflow-hidden border border-[#DCEAF7] shadow-inner bg-slate-100 group isolate z-0">
       <style>{`
         @keyframes userGpsPulse {
           0% { transform: scale(0.6); opacity: 1; }
@@ -320,7 +320,7 @@ export default function MapComponent({
       `}</style>
 
       {/* Floating Direct Navigation Control Bar */}
-      <div className="absolute top-3 right-3 z-[400] flex items-center gap-1.5 pointer-events-auto">
+      <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 pointer-events-auto">
         {singleTargetPoint && singleTargetPoint.latitude && singleTargetPoint.longitude && (
           <a
             href={getNavigationUrl(

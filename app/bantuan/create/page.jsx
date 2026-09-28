@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import React, { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -8,7 +10,7 @@ import Footer from "@/components/layout/Footer";
 import LocationPickerMap from "@/components/map/LocationPickerMap";
 import { reverseGeocodeCoordinates } from "@/lib/services/gpsService";
 import { useApp } from "@/lib/context/AppContext";
-import { formatIDR, formatDeadlineWithHour } from "@/lib/utils";
+import { formatIDR, formatDeadlineWithHour, formatNumberWithDots, parseNumberFromDots } from "@/lib/utils";
 import { 
   ShieldCheck, 
   MapPin, 
@@ -28,6 +30,8 @@ import {
   ImagePlus,
   X,
   Trash2,
+  Maximize2,
+  FileImage,
   UserCheck,
   Scale,
   Ban
@@ -35,6 +39,7 @@ import {
 import { detectProhibitedContent } from "@/lib/security";
 import CategoryIcon from "@/components/common/CategoryIcon";
 import { BANTUAN_CATEGORIES } from "@/lib/categories";
+import { FormSkeleton } from "@/components/skeletons/FormSkeleton";
 
 function CreateRequestForm() {
   const router = useRouter();
@@ -56,31 +61,96 @@ function CreateRequestForm() {
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("Ambil Dokumen");
   const [mode, setMode] = useState("offline");
-  const [photos, setPhotos] = useState([]);
+  const [photoFiles, setPhotoFiles] = useState([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [photoError, setPhotoError] = useState(null);
+  const [previewModalPhoto, setPreviewModalPhoto] = useState(null);
   
+  // Format file size helper
+  const formatFileSize = (bytes) => {
+    if (!bytes || bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+  };
+
   // Legal & Item Safety Declaration (Pola Grab/Gojek Self-Declaration)
   const [itemType, setItemType] = useState("Dokumen / Berkas");
   const [legalDeclarationChecked, setLegalDeclarationChecked] = useState(false);
   const [prohibitedWarning, setProhibitedWarning] = useState(null);
 
+  const processImageFiles = (files) => {
+    setPhotoError(null);
+    const validImageFiles = [];
+    let hasInvalid = false;
+
+    files.forEach((file) => {
+      if (file.type && file.type.startsWith("image/")) {
+        validImageFiles.push({
+          file,
+          previewUrl: URL.createObjectURL(file),
+          name: file.name || "Foto Lampiran",
+          size: file.size || 0,
+          type: file.type || "image/jpeg",
+        });
+      } else {
+        hasInvalid = true;
+      }
+    });
+
+    if (hasInvalid) {
+      setPhotoError("Hanya file foto/gambar (JPG, PNG, WEBP, GIF, dll) yang diperbolehkan.");
+    }
+
+    if (validImageFiles.length > 0) {
+      setPhotoFiles((prev) => [...prev, ...validImageFiles]);
+    }
+  };
+
   const handlePhotoUpload = (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
-
-    files.forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setPhotos((prev) => [...prev, event.target.result]);
-        }
-      };
-      reader.readAsDataURL(file);
-    });
+    processImageFiles(files);
     e.target.value = "";
   };
 
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isDragging) setIsDragging(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const droppedFiles = Array.from(e.dataTransfer.files);
+      processImageFiles(droppedFiles);
+    }
+  };
+
   const handleRemovePhoto = (indexToRemove) => {
-    setPhotos((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+    if (previewModalPhoto && previewModalPhoto.index === indexToRemove) {
+      setPreviewModalPhoto(null);
+    }
+    setPhotoFiles((prev) => {
+      const removed = prev[indexToRemove];
+      if (removed?.previewUrl) {
+        try { URL.revokeObjectURL(removed.previewUrl); } catch (_) {}
+      }
+      return prev.filter((_, idx) => idx !== indexToRemove);
+    });
+    if (photoFiles.length <= 1) {
+      setPhotoError(null);
+    }
   };
   
   // Custom Location & Map Pin Picker States
@@ -154,7 +224,7 @@ function CreateRequestForm() {
 
   const [customDate, setCustomDate] = useState(getTodayStr());
   const [customTime, setCustomTime] = useState("17:00");
-  const [rewardAmount, setRewardAmount] = useState("35000");
+  const [rewardAmount, setRewardAmount] = useState("");
   const [isVoluntary, setIsVoluntary] = useState(false);
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -270,37 +340,83 @@ function CreateRequestForm() {
     return Object.keys(errs).length === 0;
   };
 
-  const handleFormSubmit = (e) => {
+  const handleFormSubmit = async (e) => {
     e.preventDefault();
     if (!validate()) return;
 
     setIsSubmitting(true);
     const deadlineDate = calculateDeadlineTimestamp();
-    const deadlineDisplay = getDeadlineDisplayText();
-    
-    setTimeout(() => {
-      const newReq = createRequest({
-        title,
-        description,
+
+    try {
+      let uploadedAttachments = [];
+
+      // Upload file hanya jika form valid dan disubmit secara resmi
+      if (photoFiles.length > 0) {
+        const formData = new FormData();
+        photoFiles.forEach((item) => {
+          if (item.file) formData.append("files", item.file);
+        });
+        formData.append("folder", "requests");
+
+        try {
+          const uploadRes = await fetch("/api/upload", {
+            method: "POST",
+            body: formData,
+          });
+          const uploadData = await uploadRes.json();
+          if (uploadData.success && Array.isArray(uploadData.urls)) {
+            uploadedAttachments = uploadData.urls;
+          }
+        } catch (uploadErr) {
+          console.warn("Upload to storage error:", uploadErr);
+        }
+      }
+
+      const payload = {
+        requesterId: currentUser?.id,
+        userEmail: currentUser?.email,
+        userName: currentUser?.fullName || currentUser?.name || "",
+        userAvatar: currentUser?.avatarUrl || currentUser?.avatar || "",
+        userCampus: currentUser?.campusName || currentUser?.campus || currentUser?.location || "",
+        title: title.trim(),
+        description: description.trim(),
         category,
         mode,
-        itemType: mode === "offline" ? itemType : "Online Task",
-        legalDeclared: true,
-        locationName: mode === "online" ? "Online / Remote" : locationName,
+        locationName: mode === "online" ? "Online / Remote" : (locationName.trim() || "Lokasi Pengguna"),
         latitude: coords?.latitude || userCoordinates?.latitude || null,
         longitude: coords?.longitude || userCoordinates?.longitude || null,
-        pickupPoint: mode === "offline" ? (pickupPoint.trim() || "Titik Temu Ditentukan Pembuat") : "Online Workroom",
         deadline: deadlineDate,
-        deadlineText: deadlineDisplay,
-        deadlineDisplay: deadlineDisplay,
         rewardAmount: isVoluntary ? 0 : Number(rewardAmount),
         isVoluntary,
-        photos,
+        attachments: uploadedAttachments,
+      };
+
+      const res = await fetch("/api/requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
 
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Gagal mempublikasikan permintaan bantuan.");
+      }
+
+      if (data.data?.id) {
+        router.push(`/bantuan/${data.data.id}`);
+      } else {
+        router.push("/bantuan");
+      }
+    } catch (err) {
+      console.error("Create request failed:", err);
+      setErrors((prev) => ({
+        ...prev,
+        submit: err.message || "Terjadi kesalahan saat mempublikasikan permintaan.",
+      }));
+    } finally {
       setIsSubmitting(false);
-      router.push(`/bantuan/${newReq.id}`);
-    }, 500);
+    }
   };
 
   return (
@@ -459,41 +575,72 @@ function CreateRequestForm() {
                         Lampirkan foto barang yang ingin dititip beli, bukti dokumen, foto lokasi, atau barang yang perlu dipindahkan agar helper langsung memahami kebutuhan Anda.
                       </p>
                     </div>
-                    {photos.length > 0 && (
+                    {photoFiles.length > 0 && (
                       <span className="text-xs font-bold text-[#1683FF] bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100 self-start sm:self-auto shrink-0">
-                        {photos.length} Foto Terlampir
+                        {photoFiles.length} Foto Terlampir
                       </span>
                     )}
                   </div>
 
                   {/* Preview Thumbnails */}
-                  {photos.length > 0 && (
+                  {photoFiles.length > 0 && (
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
-                      {photos.map((photoUrl, idx) => (
-                        <div key={idx} className="relative group rounded-xl overflow-hidden border border-slate-200 bg-white aspect-square shadow-2xs">
+                      {photoFiles.map((item, idx) => (
+                        <div
+                          key={idx}
+                          onClick={() => setPreviewModalPhoto({ ...item, index: idx })}
+                          className="relative group rounded-xl overflow-hidden border border-slate-200 bg-white aspect-square shadow-2xs cursor-pointer hover:ring-2 hover:ring-[#1683FF] transition duration-200"
+                        >
                           <img
-                            src={photoUrl}
-                            alt={`Lampiran barang ${idx + 1}`}
+                            src={item.previewUrl}
+                            alt={item.name || `Lampiran barang ${idx + 1}`}
                             className="w-full h-full object-cover group-hover:scale-105 transition duration-200"
                           />
+                          
+                          {/* Hover Overlay with View Icon */}
+                          <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition duration-200 flex flex-col items-center justify-center gap-1 text-white">
+                            <Eye className="w-5 h-5 drop-shadow-sm" />
+                            <span className="text-[10px] font-bold">Lihat Detail</span>
+                          </div>
+
                           <button
                             type="button"
-                            onClick={() => handleRemovePhoto(idx)}
-                            className="absolute top-1.5 right-1.5 p-1 rounded-full bg-slate-900/80 hover:bg-red-600 text-white shadow-xs transition cursor-pointer"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemovePhoto(idx);
+                            }}
+                            className="absolute top-1.5 right-1.5 p-1.5 rounded-full bg-slate-900/80 hover:bg-red-600 text-white shadow-xs transition cursor-pointer z-10"
                             title="Hapus foto"
                           >
                             <X className="w-3.5 h-3.5" />
                           </button>
-                          <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-slate-900/70 text-white text-[10px] font-bold">
-                            Foto {idx + 1}
-                          </span>
+                          
+                          <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center justify-between pointer-events-none z-10">
+                            <span className="px-1.5 py-0.5 rounded bg-slate-900/70 text-white text-[10px] font-bold">
+                              Foto {idx + 1}
+                            </span>
+                            {item.size > 0 && (
+                              <span className="px-1.5 py-0.5 rounded bg-slate-900/70 text-white text-[9px] font-medium">
+                                {formatFileSize(item.size)}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
                   )}
 
                   {/* Upload Drop Zone */}
-                  <label className="border-2 border-dashed border-slate-300 hover:border-[#1683FF] bg-white rounded-2xl p-4 sm:p-5 flex flex-col items-center justify-center text-center cursor-pointer transition group hover:bg-blue-50/20">
+                  <label
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    className={`border-2 border-dashed rounded-2xl p-5 sm:p-6 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-200 group ${
+                      isDragging
+                        ? "border-[#1683FF] bg-blue-50/80 scale-[1.01] ring-4 ring-blue-100"
+                        : "border-slate-300 hover:border-[#1683FF] bg-white hover:bg-blue-50/20"
+                    }`}
+                  >
                     <input
                       type="file"
                       multiple
@@ -501,16 +648,32 @@ function CreateRequestForm() {
                       onChange={handlePhotoUpload}
                       className="hidden"
                     />
-                    <div className="w-10 h-10 rounded-full bg-blue-50 text-[#1683FF] flex items-center justify-center mb-2 group-hover:scale-110 transition">
-                      <ImagePlus className="w-5 h-5" />
+                    <div
+                      className={`w-12 h-12 rounded-full flex items-center justify-center mb-2.5 transition-all duration-200 ${
+                        isDragging
+                          ? "bg-[#1683FF] text-white scale-110 shadow-md"
+                          : "bg-blue-50 text-[#1683FF] group-hover:scale-110"
+                      }`}
+                    >
+                      <ImagePlus className="w-6 h-6" />
                     </div>
-                    <span className="text-xs font-bold text-slate-800 group-hover:text-[#1683FF] transition">
-                      Klik untuk ambil foto kamera / unggah dari galeri
+                    <span className="text-xs sm:text-sm font-bold text-slate-800 group-hover:text-[#1683FF] transition">
+                      {isDragging
+                        ? "Lepaskan foto di sini untuk mengunggah"
+                        : "Tarik & lepas foto ke sini, atau klik untuk memilih file"}
                     </span>
-                    <span className="text-[11px] text-slate-400 mt-0.5">
-                      Mendukung format JPG, PNG, WEBP (Bisa lebih dari 1 foto)
+                    <span className="text-[11px] text-slate-400 mt-1">
+                      Hanya format gambar: JPG, PNG, WEBP, GIF (Bisa pilih lebih dari 1 foto)
                     </span>
                   </label>
+
+                  {/* Foto Error Alert if non-image dropped/selected */}
+                  {photoError && (
+                    <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>{photoError}</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Lokasi Bebas & Tentukan Titik Peta (jika Tatap Muka) */}
@@ -554,8 +717,6 @@ function CreateRequestForm() {
                         latitude={coords?.latitude || -7.9044}
                         longitude={coords?.longitude || 110.0543}
                         onChange={handleMapLocationChange}
-                        onUseGps={handleUseMyGPS}
-                        isDetectingGPS={isDetectingGPS}
                         height="260px"
                       />
                       
@@ -653,16 +814,25 @@ function CreateRequestForm() {
                       </label>
                     </div>
 
-                    <input
-                      type="number"
-                      disabled={isVoluntary}
-                      value={isVoluntary ? "" : rewardAmount}
-                      onChange={(e) => setRewardAmount(e.target.value)}
-                      placeholder={isVoluntary ? "Gratis / Sukarela" : "35000"}
-                      className={`w-full text-xs sm:text-sm p-3.5 rounded-xl border transition ${
-                        isVoluntary ? "bg-slate-100 text-slate-400" : "border-slate-200 focus:border-[#1683FF]"
-                      } focus:outline-none font-bold text-slate-900`}
-                    />
+                    <div className="relative">
+                      <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400 pointer-events-none select-none">
+                        Rp
+                      </div>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        disabled={isVoluntary}
+                        value={isVoluntary ? "" : formatNumberWithDots(rewardAmount)}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/\D/g, "");
+                          setRewardAmount(raw);
+                        }}
+                        placeholder={isVoluntary ? "Gratis / Sukarela" : "Misal: 35.000"}
+                        className={`w-full text-xs sm:text-sm pl-10 pr-3.5 py-3.5 rounded-xl border transition ${
+                          isVoluntary ? "bg-slate-100 text-slate-400" : "border-slate-200 bg-white focus:border-[#1683FF]"
+                        } focus:outline-none font-bold text-slate-900`}
+                      />
+                    </div>
                     {errors.rewardAmount && <p className="text-[11px] text-red-500 mt-1">{errors.rewardAmount}</p>}
                   </div>
 
@@ -896,6 +1066,14 @@ function CreateRequestForm() {
                   )}
                 </div>
 
+                {/* Error Banner */}
+                {errors.submit && (
+                  <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-xs font-semibold text-red-600 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
+                    <span>{errors.submit}</span>
+                  </div>
+                )}
+
                 {/* Submit Action */}
                 <div className="flex items-center gap-4 pt-4 border-t border-slate-100">
                   <Link
@@ -908,10 +1086,19 @@ function CreateRequestForm() {
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="flex-1 py-3.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm shadow-xs transition active:scale-95 flex items-center justify-center gap-2"
+                    className="flex-1 py-3.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] disabled:opacity-70 disabled:cursor-not-allowed text-white font-bold text-xs sm:text-sm shadow-xs transition active:scale-95 flex items-center justify-center gap-2"
                   >
-                    <span>{isSubmitting ? "Mempublikasikan Permintaan..." : "Publikasikan Permintaan Bantuan"}</span>
-                    <Send className="w-4 h-4" />
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Mempublikasikan Permintaan...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Publikasikan Permintaan Bantuan</span>
+                        <Send className="w-4 h-4" />
+                      </>
+                    )}
                   </button>
                 </div>
 
@@ -992,6 +1179,94 @@ function CreateRequestForm() {
           </div>
         </div>
 
+        {/* Image Detail & Preview Lightbox Modal */}
+        {previewModalPhoto && (
+          <div 
+            className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200"
+            onClick={() => setPreviewModalPhoto(null)}
+          >
+            <div 
+              className="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/80">
+                <div className="flex items-center gap-2.5 min-w-0 pr-3">
+                  <div className="w-8 h-8 rounded-lg bg-blue-100 text-[#1683FF] flex items-center justify-center shrink-0">
+                    <FileImage className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-bold text-slate-900 truncate">
+                      Detail Foto #{previewModalPhoto.index + 1}: {previewModalPhoto.name}
+                    </h3>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPreviewModalPhoto(null)}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition cursor-pointer shrink-0"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Modal Body: Image View & File Meta */}
+              <div className="p-6 overflow-y-auto space-y-4">
+                {/* Full-view Image Canvas */}
+                <div className="bg-slate-950 rounded-2xl flex items-center justify-center p-3 max-h-[50vh] min-h-[220px] overflow-hidden">
+                  <img
+                    src={previewModalPhoto.previewUrl}
+                    alt={previewModalPhoto.name}
+                    className="max-h-[46vh] w-auto max-w-full object-contain rounded-lg shadow-lg"
+                  />
+                </div>
+
+                {/* File Metadata Info */}
+                <div className="grid grid-cols-3 gap-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-200 text-xs">
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase block">Nama File</span>
+                    <span className="font-semibold text-slate-800 truncate block mt-0.5" title={previewModalPhoto.name}>
+                      {previewModalPhoto.name}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase block">Ukuran File</span>
+                    <span className="font-semibold text-slate-800 block mt-0.5">
+                      {formatFileSize(previewModalPhoto.size)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 font-bold uppercase block">Tipe Format</span>
+                    <span className="font-semibold text-slate-800 block mt-0.5 uppercase">
+                      {previewModalPhoto.type?.replace("image/", "") || "IMG"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Footer Actions */}
+              <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => handleRemovePhoto(previewModalPhoto.index)}
+                  className="px-4 py-2.5 rounded-xl border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 font-bold text-xs inline-flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Hapus Foto Ini</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPreviewModalPhoto(null)}
+                  className="px-5 py-2.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs transition cursor-pointer shadow-xs"
+                >
+                  Tutup Pralihat
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </main>
 
       <Footer />
@@ -1002,8 +1277,12 @@ function CreateRequestForm() {
 export default function CreateRequestPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-[#EEF2F6]">
-        <div className="text-slate-500 font-medium text-sm">Memuat formulir bantuan...</div>
+      <div className="min-h-screen flex flex-col bg-[#EEF2F6]">
+        <Navbar />
+        <main className="flex-1">
+          <FormSkeleton />
+        </main>
+        <Footer />
       </div>
     }>
       <CreateRequestForm />

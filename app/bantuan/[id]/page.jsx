@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Navbar from "@/components/layout/Navbar";
@@ -39,12 +39,12 @@ import {
   Eye,
   X
 } from "lucide-react";
+import DetailSkeleton from "@/components/skeletons/DetailSkeleton";
 
 export default function RequestDetailPage() {
   const { id } = useParams();
   const router = useRouter();
   const { 
-    requests, 
     currentUser, 
     userCoordinates,
     getDistanceToUser,
@@ -52,16 +52,53 @@ export default function RequestDetailPage() {
     startTaskInquiry
   } = useApp();
 
-  const request = requests.find((r) => r.id === id);
+  const [request, setRequest] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
   const [selectedPhotoModal, setSelectedPhotoModal] = useState(null);
 
-  if (!request) {
+  const fetchDetail = async () => {
+    if (!id) return;
+    setIsLoading(true);
+    setErrorMsg("");
+    try {
+      const res = await fetch(`/api/requests/${id}`);
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || "Permintaan bantuan tidak ditemukan.");
+      }
+      setRequest(json.data);
+    } catch (err) {
+      console.error("Fetch detail error:", err);
+      setErrorMsg(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchDetail();
+  }, [id]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex flex-col bg-[#EEF2F6]">
+        <Navbar />
+        <main className="flex-1">
+          <DetailSkeleton />
+        </main>
+        <Footer />
+      </div>
+    );
+  }
+
+  if (!request || errorMsg) {
     return (
       <div className="min-h-screen flex flex-col bg-[#F4F7FB]">
         <Navbar />
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
           <h2 className="text-xl font-bold text-slate-900">Permintaan Bantuan Tidak Ditemukan</h2>
-          <p className="text-sm text-slate-500 mt-1 mb-4">Mungkin permintaan sudah selesai atau telah ditutup.</p>
+          <p className="text-sm text-slate-500 mt-1 mb-4">{errorMsg || "Mungkin permintaan sudah selesai atau telah ditutup."}</p>
           <Link href="/bantuan" className="px-5 py-2.5 bg-[#1683FF] text-white rounded-xl text-xs font-bold shadow-xs">
             Kembali ke Daftar Bantuan
           </Link>
@@ -71,17 +108,17 @@ export default function RequestDetailPage() {
     );
   }
 
-  const isOwner = currentUser?.id === request.requester?.id;
+  const isOwner = currentUser?.id === request.requesterId || currentUser?.id === request.requester?.id;
   const offersList = request.offers || [];
   const hasUserOffered = offersList.some((o) => o.helperId === currentUser?.id);
-  const isClosed = request.status === "helper_selected" || request.status === "in_progress";
+  const isClosed = request.status === "helper_selected" || request.status === "in_progress" || request.status === "completed";
 
   const distanceInfo = getDistanceToUser
     ? getDistanceToUser(request.latitude, request.longitude, request.distanceMeters)
     : null;
   const distanceText = request.mode === "online"
     ? "Online"
-    : (distanceInfo?.text || (request.distanceMeters ? `${request.distanceMeters} m` : "850 m"));
+    : (distanceInfo?.text || (request.distanceMeters ? `${request.distanceMeters} m` : "Dekat"));
 
   // Open Direct Full-Page Workspace Room (No Floating Popups)
   const handleOpenChat = (offer) => {
@@ -303,17 +340,28 @@ export default function RequestDetailPage() {
 
                   <div className="flex items-center gap-3">
                     <img
-                      src={request.requester?.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80"}
-                      alt={request.requester?.name || "Peminta"}
+                      src={request.requester?.avatar || request.userAvatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80"}
+                      alt={request.requester?.name || request.userName || "Peminta"}
                       className="w-11 h-11 rounded-full object-cover border border-slate-200 shrink-0"
                     />
                     <div>
-                      <h4 className="font-bold text-sm text-slate-900">{request.requester?.name || "Rian Prasetya"}</h4>
-                      <p className="text-xs text-slate-500">{request.requester?.role || "Wirausaha"}</p>
-                      <div className="flex items-center gap-1 text-xs text-slate-600 font-medium mt-0.5">
-                        <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                        <span>{request.requester?.rating || 4.95}</span>
-                        <span className="text-slate-400">({request.requester?.campus || "Banjarmasin"})</span>
+                      <h4 className="font-bold text-sm text-slate-900">
+                        {request.requester?.name || request.userName || "Pengguna Bantuin"}
+                      </h4>
+                      <p className="text-xs text-slate-500 font-medium">
+                        {request.requester?.role || "Pengguna Terverifikasi"}
+                      </p>
+                      <div className="flex items-center gap-1.5 text-xs text-slate-600 font-medium mt-0.5">
+                        <span className="flex items-center gap-1 text-slate-800 font-bold">
+                          <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                          {Number(request.requester?.rating || request.userRating || 5.0).toFixed(1)}
+                        </span>
+                        {request.requester?.campus && (
+                          <>
+                            <span className="text-slate-300">•</span>
+                            <span className="text-slate-500 truncate max-w-[170px]">{request.requester.campus}</span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>

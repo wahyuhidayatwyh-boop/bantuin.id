@@ -35,11 +35,33 @@ function PembayaranContent() {
   const roomId = searchParams.get("roomId");
 
   const { 
-    requests, 
     selectHelper, 
     walletBalance, 
     addToast 
   } = useApp();
+
+  const [request, setRequest] = useState(null);
+  const [isLoadingRequest, setIsLoadingRequest] = useState(true);
+
+  const fetchRequestDetail = async () => {
+    if (!id) return;
+    setIsLoadingRequest(true);
+    try {
+      const res = await fetch(`/api/requests/${id}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setRequest(json.data);
+      }
+    } catch (e) {
+      console.error("Fetch request for payment failed:", e);
+    } finally {
+      setIsLoadingRequest(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRequestDetail();
+  }, [id]);
 
   const [selectedMethod, setSelectedMethod] = useState("qris");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -63,8 +85,6 @@ function PembayaranContent() {
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
-  const request = requests.find((r) => r.id === id) || requests[0];
-
   // Find targeted offer or fallback
   const targetOffer = 
     (request?.offers || []).find((o) => o.id === offerId || o.helperId === offerId) ||
@@ -77,7 +97,7 @@ function PembayaranContent() {
       proposedPrice: 150000
     };
 
-  const helperProposedPrice = Number(targetOffer.proposedPrice) || Number(request.rewardAmount) || 35000;
+  const helperProposedPrice = Number(targetOffer.proposedPrice) || Number(request?.rewardAmount) || 35000;
   const platformFee = Math.round(helperProposedPrice * 0.08); // 8% potongan Bantuin
   const helperNetPayout = helperProposedPrice - platformFee;
   
@@ -102,23 +122,38 @@ function PembayaranContent() {
     navigator.clipboard?.writeText(text);
     if (type === "va") {
       setIsCopiedVA(true);
-      addToast("Nomor VA Disalin", "Nomor Virtual Account telah disalin ke clipboard.");
+      addToast?.("Nomor VA Disalin", "Nomor Virtual Account telah disalin ke clipboard.");
       setTimeout(() => setIsCopiedVA(false), 2000);
     } else {
       setIsCopiedNominal(true);
-      addToast("Nominal Disalin", `Nominal ${formatIDR(text)} telah disalin.`);
+      addToast?.("Nominal Disalin", `Nominal ${formatIDR(text)} telah disalin.`);
       setTimeout(() => setIsCopiedNominal(false), 2000);
     }
   };
 
-  const handleConfirmPayment = () => {
+  const handleConfirmPayment = async () => {
     setIsProcessing(true);
+
+    try {
+      if (request?.id) {
+        await fetch(`/api/requests/${request.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            status: "helper_selected",
+            selectedHelperId: targetOffer?.helperId || null,
+          }),
+        });
+      }
+    } catch (err) {
+      console.warn("Update request status on payment error:", err);
+    }
 
     setTimeout(() => {
       setIsProcessing(false);
       setIsSuccess(true);
 
-      const newRoomId = selectHelper(request.id, targetOffer, roomId);
+      const newRoomId = selectHelper ? selectHelper(request?.id, targetOffer, roomId) : null;
       const targetRoomId = newRoomId || roomId || "order-room-101";
       const next = encodeURIComponent(`/chat?room=${targetRoomId}`);
       router.push(`/pembayaran/berhasil?type=bantuan&title=${encodeURIComponent(request?.title || "Permintaan Bantuan")}&amount=${finalAmount}&next=${next}`);

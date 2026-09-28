@@ -1,12 +1,12 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { useApp } from "@/lib/context/AppContext";
-import { formatIDR } from "@/lib/utils";
+import { formatIDR, formatNumberWithDots, parseNumberFromDots } from "@/lib/utils";
 import { 
   ArrowLeft, 
   Send, 
@@ -19,18 +19,46 @@ import {
   Clock, 
   MapPin, 
   Plus, 
-  X,
-  Star,
-  CheckCircle2,
-  Loader2
+  X, 
+  Star, 
+  CheckCircle2, 
+  Loader2 
 } from "lucide-react";
 
 export default function AjukanBantuanPage() {
   const { id } = useParams();
   const router = useRouter();
-  const { requests, submitOffer, currentUser, setCurrentUser, addToast } = useApp();
+  const { currentUser, setCurrentUser, addToast } = useApp();
 
-  const request = requests.find((r) => r.id === id);
+  const [request, setRequest] = useState(null);
+  const [isLoadingRequest, setIsLoadingRequest] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const fetchRequestDetail = async () => {
+    if (!id) return;
+    setIsLoadingRequest(true);
+    setErrorMsg("");
+    try {
+      const res = await fetch(`/api/requests/${id}`);
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || "Permintaan bantuan tidak ditemukan.");
+      }
+      setRequest(json.data);
+      if (json.data?.rewardAmount) {
+        setProposedPrice(String(json.data.rewardAmount));
+      }
+    } catch (err) {
+      console.error("Fetch request error in ajukan page:", err);
+      setErrorMsg(err.message);
+    } finally {
+      setIsLoadingRequest(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRequestDetail();
+  }, [id]);
 
   // Status Verifikasi Jasa: Pengguna umum harus verifikasi jasa terlebih dahulu agar memenuhi syarat
   const isRegularUser = !currentUser || currentUser?.accountType === "user";
@@ -48,7 +76,7 @@ export default function AjukanBantuanPage() {
   const [isVerifying, setIsVerifying] = useState(false);
 
   const [pitchMessage, setPitchMessage] = useState("");
-  const [proposedPrice, setProposedPrice] = useState(request ? String(request.rewardAmount) : "25000");
+  const [proposedPrice, setProposedPrice] = useState("25000");
   const [durationMode, setDurationMode] = useState("preset"); // 'preset' | 'custom'
   const [estimatedDuration, setEstimatedDuration] = useState("1-2 Jam");
   const [customDurationValue, setCustomDurationValue] = useState("30");
@@ -64,13 +92,26 @@ export default function AjukanBantuanPage() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  if (!request) {
+  if (isLoadingRequest) {
+    return (
+      <div className="min-h-screen flex flex-col bg-[#EEF2F6]">
+        <Navbar />
+        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+          <Loader2 className="w-8 h-8 text-[#1683FF] animate-spin mb-3" />
+          <p className="text-sm font-semibold text-slate-600">Memuat rincian bantuan...</p>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
+
+  if (!request || errorMsg) {
     return (
       <div className="min-h-screen flex flex-col bg-[#F4F7FB]">
         <Navbar />
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
           <h2 className="text-xl font-bold text-slate-900">Permintaan Bantuan Tidak Ditemukan</h2>
-          <p className="text-sm text-slate-500 mt-1 mb-4">Mungkin permintaan sudah ditutup atau diselesaikan.</p>
+          <p className="text-sm text-slate-500 mt-1 mb-4">{errorMsg || "Mungkin permintaan sudah ditutup atau diselesaikan."}</p>
           <Link href="/bantuan" className="px-5 py-2.5 bg-[#1683FF] text-white rounded-xl text-xs font-bold shadow-xs">
             Kembali ke Daftar Bantuan
           </Link>
@@ -155,7 +196,7 @@ export default function AjukanBantuanPage() {
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!pitchMessage.trim()) return;
 
@@ -165,20 +206,32 @@ export default function AjukanBantuanPage() {
         : `${customDurationValue || "30"} ${customDurationUnit}`;
 
     setIsSubmitting(true);
-    setTimeout(() => {
-      submitOffer(request.id, {
-        pitchMessage: pitchMessage.trim(),
-        proposedPrice: Number(proposedPrice) || request.rewardAmount,
-        estimatedDuration: finalDuration,
-        cvName: cvFileName || null,
-        portfolioName: portfolioFileName || (portfolioLink ? "Tautan Portofolio Online" : null),
-        portfolioUrl: portfolioLink || null,
+    try {
+      const res = await fetch(`/api/requests/${request.id}/offers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          helperId: currentUser?.id,
+          helperEmail: currentUser?.email,
+          pitchMessage: pitchMessage.trim(),
+          proposedPrice: Number(proposedPrice) || request.rewardAmount,
+          estimatedArrivalMinutes: 15,
+        }),
       });
 
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Gagal mengirimkan tawaran bantuan.");
+      }
+
+      addToast?.("Proposal Terkirim", "Tawaran bantuan Anda berhasil dikirim ke peminta.");
+      router.push(`/bantuan/${request.id}`);
+    } catch (err) {
+      console.error("Submit offer failed:", err);
+      addToast?.("Gagal Mengirim", err.message || "Terjadi kesalahan sistem.", "error");
+    } finally {
       setIsSubmitting(false);
-      // Redirect directly to the applicants list page
-      router.push(`/bantuan/${request.id}/pelamar`);
-    }, 600);
+    }
   };
 
   return (
@@ -368,14 +421,23 @@ export default function AjukanBantuanPage() {
                       <label className="block text-xs sm:text-sm font-bold text-slate-900 mb-1.5">
                         Tawaran Imbalan (Rp)
                       </label>
-                      <input
-                        type="number"
-                        required
-                        placeholder={String(request.rewardAmount)}
-                        value={proposedPrice}
-                        onChange={(e) => setProposedPrice(e.target.value)}
-                        className="w-full text-xs sm:text-sm px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:border-[#1683FF] font-bold text-slate-900"
-                      />
+                      <div className="relative">
+                        <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400 pointer-events-none select-none">
+                          Rp
+                        </div>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          required
+                          placeholder={formatNumberWithDots(request.rewardAmount)}
+                          value={formatNumberWithDots(proposedPrice)}
+                          onChange={(e) => {
+                            const raw = e.target.value.replace(/\D/g, "");
+                            setProposedPrice(raw);
+                          }}
+                          className="w-full text-xs sm:text-sm pl-10 pr-4 py-3 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-[#1683FF] font-bold text-slate-900"
+                        />
+                      </div>
                       <span className="text-[11px] text-slate-400 mt-1 block">
                         Default: {formatIDR(request.rewardAmount)}
                       </span>
