@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/lib/context/AppContext";
 import { CANONICAL_ROLES, ROLE_LABELS } from "@/lib/services/authService";
-import { ShieldAlert, ArrowLeft, RefreshCw, UserCheck, Shield, Store, Briefcase } from "lucide-react";
+import { ShieldAlert, ArrowLeft, RefreshCw, UserCheck, Shield, Store, Briefcase, User } from "lucide-react";
 
 /**
  * RoleGuard Component
@@ -19,7 +19,7 @@ import { ShieldAlert, ArrowLeft, RefreshCw, UserCheck, Shield, Store, Briefcase 
  *
  * Mencegah direct URL navigation yang tidak sah.
  */
-export default function RoleGuard({ allowedRoles = [], children }) {
+export default function RoleGuard({ allowedRoles = [], fallback = null, children }) {
   const { currentUser, setCurrentUser } = useApp();
   const router = useRouter();
   const [isClient, setIsClient] = useState(false);
@@ -29,6 +29,9 @@ export default function RoleGuard({ allowedRoles = [], children }) {
   }, []);
 
   if (!isClient) {
+    if (fallback) {
+      return fallback;
+    }
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
         <div className="flex flex-col items-center gap-3">
@@ -39,7 +42,7 @@ export default function RoleGuard({ allowedRoles = [], children }) {
     );
   }
 
-  const currentRole = currentUser?.role || CANONICAL_ROLES.USER;
+  const currentRole = currentUser?.accountRole || currentUser?.accountType || currentUser?.role || CANONICAL_ROLES.USER;
 
   // Normalisasi alias role: partner <-> mitra, provider <-> penyedia, admin <-> super_admin
   const roleAliases = {
@@ -61,16 +64,6 @@ export default function RoleGuard({ allowedRoles = [], children }) {
     currentUser?.isAdmin === true;
 
   const isAllowed = isAdministrator || expandedAllowedRoles.includes(currentRole);
-
-  const handleSwitchRole = (newRole) => {
-    if (setCurrentUser) {
-      setCurrentUser((prev) => ({
-        ...prev,
-        role: newRole,
-        roleLabel: ROLE_LABELS[newRole] || newRole,
-      }));
-    }
-  };
 
   if (!isAllowed) {
     const requiredLabels = allowedRoles.map((r) => ROLE_LABELS[r] || r).join(" atau ");
@@ -109,69 +102,44 @@ export default function RoleGuard({ allowedRoles = [], children }) {
             </div>
           </div>
 
-          {/* Quick Canonical Role Switcher for Testing / Pair Programming */}
-          <div className="space-y-2 pt-1">
-            <span className="text-[11px] font-bold text-slate-400 block uppercase tracking-wider">
-              Simulasi Ganti Peran (Role Switcher)
-            </span>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <button
-                type="button"
-                onClick={() => handleSwitchRole(CANONICAL_ROLES.PROVIDER)}
-                className={`p-2.5 rounded-xl border font-bold flex items-center justify-center gap-1.5 transition ${
-                  currentRole === CANONICAL_ROLES.PROVIDER
-                    ? "bg-[#1683FF] text-white border-[#1683FF]"
-                    : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
-                }`}
-              >
-                <Briefcase className="w-3.5 h-3.5" /> Penyedia Jasa
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSwitchRole(CANONICAL_ROLES.PARTNER)}
-                className={`p-2.5 rounded-xl border font-bold flex items-center justify-center gap-1.5 transition ${
-                  currentRole === CANONICAL_ROLES.PARTNER
-                    ? "bg-[#1683FF] text-white border-[#1683FF]"
-                    : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
-                }`}
-              >
-                <Store className="w-3.5 h-3.5" /> Mitra Sewa
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSwitchRole(CANONICAL_ROLES.USER)}
-                className={`p-2.5 rounded-xl border font-bold flex items-center justify-center gap-1.5 transition ${
-                  currentRole === CANONICAL_ROLES.USER
-                    ? "bg-[#1683FF] text-white border-[#1683FF]"
-                    : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
-                }`}
-              >
-                <UserCheck className="w-3.5 h-3.5" /> Pelanggan (User)
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSwitchRole(CANONICAL_ROLES.ADMIN)}
-                className={`p-2.5 rounded-xl border font-bold flex items-center justify-center gap-1.5 transition ${
-                  currentRole === CANONICAL_ROLES.ADMIN
-                    ? "bg-[#1683FF] text-white border-[#1683FF]"
-                    : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
-                }`}
-              >
-                <Shield className="w-3.5 h-3.5" /> Admin Pusat
-              </button>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-center gap-3 pt-2">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-2">
             <Link
               href="/"
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition"
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition active:scale-95 cursor-pointer"
             >
-              <ArrowLeft className="w-3.5 h-3.5" /> Kembali ke Beranda
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Kembali ke Beranda</span>
             </Link>
+
+            {(currentRole === "provider" || currentRole === "penyedia") && (
+              <Link
+                href="/jasa/dashboard"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs shadow-xs transition active:scale-95 cursor-pointer"
+              >
+                <Briefcase className="w-3.5 h-3.5" />
+                <span>Dashboard Jasa</span>
+              </Link>
+            )}
+
+            {(currentRole === "partner" || currentRole === "mitra") && (
+              <Link
+                href="/mitra/dashboard"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs shadow-xs transition active:scale-95 cursor-pointer"
+              >
+                <Store className="w-3.5 h-3.5" />
+                <span>Dashboard Mitra</span>
+              </Link>
+            )}
+
+            {currentRole === "user" && (
+              <Link
+                href="/profile"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs shadow-xs transition active:scale-95 cursor-pointer"
+              >
+                <User className="w-3.5 h-3.5" />
+                <span>Pengaturan Profil</span>
+              </Link>
+            )}
           </div>
         </div>
       </div>

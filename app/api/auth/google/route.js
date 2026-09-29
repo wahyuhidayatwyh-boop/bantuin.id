@@ -26,26 +26,44 @@ export async function POST(req) {
         data: {
           email: normalizedEmail,
           fullName: fullName || "Pengguna Google",
-          avatarUrl: avatarUrl || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80",
+          avatarUrl: avatarUrl || null,
           accountRole: role,
           authProvider: "google",
-          verificationStatus: "verified",
+          verificationStatus: "unverified",
         },
       });
+    } else {
+      const isUnsplashDefault = !profile.avatarUrl || profile.avatarUrl.includes("images.unsplash.com");
+      if (avatarUrl && isUnsplashDefault) {
+        profile = await prisma.profile.update({
+          where: { id: profile.id },
+          data: {
+            avatarUrl: avatarUrl,
+            fullName: profile.fullName || fullName,
+          },
+        });
+      } else if (isUnsplashDefault && !avatarUrl) {
+        profile = await prisma.profile.update({
+          where: { id: profile.id },
+          data: {
+            avatarUrl: null,
+          },
+        });
+      }
     }
 
-    // 2. Sinkronkan ke tabel User dengan kolom verified: true
+    // 2. Sinkronkan ke tabel User
     try {
       await prisma.user.upsert({
         where: { email: normalizedEmail },
         update: {
           name: fullName || profile.fullName || "Pengguna Google",
-          verified: true,
+          verified: profile.verificationStatus === "verified",
         },
         create: {
           email: normalizedEmail,
           name: fullName || "Pengguna Google",
-          verified: true,
+          verified: false,
         },
       });
     } catch (userSyncErr) {
@@ -65,7 +83,7 @@ export async function POST(req) {
       campusName: profile.campusName || "Bekasi, Jawa Barat",
       address: profile.partnerAddress || profile.campusName || "Bekasi, Jawa Barat",
       avatarUrl: profile.avatarUrl,
-      verificationStatus: profile.verificationStatus || "verified",
+      verificationStatus: profile.verificationStatus || "unverified",
       authProvider: "google",
       ratingAvg: Number(profile.ratingAvg) || 5.0,
       completedHelpsCount: profile.completedHelpsCount || 0,

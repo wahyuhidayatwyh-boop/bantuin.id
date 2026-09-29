@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, Suspense } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -8,8 +8,9 @@ import logoImg from "@/components/image/logo.png";
 import { Store, ShieldCheck, ArrowRight, Lock, Mail, ArrowLeft, Loader2 } from "lucide-react";
 import GoogleIcon from "@/components/common/GoogleIcon";
 import { authService, CANONICAL_ROLES } from "@/lib/services/authService";
+import AuthSkeleton from "@/components/skeletons/AuthSkeleton";
 
-export default function MitraLoginPage() {
+function MitraLoginPageContent() {
   const router = useRouter();
   const [email, setEmail] = useState("mitra@bantuin.id");
   const [password, setPassword] = useState("password123");
@@ -173,12 +174,16 @@ export default function MitraLoginPage() {
             type="button"
             disabled={isLoading || isGoogleLoading}
             onClick={handleGoogleLogin}
-            className="w-full py-2.5 px-4 rounded-xl border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs sm:text-sm font-semibold shadow-2xs transition flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-60"
+            className={`w-full py-2.5 px-4 rounded-xl border text-xs sm:text-sm font-semibold shadow-2xs transition flex items-center justify-center gap-2.5 cursor-pointer active:scale-95 disabled:cursor-not-allowed ${
+              isGoogleLoading
+                ? "bg-blue-50 border-blue-300 text-[#1683FF]"
+                : "border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-700"
+            }`}
           >
             {isGoogleLoading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin text-[#1683FF]" />
-                <span>Menghubungkan ke Google...</span>
+                <span>Membuka Google OAuth...</span>
               </>
             ) : (
               <>
@@ -215,5 +220,13 @@ export default function MitraLoginPage() {
       </div>
 
     </div>
+  );
+}
+
+export default function MitraLoginPage() {
+  return (
+    <Suspense fallback={<AuthSkeleton />}>
+      <MitraLoginPageContent />
+    </Suspense>
   );
 }

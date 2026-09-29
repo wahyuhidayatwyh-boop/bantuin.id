@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, Suspense } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -12,6 +12,7 @@ import CustomSelect from "@/components/ui/CustomSelect";
 import GoogleIcon from "@/components/common/GoogleIcon";
 import { authService, CANONICAL_ROLES } from "@/lib/services/authService";
 import { validateFile, getAcceptAttribute } from "@/lib/utils/fileValidation";
+import AuthSkeleton from "@/components/skeletons/AuthSkeleton";
 import {
   ShieldCheck,
   ArrowRight,
@@ -41,7 +42,7 @@ import {
   Clock
 } from "lucide-react";
 
-export default function RegisterPage() {
+function RegisterPageContent() {
   const router = useRouter();
   const { setCurrentUser, addToast } = useApp();
 
@@ -116,29 +117,12 @@ export default function RegisterPage() {
   const handleGoogleRegister = async () => {
     if (isGoogleRegistering) return;
     setIsGoogleRegistering(true);
+    addToast?.("Menghubungkan Google", "Mengarahkan ke halaman autentikasi Google aman...", "info");
 
     try {
-      const { user } = await authService.loginWithGoogle();
-      setFormData((prev) => ({
-        ...prev,
-        fullName: user.fullName || prev.fullName || "Pengguna Google",
-        email: user.email || prev.email || "user.google@gmail.com",
-        authProvider: "google",
-        password: "",
-      }));
-
-      addToast?.(
-        "Google Terhubung",
-        "Akun Google berhasil diverifikasi. Lanjutkan melengkapi kontak, domisili, dan data akun Anda."
-      );
-
-      // Otomatis maju ke step berikutnya jika masih di step 1
-      if (step === 1) {
-        setStep(2);
-      }
+      await authService.loginWithGoogle(formData.role || "user");
     } catch (err) {
       addToast?.("Google Register Gagal", err.message || "Gagal menghubungkan Google.", "error");
-    } finally {
       setIsGoogleRegistering(false);
     }
   };
@@ -165,23 +149,23 @@ export default function RegisterPage() {
     }
   };
 
+  const [isDraggingKtp, setIsDraggingKtp] = useState(false);
+
   // Local File Upload Handler for Foto KTP
-  const handleKTPUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const validation = validateFile(file, "bantuin-kyc");
-      if (!validation.valid) {
-        addToast?.("Format File Ditolak", validation.error, "error");
-        e.target.value = "";
-        return;
-      }
-      const previewUrl = URL.createObjectURL(file);
-      setFormData({
-        ...formData,
-        idCardPreview: previewUrl,
-        idCardFileName: file.name
-      });
+  const handleKTPUpload = (file) => {
+    if (!file) return;
+    const validation = validateFile(file, "bantuin-kyc");
+    if (!validation.valid) {
+      addToast?.("Format File Ditolak", validation.error, "error");
+      return;
     }
+    const previewUrl = URL.createObjectURL(file);
+    setFormData((prev) => ({
+      ...prev,
+      idCardPreview: previewUrl,
+      idCardFileName: file.name,
+      idCardType: file.type,
+    }));
   };
 
   const handleNext = async (e) => {
@@ -216,8 +200,8 @@ export default function RegisterPage() {
 
     // Validasi Step 3 untuk Provider HANYA JIKA memilih opsi 'now' (Lengkapi Sekarang)
     if (step === 3 && formData.accountType === "provider" && providerKycChoice === "now") {
-      if (!formData.idNumber || formData.idNumber.length < 16) {
-        addToast?.("NIK Belum Valid", "Harap masukkan 16 digit NIK sesuai kartu identitas KTP Anda.", "error");
+      if (!formData.idNumber || formData.idNumber.length !== 16) {
+        addToast?.("NIK Belum Valid", "Nomor Induk Kependudukan (NIK) wajib tepat 16 digit angka sesuai KTP.", "error");
         return;
       }
       if (!formData.idCardPreview) {
@@ -305,11 +289,7 @@ export default function RegisterPage() {
           campusName: formData.address || `${formData.district}, ${formData.city}`,
           faculty: isProvider ? "Penyedia Jasa Lepas" : isMitra ? "Mitra Rental Resmi" : "Pengguna Komunitas",
           accountType: formData.accountType,
-          avatarUrl: isProvider
-            ? "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80"
-            : isMitra
-              ? "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=400&q=80"
-              : "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=400&q=80",
+          avatarUrl: null,
           verificationStatus: hasUploadedKyc ? "pending_review" : "verified",
           idNumber: formData.idNumber || "",
           idCardUrl: formData.idCardPreview || "",
@@ -554,12 +534,16 @@ export default function RegisterPage() {
                   type="button"
                   disabled={isGoogleRegistering}
                   onClick={handleGoogleRegister}
-                  className="w-full py-3 px-4 rounded-2xl border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-900 text-xs sm:text-sm font-bold shadow-2xs transition flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-60"
+                  className={`w-full py-3 px-4 rounded-2xl border text-xs sm:text-sm font-bold shadow-2xs transition flex items-center justify-center gap-2.5 cursor-pointer active:scale-95 disabled:cursor-not-allowed ${
+                    isGoogleRegistering
+                      ? "bg-blue-50 border-blue-300 text-[#1683FF]"
+                      : "border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-900"
+                  }`}
                 >
                   {isGoogleRegistering ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin text-[#1683FF]" />
-                      <span>Menghubungkan ke Google...</span>
+                      <span>Membuka Google OAuth...</span>
                     </>
                   ) : (
                     <>
@@ -629,10 +613,11 @@ export default function RegisterPage() {
                       <Phone className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
                       <input
                         type="tel"
+                        inputMode="numeric"
                         required
                         placeholder="Misal: 081234567890"
                         value={formData.phone}
-                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                        onChange={(e) => setFormData({ ...formData, phone: e.target.value.replace(/\D/g, "") })}
                         className="w-full text-xs sm:text-sm pl-11 pr-4 py-3 rounded-2xl border border-slate-200 focus:outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/20"
                       />
                     </div>
@@ -695,12 +680,16 @@ export default function RegisterPage() {
                       type="button"
                       disabled={isGoogleRegistering}
                       onClick={handleGoogleRegister}
-                      className="w-full py-2.5 px-4 rounded-2xl border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-900 text-xs sm:text-sm font-bold shadow-2xs transition flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-60"
+                      className={`w-full py-2.5 px-4 rounded-2xl border text-xs sm:text-sm font-bold shadow-2xs transition flex items-center justify-center gap-2.5 cursor-pointer active:scale-95 disabled:cursor-not-allowed ${
+                        isGoogleRegistering
+                          ? "bg-blue-50 border-blue-300 text-[#1683FF]"
+                          : "border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-900"
+                      }`}
                     >
                       {isGoogleRegistering ? (
                         <>
                           <Loader2 className="w-4 h-4 animate-spin text-[#1683FF]" />
-                          <span>Menghubungkan ke Google...</span>
+                          <span>Membuka Google OAuth...</span>
                         </>
                       ) : (
                         <>
@@ -980,55 +969,131 @@ export default function RegisterPage() {
                     {providerKycChoice === "now" && (
                       <div className="p-4 rounded-2xl bg-slate-50/90 border border-slate-200 space-y-3 animate-in fade-in">
                         <div>
-                          <label className="block text-xs font-bold text-slate-700 mb-1">
-                            Nomor Induk Kependudukan (NIK 16 Digit) <span className="text-rose-500 font-bold">*</span>
-                          </label>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="block text-xs font-bold text-slate-700">
+                              Nomor Induk Kependudukan (NIK 16 Digit) <span className="text-rose-500 font-bold">*</span>
+                            </label>
+                            <span className={`text-[11px] font-bold ${
+                              formData.idNumber?.length === 16
+                                ? "text-emerald-600 font-extrabold"
+                                : formData.idNumber?.length > 0
+                                ? "text-amber-600 font-semibold"
+                                : "text-slate-400"
+                            }`}>
+                              {formData.idNumber?.length || 0}/16 digit
+                            </span>
+                          </div>
                           <input
                             type="text"
+                            inputMode="numeric"
                             required
+                            minLength={16}
                             maxLength={16}
+                            pattern="[0-9]{16}"
+                            title="NIK harus tepat 16 digit angka"
                             placeholder="Contoh: 3201234567890001"
                             value={formData.idNumber}
-                            onChange={(e) => setFormData({ ...formData, idNumber: e.target.value })}
-                            className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white"
+                            onChange={(e) => setFormData({ ...formData, idNumber: e.target.value.replace(/\D/g, "").slice(0, 16) })}
+                            className={`w-full text-xs px-3.5 py-2.5 rounded-xl border bg-white focus:outline-none transition ${
+                              formData.idNumber?.length > 0 && formData.idNumber?.length < 16
+                                ? "border-amber-300 focus:border-amber-500"
+                                : formData.idNumber?.length === 16
+                                ? "border-emerald-300 focus:border-emerald-500"
+                                : "border-slate-200 focus:border-[#1683FF]"
+                            }`}
                           />
+                          {formData.idNumber?.length > 0 && formData.idNumber?.length < 16 && (
+                            <span className="text-[11px] text-amber-600 font-semibold mt-1 block animate-in fade-in">
+                              NIK harus 16 digit angka (kurang {16 - formData.idNumber.length} digit lagi)
+                            </span>
+                          )}
+                          {formData.idNumber?.length === 16 && (
+                            <span className="text-[11px] text-emerald-600 font-semibold mt-1 block animate-in fade-in">
+                              Format NIK 16 digit lengkap
+                            </span>
+                          )}
                         </div>
 
                         <div>
-                          <label className="block text-xs font-bold text-slate-700 mb-1">
-                            Foto KTP Asli <span className="text-rose-500 font-bold">*</span>
-                          </label>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="block text-xs font-bold text-slate-700">
+                              Foto KTP Asli <span className="text-rose-500 font-bold">*</span>
+                            </label>
+                            <span className="text-[10px] text-slate-400 font-semibold">
+                              JPG, PNG, WEBP, PDF (Maks. 10MB)
+                            </span>
+                          </div>
                           {formData.idCardPreview ? (
-                            <div className="flex items-center justify-between p-3 bg-blue-50 rounded-xl border border-blue-200">
-                              <div className="flex items-center gap-3">
-                                <img
-                                  src={formData.idCardPreview}
-                                  alt="KTP Preview"
-                                  className="w-16 h-11 object-cover rounded-lg border border-slate-200"
-                                />
-                                <div>
-                                  <div className="text-xs font-bold text-slate-900 flex items-center gap-1">
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-[#1683FF]" />
-                                    <span>KTP Siap Diverifikasi</span>
+                            <div className="flex items-center justify-between p-3.5 bg-blue-50/80 rounded-2xl border border-blue-200 animate-in fade-in">
+                              <div className="flex items-center gap-3 min-w-0">
+                                {formData.idCardType?.includes("pdf") || formData.idCardFileName?.toLowerCase().endsWith(".pdf") ? (
+                                  <div className="w-12 h-12 rounded-xl bg-red-100 text-red-600 flex items-center justify-center font-black text-xs shrink-0 border border-red-200">
+                                    PDF
                                   </div>
-                                  <div className="text-[10px] text-slate-500">
-                                    {formData.idCardFileName || "ktp_provider.jpg"}
+                                ) : (
+                                  <img
+                                    src={formData.idCardPreview}
+                                    alt="KTP Preview"
+                                    className="w-12 h-12 object-cover rounded-xl border border-blue-200 bg-white shrink-0 shadow-2xs"
+                                  />
+                                )}
+                                <div className="min-w-0">
+                                  <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5 truncate">
+                                    <CheckCircle2 className="w-4 h-4 text-[#1683FF] shrink-0" />
+                                    <span className="truncate">{formData.idCardFileName || "ktp_provider.jpg"}</span>
+                                  </div>
+                                  <div className="text-[11px] text-emerald-600 font-semibold mt-0.5">
+                                    ✓ KTP tervalidasi &amp; siap diverifikasi
                                   </div>
                                 </div>
                               </div>
                               <button
                                 type="button"
-                                onClick={() => setFormData({ ...formData, idCardPreview: null, idCardFileName: "" })}
-                                className="text-xs text-rose-600 font-bold hover:underline"
+                                onClick={() => setFormData({ ...formData, idCardPreview: null, idCardFileName: "", idCardType: null })}
+                                className="text-xs text-rose-600 font-bold hover:underline cursor-pointer px-2 py-1 shrink-0 ml-2"
                               >
-                                Ganti
+                                Ganti File
                               </button>
                             </div>
                           ) : (
-                            <label className="border-2 border-dashed border-slate-300 hover:border-[#1683FF] rounded-xl p-4 text-center cursor-pointer transition bg-white block">
-                              <Upload className="w-5 h-5 text-[#1683FF] mx-auto mb-1" />
-                              <span className="text-xs font-bold text-slate-800 block">Pilih File Foto KTP Asli</span>
-                              <input type="file" accept="image/*" onChange={handleKTPUpload} className="hidden" />
+                            <label
+                              onDragOver={(e) => {
+                                e.preventDefault();
+                                setIsDraggingKtp(true);
+                              }}
+                              onDragLeave={() => setIsDraggingKtp(false)}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                setIsDraggingKtp(false);
+                                const file = e.dataTransfer.files?.[0];
+                                if (file) handleKTPUpload(file);
+                              }}
+                              className={`border-2 border-dashed rounded-2xl p-5 sm:p-6 text-center cursor-pointer transition flex flex-col items-center justify-center gap-2 group ${
+                                isDraggingKtp
+                                  ? "border-[#1683FF] bg-blue-50/90 ring-4 ring-blue-100 scale-[0.99]"
+                                  : "border-slate-300 hover:border-[#1683FF] bg-white hover:bg-blue-50/30"
+                              }`}
+                            >
+                              <div className="w-11 h-11 rounded-2xl bg-blue-50 group-hover:bg-blue-100 flex items-center justify-center text-[#1683FF] transition">
+                                <Upload className="w-5 h-5" />
+                              </div>
+                              <div>
+                                <span className="text-xs font-bold text-slate-800 block">
+                                  {isDraggingKtp ? "Lepaskan file KTP Anda di sini" : "Tarik & Lepas Foto KTP atau Klik untuk Memilih"}
+                                </span>
+                                <span className="text-[11px] text-slate-400 block mt-0.5">
+                                  Format: JPG, PNG, WEBP, PDF (Maksimal 10MB)
+                                </span>
+                              </div>
+                              <input
+                                type="file"
+                                accept={getAcceptAttribute("bantuin-kyc")}
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) handleKTPUpload(file);
+                                }}
+                                className="hidden"
+                              />
                             </label>
                           )}
                         </div>
@@ -1245,5 +1310,13 @@ export default function RegisterPage() {
         &copy; {new Date().getFullYear()} Bantuin.id &middot; Platform Bantuan, Jasa &amp; Sewa Komunitas
       </div>
     </div>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={<AuthSkeleton />}>
+      <RegisterPageContent />
+    </Suspense>
   );
 }

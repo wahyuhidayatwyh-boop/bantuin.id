@@ -178,7 +178,7 @@ function CallbackHandler() {
             </div>
             <h2 className="text-xl font-bold text-gray-900">Menghubungkan Akun Google...</h2>
             <p className="text-sm text-gray-600">
-              Sedang memverifikasi data dan mendaftarkan akun Anda ke sistem Bantuin.id.
+              Sedang memverifikasi data akun Anda ke sistem Bantuin.id.
             </p>
           </>
         )}

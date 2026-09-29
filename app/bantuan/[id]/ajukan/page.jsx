@@ -7,6 +7,7 @@ import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { useApp } from "@/lib/context/AppContext";
 import { formatIDR, formatNumberWithDots, parseNumberFromDots } from "@/lib/utils";
+import { validateFile, getAcceptAttribute } from "@/lib/utils/fileValidation";
 import { 
   ArrowLeft, 
   Send, 
@@ -69,11 +70,13 @@ export default function AjukanBantuanPage() {
     idNumber: currentUser?.idNumber || "",
     idCardPreview: currentUser?.idCardUrl || null,
     idCardFileName: "",
+    idCardType: null,
     skill: "Tukang Antar & Errand",
     customSkill: "",
     payoutAccount: currentUser?.bankInfo?.accountNumber || "",
   });
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isDraggingKtp, setIsDraggingKtp] = useState(false);
 
   const [pitchMessage, setPitchMessage] = useState("");
   const [proposedPrice, setProposedPrice] = useState("25000");
@@ -121,21 +124,25 @@ export default function AjukanBantuanPage() {
     );
   }
 
-  const handleKtpUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setVerificationData((prev) => ({
-        ...prev,
-        idCardPreview: URL.createObjectURL(file),
-        idCardFileName: file.name,
-      }));
+  const handleKtpUpload = (file) => {
+    if (!file) return;
+    const validation = validateFile(file, "bantuin-kyc");
+    if (!validation.valid) {
+      addToast?.("Format File Ditolak", validation.error, "error");
+      return;
     }
+    setVerificationData((prev) => ({
+      ...prev,
+      idCardPreview: URL.createObjectURL(file),
+      idCardFileName: file.name,
+      idCardType: file.type,
+    }));
   };
 
   const handleJasaVerification = (e) => {
     e.preventDefault();
-    if (!verificationData.idNumber || verificationData.idNumber.length < 16) {
-      addToast?.("NIK Belum Valid", "Harap masukkan 16 digit NIK KTP Anda.", "error");
+    if (!verificationData.idNumber || verificationData.idNumber.length !== 16) {
+      addToast?.("NIK Belum Valid", "Nomor Induk Kependudukan (NIK) harus tepat 16 digit angka.", "error");
       return;
     }
     if (!verificationData.idCardPreview) {
@@ -198,6 +205,7 @@ export default function AjukanBantuanPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!pitchMessage.trim()) return;
 
     const finalDuration =
@@ -286,43 +294,132 @@ export default function AjukanBantuanPage() {
                     </h4>
 
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Nomor Induk Kependudukan (NIK 16 Digit) <span className="text-red-500">*</span>
-                      </label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-xs font-bold text-slate-700">
+                          Nomor Induk Kependudukan (NIK 16 Digit) <span className="text-red-500">*</span>
+                        </label>
+                        <span className={`text-[11px] font-bold ${
+                          verificationData.idNumber?.length === 16
+                            ? "text-emerald-600 font-extrabold"
+                            : verificationData.idNumber?.length > 0
+                            ? "text-amber-600 font-semibold"
+                            : "text-slate-400"
+                        }`}>
+                          {verificationData.idNumber?.length || 0}/16 digit
+                        </span>
+                      </div>
                       <input
                         type="text"
+                        inputMode="numeric"
                         required
+                        minLength={16}
                         maxLength={16}
+                        pattern="[0-9]{16}"
+                        title="NIK harus tepat 16 digit angka"
                         placeholder="Masukkan 16 digit NIK KTP Anda"
                         value={verificationData.idNumber}
-                        onChange={(e) => setVerificationData({ ...verificationData, idNumber: e.target.value })}
-                        className="w-full text-xs sm:text-sm px-4 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:border-[#1683FF]"
+                        onChange={(e) => setVerificationData({ ...verificationData, idNumber: e.target.value.replace(/\D/g, "").slice(0, 16) })}
+                        className={`w-full text-xs sm:text-sm px-4 py-2.5 rounded-xl border bg-white focus:outline-none transition ${
+                          verificationData.idNumber?.length > 0 && verificationData.idNumber?.length < 16
+                            ? "border-amber-300 focus:border-amber-500"
+                            : verificationData.idNumber?.length === 16
+                            ? "border-emerald-300 focus:border-emerald-500"
+                            : "border-slate-200 focus:border-[#1683FF]"
+                        }`}
                       />
+                      {verificationData.idNumber?.length > 0 && verificationData.idNumber?.length < 16 && (
+                        <span className="text-[11px] text-amber-600 font-semibold mt-1 block animate-in fade-in">
+                          NIK harus 16 digit angka (kurang {16 - verificationData.idNumber.length} digit lagi)
+                        </span>
+                      )}
+                      {verificationData.idNumber?.length === 16 && (
+                        <span className="text-[11px] text-emerald-600 font-semibold mt-1 block animate-in fade-in">
+                          Format NIK 16 digit lengkap
+                        </span>
+                      )}
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Foto KTP Asli <span className="text-red-500">*</span>
-                      </label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-xs font-bold text-slate-700">
+                          Foto KTP Asli <span className="text-red-500">*</span>
+                        </label>
+                        <span className="text-[10px] text-slate-400 font-semibold">
+                          JPG, PNG, WEBP, PDF (Maks. 10MB)
+                        </span>
+                      </div>
                       {verificationData.idCardPreview ? (
-                        <div className="flex items-center justify-between p-3 bg-blue-50 rounded-xl border border-blue-200">
-                          <span className="text-xs font-bold text-[#1683FF] flex items-center gap-1.5">
-                            <CheckCircle2 className="w-4 h-4 text-[#1683FF]" />
-                            <span>{verificationData.idCardFileName || "ktp_terlampir.jpg"}</span>
-                          </span>
+                        <div className="flex items-center justify-between p-3.5 bg-blue-50/80 rounded-2xl border border-blue-200 animate-in fade-in">
+                          <div className="flex items-center gap-3 min-w-0">
+                            {verificationData.idCardType?.includes("pdf") || verificationData.idCardFileName?.toLowerCase().endsWith(".pdf") ? (
+                              <div className="w-12 h-12 rounded-xl bg-red-100 text-red-600 flex items-center justify-center font-black text-xs shrink-0 border border-red-200">
+                                PDF
+                              </div>
+                            ) : (
+                              <img
+                                src={verificationData.idCardPreview}
+                                alt="KTP Preview"
+                                className="w-12 h-12 object-cover rounded-xl border border-blue-200 bg-white shrink-0 shadow-2xs"
+                              />
+                            )}
+                            <div className="min-w-0">
+                              <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5 truncate">
+                                <CheckCircle2 className="w-4 h-4 text-[#1683FF] shrink-0" />
+                                <span className="truncate">{verificationData.idCardFileName || "ktp_terlampir.jpg"}</span>
+                              </span>
+                              <span className="text-[11px] text-emerald-600 font-semibold block mt-0.5">
+                                ✓ File KTP tervalidasi &amp; siap diverifikasi
+                              </span>
+                            </div>
+                          </div>
                           <button
                             type="button"
-                            onClick={() => setVerificationData({ ...verificationData, idCardPreview: null, idCardFileName: "" })}
-                            className="text-xs text-rose-600 font-bold hover:underline cursor-pointer"
+                            onClick={() => setVerificationData({ ...verificationData, idCardPreview: null, idCardFileName: "", idCardType: null })}
+                            className="text-xs text-rose-600 font-bold hover:underline cursor-pointer px-2 py-1 shrink-0 ml-2"
                           >
-                            Ganti Foto
+                            Ganti File
                           </button>
                         </div>
                       ) : (
-                        <label className="border-2 border-dashed border-slate-300 hover:border-[#1683FF] rounded-xl p-4 text-center cursor-pointer transition bg-white block">
-                          <Upload className="w-5 h-5 text-[#1683FF] mx-auto mb-1" />
-                          <span className="text-xs font-bold text-slate-800 block">Pilih File Foto KTP Asli</span>
-                          <input type="file" accept="image/*" onChange={handleKtpUpload} className="hidden" required />
+                        <label
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            setIsDraggingKtp(true);
+                          }}
+                          onDragLeave={() => setIsDraggingKtp(false)}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            setIsDraggingKtp(false);
+                            const file = e.dataTransfer.files?.[0];
+                            if (file) handleKtpUpload(file);
+                          }}
+                          className={`border-2 border-dashed rounded-2xl p-5 sm:p-6 text-center cursor-pointer transition flex flex-col items-center justify-center gap-2 group ${
+                            isDraggingKtp
+                              ? "border-[#1683FF] bg-blue-50/90 ring-4 ring-blue-100 scale-[0.99]"
+                              : "border-slate-300 hover:border-[#1683FF] bg-white hover:bg-blue-50/30"
+                          }`}
+                        >
+                          <div className="w-11 h-11 rounded-2xl bg-blue-50 group-hover:bg-blue-100 flex items-center justify-center text-[#1683FF] transition">
+                            <Upload className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-slate-800 block">
+                              {isDraggingKtp ? "Lepaskan file KTP Anda di sini" : "Tarik & Lepas Foto KTP atau Klik untuk Memilih File"}
+                            </span>
+                            <span className="text-[11px] text-slate-400 block mt-0.5">
+                              Format: JPG, PNG, WEBP, PDF (Maksimal 10MB)
+                            </span>
+                          </div>
+                          <input
+                            type="file"
+                            accept={getAcceptAttribute("bantuin-kyc")}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleKtpUpload(file);
+                            }}
+                            className="hidden"
+                            required
+                          />
                         </label>
                       )}
                     </div>
@@ -656,7 +753,9 @@ export default function AjukanBantuanPage() {
                   <div className="flex items-center gap-3 pt-4 border-t border-slate-100">
                     <Link
                       href={`/bantuan/${request.id}`}
-                      className="px-6 py-3 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold transition text-center"
+                      className={`px-6 py-3 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold transition text-center ${
+                        isSubmitting ? "pointer-events-none opacity-50" : ""
+                      }`}
                     >
                       Batal
                     </Link>
@@ -664,10 +763,19 @@ export default function AjukanBantuanPage() {
                     <button
                       type="submit"
                       disabled={isSubmitting}
-                      className="flex-1 py-3.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm shadow-xs transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer"
+                      className="flex-1 py-3.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm shadow-xs transition active:scale-95 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:pointer-events-none disabled:active:scale-100"
                     >
-                      <span>{isSubmitting ? "Mengirimkan Proposal..." : "Kirim Ajuan Proposal"}</span>
-                      <Send className="w-4 h-4" />
+                      {isSubmitting ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Mengirimkan Proposal...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Kirim Ajuan Proposal</span>
+                          <Send className="w-4 h-4" />
+                        </>
+                      )}
                     </button>
                   </div>
 
@@ -685,16 +793,22 @@ export default function AjukanBantuanPage() {
                 </div>
 
                 <div className="flex items-start gap-3.5 pb-4 border-b border-slate-100">
-                  <img
-                    src={request.requester?.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80"}
-                    alt={request.requester?.name || "Peminta"}
-                    className="w-11 h-11 rounded-full object-cover border border-slate-100 shrink-0"
-                  />
+                  {request.requester?.avatar && !request.requester.avatar.includes("images.unsplash.com") ? (
+                    <img
+                      src={request.requester.avatar}
+                      alt={request.requester?.name || "Peminta"}
+                      className="w-11 h-11 rounded-full object-cover border border-slate-100 shrink-0 bg-white"
+                    />
+                  ) : (
+                    <div className="w-11 h-11 rounded-full bg-blue-50 text-[#1683FF] flex items-center justify-center font-black text-sm border border-blue-200 shrink-0 shadow-2xs">
+                      {(request.requester?.name || "U")[0].toUpperCase()}
+                    </div>
+                  )}
                   <div>
-                    <h4 className="font-bold text-sm text-slate-900">{request.requester?.name}</h4>
+                    <h4 className="font-bold text-sm text-slate-900">{request.requester?.name || "Peminta"}</h4>
                     <div className="flex items-center gap-1 text-xs text-slate-500 mt-0.5">
                       <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                      <span>{request.requester?.rating || 4.9}</span>
+                      <span>{request.requester?.rating || 5.0}</span>
                     </div>
                   </div>
                 </div>
@@ -707,7 +821,7 @@ export default function AjukanBantuanPage() {
                 </div>
 
                 <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
-                  <div className="text-slate-400">Budget Peminta:</div>
+                  <div className="text-slate-400">Budget Imbalan dari Peminta:</div>
                   <div className="font-extrabold text-[#1683FF] text-base">
                     {request.isVoluntary ? "Sukarela" : formatIDR(request.rewardAmount)}
                   </div>

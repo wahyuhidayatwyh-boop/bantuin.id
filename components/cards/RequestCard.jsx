@@ -36,15 +36,17 @@ function formatShortDeadline(deadline, deadlineText) {
 export default function RequestCard({ request }) {
   const { currentUser, getDistanceToUser } = useApp();
 
-  const requester = request.requester || {
-    id: request.userId || "user-1",
-    name: request.userName || "Sarah Kusuma",
-    role: "Wirausaha",
-    avatar: request.userAvatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80",
-    verified: true,
-  };
+  const requesterId = request.requesterId || request.requester?.id || request.userId;
+  const requesterName = request.requester?.fullName || request.requester?.name || request.userName || "Pengguna Bantuin";
+  const requesterAvatar = request.requester?.avatarUrl || request.requester?.avatar || request.userAvatar || null;
+  const requesterRole = request.requester?.campusName || request.userRole || "Pengguna Terverifikasi";
+  const isVerified = request.requester?.verificationStatus === "verified" || request.userVerified !== false;
 
-  const isMine = currentUser?.id === requester.id;
+  const isMine = Boolean(
+    (currentUser?.id && requesterId && currentUser.id === requesterId) ||
+    (currentUser?.email && (request.requester?.email === currentUser.email || request.userEmail === currentUser.email))
+  );
+
   const offersCount = request.offers?.length || 0;
 
   const distanceInfo = getDistanceToUser
@@ -55,7 +57,7 @@ export default function RequestCard({ request }) {
     ? "Online / Remote" 
     : (distanceInfo?.isRealtime && distanceInfo?.text
         ? distanceInfo.text
-        : (request.location || request.city || "Atur lokasi untuk melihat jarak"));
+        : (request.location || request.locationName || request.city || "Atur lokasi untuk melihat jarak"));
 
   const shortDeadline = formatShortDeadline(request.deadline, request.deadlineText);
   const hasPhotos = Array.isArray(request.photos) && request.photos.length > 0;
@@ -73,12 +75,18 @@ export default function RequestCard({ request }) {
         {/* Requester Identity & Category */}
         <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <div className="relative shrink-0">
-            <img
-              src={requester.avatar}
-              alt={requester.name}
-              className="w-9 h-9 sm:w-10 sm:h-10 rounded-full object-cover border border-slate-100 shadow-2xs"
-            />
-            {requester.verified && (
+            {requesterAvatar && !requesterAvatar.includes("images.unsplash.com") ? (
+              <img
+                src={requesterAvatar}
+                alt={requesterName}
+                className="w-9 h-9 sm:w-10 sm:h-10 rounded-full object-cover border border-slate-100 shadow-2xs bg-white"
+              />
+            ) : (
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-blue-50 text-[#1683FF] flex items-center justify-center font-black text-xs border border-blue-200 shadow-2xs">
+                {(requesterName || "U")[0].toUpperCase()}
+              </div>
+            )}
+            {isVerified && (
               <div className="absolute -bottom-0.5 -right-0.5 bg-white rounded-full p-0.5 shadow-2xs">
                 <CheckCircle2 className="w-3 h-3 text-[#1683FF]" />
               </div>
@@ -88,11 +96,11 @@ export default function RequestCard({ request }) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-xs sm:text-sm font-bold text-slate-800 truncate">
-                {isMine ? "Saya" : requester.name}
+                {isMine ? "Saya" : requesterName}
               </span>
-              {requester.role && (
+              {requesterRole && (
                 <span className="hidden sm:inline text-[11px] text-slate-400">
-                  • {requester.role}
+                  • {requesterRole}
                 </span>
               )}
             </div>
@@ -118,7 +126,7 @@ export default function RequestCard({ request }) {
             {isMine ? "Budget" : "Imbalan"}
           </div>
           <div className="font-black text-sm sm:text-base text-slate-900 mt-0.5">
-            {request.isVoluntary ? "Sukarela" : formatIDR(request.rewardAmount)}
+            {request.isVoluntary ? "Sukarela" : formatIDR(request.rewardAmount || request.reward || 0)}
           </div>
         </div>
       </div>
@@ -209,9 +217,9 @@ export default function RequestCard({ request }) {
           {isMine ? (
             <Link
               href={`/bantuan/${request.id}`}
-              className="px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-2xs transition active:scale-95 inline-flex items-center gap-1"
+              className="px-4 py-1.5 sm:px-5 sm:py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-2xs transition active:scale-95 inline-flex items-center justify-center min-w-[70px]"
             >
-              Kelola ({offersCount})
+              <span>Lihat</span>
             </Link>
           ) : (
             <Link

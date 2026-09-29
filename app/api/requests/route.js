@@ -223,7 +223,7 @@ export async function GET(req) {
         requesterId: item.requesterId,
         userName: item.requester?.fullName || "Pengguna Bantuin",
         userRole: item.requester?.campusName || "Pengguna Umum",
-        userAvatar: item.requester?.avatarUrl || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80",
+        userAvatar: item.requester?.avatarUrl && !item.requester.avatarUrl.includes("images.unsplash.com") ? item.requester.avatarUrl : null,
         userRating: Number(item.requester?.ratingAvg) || 5.0,
         userVerified: item.requester?.verificationStatus === "verified",
         title: item.title,
@@ -354,7 +354,7 @@ export async function POST(req) {
         data: {
           email: defaultEmail,
           fullName: userName || "Fauzi",
-          avatarUrl: userAvatar || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80",
+          avatarUrl: userAvatar && !userAvatar.includes("images.unsplash.com") ? userAvatar : null,
           campusName: userCampus || "Pasar Rebo, Jakarta Timur",
           accountRole: "user",
           ratingAvg: 5.0,

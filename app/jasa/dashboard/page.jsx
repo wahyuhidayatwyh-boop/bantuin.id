@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
@@ -8,6 +8,7 @@ import logoImg from "@/components/image/logo.png";
 import { useApp } from "@/lib/context/AppContext";
 import UnreadBadge from "@/components/ui/UnreadBadge";
 import RoleGuard from "@/components/auth/RoleGuard";
+import JasaDashboardSkeleton from "@/components/skeletons/JasaDashboardSkeleton";
 import { formatIDR, formatDateIndo } from "@/lib/utils";
 import { 
   getProviderById, 
@@ -28,42 +29,42 @@ import {
   MessageSquare, 
   Trash2,
   Check, 
-  X,
-  ArrowUpRight,
-  ShieldCheck,
-  ExternalLink,
-  Plus,
-  Layers,
-  Image as ImageIcon,
-  UserCheck,
-  Package,
-  Clock,
-  MapPin,
-  ChevronRight,
-  Edit3,
-  Upload,
-  Camera,
-  Award,
-  Loader2,
-  User,
-  Store,
-  Bell,
-  AlertTriangle,
-  Send,
-  Shapes,
-  Eye,
-  FileText,
-  CheckCircle,
-  Rocket,
-  Megaphone,
-  AlertCircle,
-  QrCode,
-  CreditCard,
-  RefreshCw,
-  RotateCcw,
-  TrendingUp,
-  Navigation,
-  MoreHorizontal,
+  X, 
+  ArrowUpRight, 
+  ShieldCheck, 
+  ExternalLink, 
+  Plus, 
+  Layers, 
+  Image as ImageIcon, 
+  UserCheck, 
+  Package, 
+  Clock, 
+  MapPin, 
+  ChevronRight, 
+  Edit3, 
+  Upload, 
+  Camera, 
+  Award, 
+  Loader2, 
+  User, 
+  Store, 
+  Bell, 
+  AlertTriangle, 
+  Send, 
+  Shapes, 
+  Eye, 
+  FileText, 
+  CheckCircle, 
+  Rocket, 
+  Megaphone, 
+  AlertCircle, 
+  QrCode, 
+  CreditCard, 
+  RefreshCw, 
+  RotateCcw, 
+  TrendingUp, 
+  Navigation, 
+  MoreHorizontal, 
 } from "lucide-react";
 import { resolveCategoryIcon } from "@/lib/services/categoryService";
 import { promotionService } from "@/lib/services/promotionService";
@@ -71,7 +72,7 @@ import { paymentService, PAYMENT_METHODS } from "@/lib/services/paymentService";
 import { reportService } from "@/lib/services/reportService";
 import { imageService } from "@/lib/services/imageService";
 
-export default function JasaDashboardPage() {
+function JasaDashboardContent() {
   const router = useRouter();
   const { 
     currentUser, 
@@ -742,7 +743,7 @@ export default function JasaDashboardPage() {
   };
 
   return (
-    <RoleGuard allowedRoles={["provider"]}>
+    <RoleGuard allowedRoles={["provider"]} fallback={<JasaDashboardSkeleton />}>
       <div className="min-h-screen flex flex-col lg:flex-row bg-[#F4F7FB]">
       
       {/* 1. MOBILE TOP HEADER (Clean & Compact) */}
@@ -860,16 +861,18 @@ export default function JasaDashboardPage() {
             <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
           </Link>
 
-          <Link
-            href="/mitra/dashboard"
-            className="flex items-center justify-between w-full px-3 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#1683FF] text-xs font-bold transition border border-blue-200/80"
-          >
-            <div className="flex items-center gap-2">
-              <Store className="w-3.5 h-3.5 text-[#1683FF]" />
-              <span>Dashboard Mitra Sewa</span>
-            </div>
-            <ExternalLink className="w-3.5 h-3.5 text-[#1683FF]/70" />
-          </Link>
+          {(currentUser?.isPartner || currentUser?.accountRole === "partner" || currentUser?.accountType === "mitra" || currentUser?.isAdmin) && (
+            <Link
+              href="/mitra/dashboard"
+              className="flex items-center justify-between w-full px-3 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#1683FF] text-xs font-bold transition border border-blue-200/80"
+            >
+              <div className="flex items-center gap-2">
+                <Store className="w-3.5 h-3.5 text-[#1683FF]" />
+                <span>Dashboard Mitra Sewa</span>
+              </div>
+              <ExternalLink className="w-3.5 h-3.5 text-[#1683FF]/70" />
+            </Link>
+          )}
 
           <Link
             href={`/jasa/penyedia/${provider.id}`}
@@ -3881,13 +3884,15 @@ export default function JasaDashboardPage() {
                   <span>Profil Akun</span>
                 </Link>
 
-                <Link
-                  href="/mitra/dashboard"
-                  className="py-2 px-2 rounded-xl bg-blue-50 text-[#1683FF] hover:bg-blue-100 text-[11px] font-bold text-center flex items-center justify-center gap-1"
-                >
-                  <Store className="w-3.5 h-3.5" />
-                  <span>Mitra Sewa</span>
-                </Link>
+                {(currentUser?.isPartner || currentUser?.accountRole === "partner" || currentUser?.accountType === "mitra" || currentUser?.isAdmin) && (
+                  <Link
+                    href="/mitra/dashboard"
+                    className="py-2 px-2 rounded-xl bg-blue-50 text-[#1683FF] hover:bg-blue-100 text-[11px] font-bold text-center flex items-center justify-center gap-1"
+                  >
+                    <Store className="w-3.5 h-3.5" />
+                    <span>Mitra Sewa</span>
+                  </Link>
+                )}
 
                 <Link
                   href={`/jasa/penyedia/${provider.id}`}
@@ -3905,5 +3910,13 @@ export default function JasaDashboardPage() {
 
       </div>
     </RoleGuard>
+  );
+}
+
+export default function JasaDashboardPage() {
+  return (
+    <Suspense fallback={<JasaDashboardSkeleton />}>
+      <JasaDashboardContent />
+    </Suspense>
   );
 }

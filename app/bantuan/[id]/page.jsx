@@ -39,6 +39,7 @@ import {
   Eye,
   Trash2,
   AlertTriangle,
+  XCircle,
   X
 } from "lucide-react";
 import DetailSkeleton from "@/components/skeletons/DetailSkeleton";
@@ -61,6 +62,7 @@ export default function RequestDetailPage() {
   const [selectedPhotoModal, setSelectedPhotoModal] = useState(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [selectedOfferToAccept, setSelectedOfferToAccept] = useState(null);
 
   const handleCancelRequest = async () => {
     if (!id || isCancelling) return;
@@ -158,9 +160,9 @@ export default function RequestDetailPage() {
   const handleOpenChat = (offer) => {
     if (startTaskInquiry && request) {
       const inqRoom = startTaskInquiry({ request, offer });
-      router.push(`/chat?room=${inqRoom?.id || "order-room-101"}`);
+      router.push(`/chat?room=${inqRoom?.id || request.id}`);
     } else {
-      router.push(`/chat?room=order-room-101`);
+      router.push(`/chat?room=${request?.id || id}`);
     }
   };
 
@@ -484,46 +486,70 @@ export default function RequestDetailPage() {
               <div className="space-y-3">
                 {offersList.length > 0 ? (
                   offersList.map((offer, idx) => {
-                    const isMyOffer = (currentUser && offer.helperId === currentUser.id) || (currentUser && offer.helperName === currentUser.fullName);
+                    const isMyOffer = (currentUser && (offer.helperId === currentUser.id || offer.helper?.id === currentUser.id)) || (currentUser && offer.helperName === currentUser.fullName);
+                    const isThisOfferAccepted = (request?.selectedHelperId && (request.selectedHelperId === offer.helperId || request.selectedHelperId === offer.helper?.id)) || offer.status === "accepted";
+                    const isThisOfferRejected = (isClosed && !isThisOfferAccepted) || offer.status === "rejected";
 
                     return (
                       <div
                         key={offer.id || idx}
                         className={`p-4 sm:p-5 rounded-2xl border transition duration-150 shadow-2xs space-y-3 ${
-                          isMyOffer
-                            ? "bg-blue-50/40 border-blue-200"
+                          isThisOfferAccepted
+                            ? "bg-emerald-50/40 border-emerald-300 ring-1 ring-emerald-300"
+                            : isMyOffer
+                            ? isThisOfferRejected
+                              ? "bg-slate-50/70 border-slate-200 opacity-85"
+                              : "bg-blue-50/40 border-blue-200"
                             : "border-slate-200 bg-white hover:border-blue-200"
                         }`}
                       >
                         {/* Helper Header & Price */}
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                           <div className="flex items-center gap-3">
-                            <img
-                              src={offer.helperAvatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80"}
-                              alt={offer.helperName}
-                              className="w-10 h-10 rounded-full object-cover border border-slate-200 shrink-0"
-                            />
+                            {offer.helperAvatar && !offer.helperAvatar.includes("images.unsplash.com") ? (
+                              <img
+                                src={offer.helperAvatar}
+                                alt={offer.helperName}
+                                className="w-10 h-10 rounded-full object-cover border border-slate-200 shrink-0 bg-white"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded-full bg-blue-50 text-[#1683FF] flex items-center justify-center font-black text-xs border border-blue-200 shrink-0 shadow-2xs">
+                                {(offer.helperName || "U")[0].toUpperCase()}
+                              </div>
+                            )}
                             <div>
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 <h4 className="font-bold text-xs sm:text-sm text-slate-900">{offer.helperName}</h4>
-                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
-                                  {offer.helperRole || "Mitra Helper"}
-                                </span>
+                                {offer.helperRole && (
+                                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
+                                    {offer.helperRole}
+                                  </span>
+                                )}
                                 {isMyOffer && (
                                   <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
                                     Anda
                                   </span>
                                 )}
                               </div>
-                              <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
-                                <span className="flex items-center gap-1 font-semibold text-slate-700">
-                                  <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
-                                  {offer.helperRating || 4.9}
+                              <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5 flex-wrap">
+                                {offer.helperRating !== null && (
+                                  <>
+                                    <span className="flex items-center gap-1 font-semibold text-slate-700">
+                                      <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                                      {Number(offer.helperRating).toFixed(1)}
+                                    </span>
+                                    <span>•</span>
+                                  </>
+                                )}
+                                {offer.helperCampus && (
+                                  <>
+                                    <span>{offer.helperCampus}</span>
+                                    <span>•</span>
+                                  </>
+                                )}
+                                <span className="text-emerald-600 font-semibold">
+                                  {typeof offer.completedHelps === "number" ? `${offer.completedHelps}x bantu` : "0x bantu"}
                                 </span>
-                                <span>•</span>
-                                <span>{offer.helperCampus || "Banjarmasin"}</span>
-                                <span>•</span>
-                                <span className="text-emerald-600 font-semibold">{offer.completedHelps || 24}x bantu</span>
                               </div>
                             </div>
                           </div>
@@ -576,52 +602,103 @@ export default function RequestDetailPage() {
                         <div className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-100 text-xs gap-2">
                           {isMyOffer ? (
                             <div className="flex flex-wrap items-center justify-between w-full gap-2">
-                              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[11px]">
-                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                                <span>Lamaran Anda (Terkirim)</span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (startTaskInquiry && request) {
-                                    const inqRoom = startTaskInquiry({ request, offer });
-                                    router.push(`/chat?room=${inqRoom?.id || "order-room-101"}`);
-                                  } else {
-                                    router.push(`/chat?room=order-room-101`);
-                                  }
-                                }}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-bold text-slate-700 text-xs transition cursor-pointer shrink-0"
-                              >
-                                <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
-                                <span>Chat Peminta</span>
-                              </button>
+                              {isThisOfferAccepted ? (
+                                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 text-white font-bold text-xs shadow-xs">
+                                  <CheckCircle2 className="w-4 h-4 text-white" />
+                                  <span>Lamaran Diterima</span>
+                                </div>
+                              ) : isThisOfferRejected ? (
+                                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 font-bold text-xs">
+                                  <XCircle className="w-4 h-4 text-rose-600" />
+                                  <span>Lamaran Tidak Diterima</span>
+                                </div>
+                              ) : (
+                                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 text-[#1683FF] border border-blue-200 font-bold text-xs">
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-[#1683FF]" />
+                                  <span>Lamaran Anda (Terkirim)</span>
+                                </div>
+                              )}
+
+                              {/* Tombol chat hanya muncul jika lamaran DITERIMA atau MASIH MENUNGGU (hilang jika tidak diterima) */}
+                              {!isThisOfferRejected && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (startTaskInquiry && request) {
+                                      const inqRoom = startTaskInquiry({ request, offer });
+                                      router.push(`/chat?room=${inqRoom?.id || request.id}`);
+                                    } else {
+                                      router.push(`/chat?room=${request?.id || id}`);
+                                    }
+                                  }}
+                                  className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-bold text-xs transition cursor-pointer shrink-0 ${
+                                    isThisOfferAccepted
+                                      ? "bg-[#1683FF] hover:bg-[#0F6FE5] text-white shadow-xs"
+                                      : "border border-slate-200 bg-white hover:bg-slate-50 text-slate-700"
+                                  }`}
+                                >
+                                  <MessageSquare className="w-3.5 h-3.5" />
+                                  <span>{isThisOfferAccepted ? "Chat Peminta Tugas" : "Chat Peminta"}</span>
+                                </button>
+                              )}
                             </div>
                           ) : isOwner ? (
                             <>
-                              <button
-                                type="button"
-                                onClick={() => handleOpenChat(offer)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-bold text-slate-700 text-xs transition cursor-pointer shrink-0"
-                              >
-                                <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
-                                <span>Chat Dulu</span>
-                              </button>
+                              {isThisOfferAccepted ? (
+                                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-xs">
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span>Helper Terpilih</span>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenChat(offer)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-bold text-slate-700 text-xs transition cursor-pointer shrink-0"
+                                >
+                                  <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
+                                  <span>Chat Dulu</span>
+                                </button>
+                              )}
 
                               {!isClosed ? (
-                                <Link
-                                  href={`/bantuan/${request.id}/pembayaran?offerId=${offer.id}`}
-                                  className="px-4 py-1.5 bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold rounded-xl shadow-xs transition active:scale-95 flex items-center gap-1.5 text-xs shrink-0"
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedOfferToAccept(offer)}
+                                  className="px-4 py-1.5 bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold rounded-xl shadow-xs transition active:scale-95 flex items-center gap-1.5 text-xs shrink-0 cursor-pointer"
                                 >
                                   <CreditCard className="w-3.5 h-3.5" />
                                   <span>Pilih &amp; Bayar Resmi</span>
-                                </Link>
+                                </button>
+                              ) : isThisOfferAccepted ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenChat(offer)}
+                                  className="px-3.5 py-1.5 bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                                >
+                                  <MessageSquare className="w-3.5 h-3.5" />
+                                  <span>Chat Helper</span>
+                                </button>
                               ) : (
-                                <span className="text-xs text-slate-400 font-medium">Selesai/Diproses</span>
+                                <span className="text-xs text-slate-400 font-medium px-2 py-0.5 rounded-md bg-slate-100">
+                                  Tidak Terpilih
+                                </span>
                               )}
                             </>
                           ) : (
-                            <div className="text-xs text-slate-400 font-medium">
-                              Diajukan {offer.submittedAt || "Tadi"}
+                            <div>
+                              {isThisOfferAccepted ? (
+                                <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg">
+                                  Helper Terpilih
+                                </span>
+                              ) : isClosed ? (
+                                <span className="text-[11px] text-slate-400 font-medium">
+                                  Tidak Terpilih
+                                </span>
+                              ) : (
+                                <span className="text-xs text-slate-400 font-medium">
+                                  Diajukan {offer.submittedAt || "Tadi"}
+                                </span>
+                              )}
                             </div>
                           )}
                         </div>
@@ -729,6 +806,117 @@ export default function RequestDetailPage() {
                   </>
                 )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Konfirmasi Pemilihan Helper & Pembayaran */}
+      {selectedOfferToAccept && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setSelectedOfferToAccept(null)}
+        >
+          <div
+            className="bg-white rounded-[24px] max-w-md w-full p-6 sm:p-7 shadow-2xl border border-slate-100 space-y-4 animate-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 text-[#1683FF] flex items-center justify-center font-bold">
+                  <CreditCard className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-extrabold text-slate-900">Konfirmasi Pemilihan Helper</h3>
+                  <p className="text-[11px] text-slate-500">Pilih helper resmi untuk mengerjakan tugas Anda</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedOfferToAccept(null)}
+                className="p-1 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Helper Card Summary */}
+            <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  {selectedOfferToAccept.helperAvatar && !selectedOfferToAccept.helperAvatar.includes("images.unsplash.com") ? (
+                    <img
+                      src={selectedOfferToAccept.helperAvatar}
+                      alt={selectedOfferToAccept.helperName}
+                      className="w-10 h-10 rounded-full object-cover border border-slate-200 shrink-0 bg-white"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-full bg-blue-50 text-[#1683FF] flex items-center justify-center font-black text-xs border border-blue-200 shrink-0 shadow-2xs">
+                      {(selectedOfferToAccept.helperName || "U")[0].toUpperCase()}
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <h4 className="font-bold text-xs sm:text-sm text-slate-900 truncate">
+                      {selectedOfferToAccept.helperName}
+                    </h4>
+                    <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                      {selectedOfferToAccept.helperRole && (
+                        <span className="font-semibold text-slate-700">
+                          {selectedOfferToAccept.helperRole}
+                        </span>
+                      )}
+                      {selectedOfferToAccept.helperRating !== null && (
+                        <>
+                          <span>•</span>
+                          <span className="flex items-center gap-0.5 text-amber-500 font-bold">
+                            ★ {Number(selectedOfferToAccept.helperRating).toFixed(1)}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-right shrink-0">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Imbalan</div>
+                  <div className="font-black text-sm sm:text-base text-[#1683FF]">
+                    {formatIDR(selectedOfferToAccept.proposedPrice || request.rewardAmount)}
+                  </div>
+                </div>
+              </div>
+
+              {selectedOfferToAccept.pitchMessage && (
+                <div className="p-2.5 rounded-xl bg-white border border-slate-200/60 text-[11px] text-slate-600 line-clamp-2 leading-relaxed italic">
+                  &quot;{selectedOfferToAccept.pitchMessage}&quot;
+                </div>
+              )}
+            </div>
+
+            {/* Escrow Guarantee Note */}
+            <div className="p-3 rounded-xl bg-emerald-50/70 border border-emerald-200/80 flex items-start gap-2 text-[11px] text-emerald-800 leading-relaxed">
+              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <div>
+                <strong className="font-bold text-emerald-900 block">Garansi Rekening Bersama (Escrow):</strong>
+                Dana Anda akan diamankan oleh sistem Bantuin dan baru dicairkan ke helper setelah tugas selesai dan disetujui oleh Anda.
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setSelectedOfferToAccept(null)}
+                className="flex-1 py-2.5 px-4 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold transition cursor-pointer"
+              >
+                Batal
+              </button>
+
+              <Link
+                href={`/bantuan/${request.id}/pembayaran?offerId=${selectedOfferToAccept.id}`}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-xs active:scale-98"
+              >
+                <span>Lanjut Bayar Resmi</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
             </div>
           </div>
         </div>

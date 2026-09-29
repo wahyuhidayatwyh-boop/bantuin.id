@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, Suspense } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -9,8 +9,9 @@ import { useApp } from "@/lib/context/AppContext";
 import { authService, ROLE_LABELS } from "@/lib/services/authService";
 import GoogleIcon from "@/components/common/GoogleIcon";
 import logoImg from "@/components/image/logo.png";
+import AuthSkeleton from "@/components/skeletons/AuthSkeleton";
 
-export default function LoginPage() {
+function LoginPageContent() {
   const router = useRouter();
   const { addToast, setCurrentUser } = useApp();
   const [email, setEmail] = useState("");
@@ -68,25 +69,13 @@ export default function LoginPage() {
     if (loading || googleLoading) return;
     setErrorMsg("");
     setGoogleLoading(true);
+    addToast?.("Menghubungkan Google", "Mengarahkan ke halaman autentikasi Google aman...", "info");
 
     try {
-      const { user } = await authService.loginWithGoogle();
-
-      if (setCurrentUser) {
-        setCurrentUser(user);
-      }
-
-      addToast?.(
-        "Login Google Berhasil",
-        `Selamat datang, ${user.fullName || "Pengguna"}!`
-      );
-
-      const targetPath = getSafeRedirect() || authService.getRedirectPathByRole(user.role);
-      router.push(targetPath);
+      await authService.loginWithGoogle();
     } catch (err) {
       setErrorMsg(err.message || "Login dengan Google gagal. Silakan coba lagi.");
       addToast?.("Google Auth Gagal", err.message || "Terjadi kesalahan saat otentikasi Google.", "error");
-    } finally {
       setGoogleLoading(false);
     }
   };
@@ -222,12 +211,16 @@ export default function LoginPage() {
             type="button"
             disabled={loading || googleLoading}
             onClick={handleGoogleLogin}
-            className="w-full py-2.5 px-4 rounded-xl border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs sm:text-sm font-bold shadow-2xs transition flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-60"
+            className={`w-full py-2.5 px-4 rounded-xl border text-xs sm:text-sm font-bold shadow-2xs transition flex items-center justify-center gap-2.5 cursor-pointer active:scale-95 disabled:cursor-not-allowed ${
+              googleLoading
+                ? "bg-blue-50 border-blue-300 text-[#1683FF]"
+                : "border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-700"
+            }`}
           >
             {googleLoading ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin text-[#1683FF]" />
-                <span>Menghubungkan ke Google...</span>
+                <span>Membuka Google OAuth...</span>
               </>
             ) : (
               <>
@@ -252,5 +245,13 @@ export default function LoginPage() {
         &copy; {new Date().getFullYear()} Bantuin.id &middot; Platform Bantuan, Jasa &amp; Sewa Komunitas
       </footer>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<AuthSkeleton />}>
+      <LoginPageContent />
+    </Suspense>
   );
 }

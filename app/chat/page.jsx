@@ -222,30 +222,79 @@ function ChatWorkspaceContent() {
     startJasaInquiry,
   } = useApp() || {};
 
-  // Selected Room State (cek room param dulu, lalu cek apakah cocok dengan partnerId/serviceId)
+  // Real Database Chat Rooms (Pure database tables without mockup)
+  const [realDbRooms, setRealDbRooms] = useState([]);
+  const [isLoadingRooms, setIsLoadingRooms] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchDbRooms = async () => {
+      try {
+        setIsLoadingRooms(true);
+        const token = localStorage.getItem("bantuin_auth_token") || localStorage.getItem("bantuin_token");
+        const headers = token ? { Authorization: `Bearer ${token}` } : {};
+        const url = roomParam ? `/api/chat/rooms?roomId=${encodeURIComponent(roomParam)}` : "/api/chat/rooms";
+        const res = await fetch(url, { headers });
+        if (!res.ok) {
+          setIsLoadingRooms(false);
+          return;
+        }
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data) && isMounted) {
+          setRealDbRooms(json.data);
+          if (roomParam) {
+            setSelectedRoomId(roomParam);
+          } else if (json.data.length > 0 && !selectedRoomId) {
+            setSelectedRoomId(json.data[0].id);
+          }
+        }
+      } catch (e) {
+        console.warn("Fetch chat rooms failed:", e);
+      } finally {
+        if (isMounted) setIsLoadingRooms(false);
+      }
+    };
+
+    fetchDbRooms();
+  }, [currentUser, roomParam]);
+
+  // Combined rooms prioritizing real database rooms (No Mockups)
+  const allAvailableRooms = React.useMemo(() => {
+    const map = new Map();
+    // 1. Real DB rooms first
+    realDbRooms.forEach((r) => map.set(r.id, r));
+    // 2. Real orderRooms from AppContext if any
+    (orderRooms || []).forEach((r) => {
+      if (r && r.id && !map.has(r.id)) {
+        map.set(r.id, r);
+      }
+    });
+
+    return Array.from(map.values());
+  }, [realDbRooms, orderRooms]);
+
+  // Selected Room State
   const [selectedRoomId, setSelectedRoomId] = useState(() => {
     if (roomParam) return roomParam;
-    if (partnerIdParam || serviceIdParam) {
-      const match = orderRooms?.find(
-        (r) =>
-          r.helper?.id === partnerIdParam ||
-          r.requestId === serviceIdParam ||
-          (r.id && partnerIdParam && r.id.includes(partnerIdParam))
-      );
-      if (match) return match.id;
-    }
-    return orderRooms?.[0]?.id || "order-room-101";
+    return "";
   });
 
-  const selectedRoom = (orderRooms && orderRooms.length > 0)
-    ? (orderRooms.find((r) => r.id === selectedRoomId) || orderRooms[0])
-    : null;
+  const selectedRoom = React.useMemo(() => {
+    if (!allAvailableRooms || allAvailableRooms.length === 0) return null;
+    if (selectedRoomId) {
+      const match = allAvailableRooms.find(
+        (r) => r.id === selectedRoomId || r.requestId === selectedRoomId || (selectedRoomId && r.id?.includes(selectedRoomId))
+      );
+      if (match) return match;
+    }
+    return allAvailableRooms[0] || null;
+  }, [allAvailableRooms, selectedRoomId]);
 
   useEffect(() => {
     if (roomParam) {
       setSelectedRoomId(roomParam);
     } else if (partnerIdParam || serviceIdParam) {
-      const existing = orderRooms.find(
+      const existing = allAvailableRooms.find(
         (r) =>
           r.helper?.id === partnerIdParam ||
           r.requestId === serviceIdParam ||
@@ -253,40 +302,18 @@ function ChatWorkspaceContent() {
       );
       if (existing) {
         setSelectedRoomId(existing.id);
-      } else if (startJasaInquiry) {
-        const catalogItem = serviceIdParam ? getCatalogServiceById(serviceIdParam) : null;
-        const providerItem =
-          catalogItem?.provider ||
-          (partnerIdParam ? PROVIDERS_DATA?.find((p) => p.id === partnerIdParam) : null);
-
-        if (providerItem) {
-          const newRoom = startJasaInquiry({
-            serviceId: serviceIdParam || catalogItem?.id,
-            serviceTitle: catalogItem?.title,
-            serviceImage: catalogItem?.image || providerItem?.avatar,
-            servicePrice: catalogItem?.price,
-            providerId: providerItem?.id,
-            providerName: providerItem?.name,
-            providerAvatar: providerItem?.avatar,
-            providerPhone: providerItem?.phone,
-            providerRating: providerItem?.rating,
-            providerAddress: providerItem?.address || providerItem?.location,
-            category: catalogItem?.category || providerItem?.category,
-          });
-          if (newRoom?.id) {
-            setSelectedRoomId(newRoom.id);
-          }
-        }
       }
+    } else if (allAvailableRooms.length > 0 && !selectedRoomId) {
+      setSelectedRoomId(allAvailableRooms[0].id);
     }
-  }, [roomParam, partnerIdParam, serviceIdParam, orderRooms, startJasaInquiry]);
+  }, [roomParam, partnerIdParam, serviceIdParam, allAvailableRooms]);
 
   // If selected room was deleted, fallback to another room
   useEffect(() => {
-    if (orderRooms && !orderRooms.some((r) => r.id === selectedRoomId) && orderRooms.length > 0) {
-      setSelectedRoomId(orderRooms[0].id);
+    if (allAvailableRooms && !allAvailableRooms.some((r) => r.id === selectedRoomId) && allAvailableRooms.length > 0) {
+      setSelectedRoomId(allAvailableRooms[0].id);
     }
-  }, [orderRooms, selectedRoomId]);
+  }, [allAvailableRooms, selectedRoomId]);
 
   // Responsive UI States
   const [mobileView, setMobileView] = useState("chat"); // 'list' | 'chat'
@@ -581,14 +608,14 @@ function ChatWorkspaceContent() {
 
   // Realtime Category Counts for Tabs (Semua, Jasa, Bantuan, Sewa)
   const categoryCounts = {
-    all: orderRooms.length,
-    jasa: orderRooms.filter((r) => getCategoryMeta(r).type === "jasa").length,
-    bantuan: orderRooms.filter((r) => getCategoryMeta(r).type === "bantuan").length,
-    sewa: orderRooms.filter((r) => getCategoryMeta(r).type === "sewa").length,
+    all: allAvailableRooms.length,
+    jasa: allAvailableRooms.filter((r) => getCategoryMeta(r).type === "jasa").length,
+    bantuan: allAvailableRooms.filter((r) => getCategoryMeta(r).type === "bantuan").length,
+    sewa: allAvailableRooms.filter((r) => getCategoryMeta(r).type === "sewa").length,
   };
 
   // Filtered Rooms with Category & Status Filters
-  const filteredRooms = orderRooms.filter((room) => {
+  const filteredRooms = allAvailableRooms.filter((room) => {
     const meta = getCategoryMeta(room);
     if (categoryFilter !== "all" && meta.type !== categoryFilter) {
       return false;
@@ -892,11 +919,17 @@ function ChatWorkspaceContent() {
                         : "hover:bg-slate-50 border-l-[3px] border-l-transparent"
                     }`}
                   >
-                    <img
-                      src={partner.avatar}
-                      alt={partner.name}
-                      className="w-9 h-9 rounded-full object-cover border border-slate-200 shrink-0 mt-0.5"
-                    />
+                    {partner.avatar && !partner.avatar.includes("images.unsplash.com") ? (
+                      <img
+                        src={partner.avatar}
+                        alt={partner.name}
+                        className="w-9 h-9 rounded-full object-cover border border-slate-200 shrink-0 mt-0.5"
+                      />
+                    ) : (
+                      <div className="w-9 h-9 rounded-full bg-linear-to-br from-[#1683FF] to-[#0E5FCC] text-white flex items-center justify-center font-bold text-xs shrink-0 mt-0.5 shadow-2xs">
+                        {partner.name ? partner.name.slice(0, 2).toUpperCase() : "HL"}
+                      </div>
+                    )}
                     <div className="flex-1 min-w-0 pr-7">
                       {/* Baris 1: Nama + Status Badge */}
                       <div className="flex items-center gap-1.5 mb-0.5 min-w-0">
@@ -959,23 +992,47 @@ function ChatWorkspaceContent() {
           ${mobileView === "chat" ? "flex" : "hidden"}
           md:flex flex-1 flex-col bg-white overflow-hidden relative z-10
         `}>
-          
-          {/* ============================================================= */}
-          {/* 2. IDENTITAS TOKO / MITRA (~48-52px) */}
-          {/* ============================================================= */}
-          {selectedRoom && (
-            <div className="h-12 border-b border-slate-100 px-3 sm:px-4 flex items-center justify-between gap-2 bg-white shrink-0 overflow-hidden">
-              <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 inline-block" />
-                <span className="font-bold text-slate-900 text-xs sm:text-sm truncate min-w-0">
-                  {activeRole === "requester" ? selectedRoom.helper?.name : selectedRoom.requester?.name}
-                </span>
-                <span className="text-[11px] text-slate-500 font-medium shrink-0 whitespace-nowrap">
-                  ({activeRole === "requester"
-                    ? (selectedRoom.orderType === "rental" ? "Mitra Sewa" : selectedRoom.orderType === "bantuan" ? "Helper" : "Mitra Jasa")
-                    : (selectedRoom.orderType === "rental" ? "Penyewa" : "Pemesan")})
-                </span>
+          {!selectedRoom ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-[#F8FAFC]">
+              <div className="w-16 h-16 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center text-[#1683FF] mb-4 shadow-xs">
+                <MessageSquare className="w-8 h-8" />
               </div>
+              <h3 className="text-base font-bold text-slate-800 mb-1">Belum Ada Obrolan Aktif</h3>
+              <p className="text-xs text-slate-500 max-w-sm mb-6 leading-relaxed">
+                Ruang obrolan transaksi akan otomatis muncul setelah Anda mengajukan bantuan, memesan layanan jasa, atau menyewa peralatan.
+              </p>
+              <div className="flex items-center gap-3">
+                <Link
+                  href="/bantuan"
+                  className="px-4 py-2 bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer"
+                >
+                  Jelajahi Bantuan
+                </Link>
+                <Link
+                  href="/jasa"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+                >
+                  Cari Layanan Jasa
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* ============================================================= */}
+              {/* 2. IDENTITAS TOKO / MITRA (~48-52px) */}
+              {/* ============================================================= */}
+              <div className="h-12 border-b border-slate-100 px-3 sm:px-4 flex items-center justify-between gap-2 bg-white shrink-0 overflow-hidden">
+                <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 inline-block" />
+                  <span className="font-bold text-slate-900 text-xs sm:text-sm truncate min-w-0">
+                    {activeRole === "requester" ? selectedRoom.helper?.name : selectedRoom.requester?.name}
+                  </span>
+                  <span className="text-[11px] text-slate-500 font-medium shrink-0 whitespace-nowrap">
+                    ({activeRole === "requester"
+                      ? (selectedRoom.orderType === "rental" ? "Mitra Sewa" : selectedRoom.orderType === "bantuan" ? "Helper" : "Mitra Jasa")
+                      : (selectedRoom.orderType === "rental" ? "Penyewa" : "Pemesan")})
+                  </span>
+                </div>
 
               <div className="flex items-center gap-1 shrink-0">
                 {/* Telepon Action */}
@@ -1011,14 +1068,11 @@ function ChatWorkspaceContent() {
                 </button>
               </div>
             </div>
-          )}
 
-          {/* ============================================================= */}
-          {/* 3. STATUS TRANSAKSI + AKSI */}
-          {/* ============================================================= */}
-          {selectedRoom && (
+            {/* ============================================================= */}
+            {/* 3. STATUS TRANSAKSI + AKSI */}
+            {/* ============================================================= */}
             <ChatFlowTracker room={selectedRoom} activeRole={activeRole} />
-          )}
 
           {/* Payment safety bar */}
           <div className="px-3 sm:px-4 py-2 bg-white border-b border-slate-100 flex items-center justify-between text-[11px] text-slate-500 shrink-0">
@@ -1387,11 +1441,17 @@ function ChatWorkspaceContent() {
                   className={`group flex items-end gap-2 ${isMe ? "justify-end" : "justify-start"}`}
                 >
                   {!isMe && (
-                    <img
-                      src={selectedRoom?.helper?.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80"}
-                      alt={msg.senderName}
-                      className="w-7 h-7 rounded-full object-cover border border-slate-200 shrink-0 mb-0.5"
-                    />
+                    selectedRoom?.helper?.avatar && !selectedRoom.helper.avatar.includes("images.unsplash.com") ? (
+                      <img
+                        src={selectedRoom.helper.avatar}
+                        alt={msg.senderName}
+                        className="w-7 h-7 rounded-full object-cover border border-slate-200 shrink-0 mb-0.5"
+                      />
+                    ) : (
+                      <div className="w-7 h-7 rounded-full bg-blue-100 text-[#1683FF] font-bold text-[10px] flex items-center justify-center shrink-0 mb-0.5 border border-blue-200">
+                        {(msg.senderName || selectedRoom?.helper?.name || "H")[0].toUpperCase()}
+                      </div>
+                    )
                   )}
 
                   <div className={`flex flex-col ${
@@ -1673,12 +1733,15 @@ function ChatWorkspaceContent() {
               <Send className="w-4 h-4" />
             </button>
           </form>
+          </>
+        )}
         </div>
 
         {/* ------------------------------------------------------------- */}
         {/* COLUMN 3: RIGHT PANEL - RINCIAN RENCANA ATAU PESANAN */}
         {/* (RESPONSIVE: SLIDE-OVER ON TABLET/MOBILE, FIXED ON DESKTOP) */}
         {/* ------------------------------------------------------------- */}
+        {selectedRoom && (
         <aside className={`
           ${showRightDrawerMobile ? "fixed inset-y-14 right-0 z-40 w-80 shadow-2xl flex" : "hidden"}
           ${isDetailsOpen ? "lg:flex" : "lg:hidden"}
@@ -2118,6 +2181,7 @@ function ChatWorkspaceContent() {
           )}
 
         </aside>
+        )}
 
       </div>
 

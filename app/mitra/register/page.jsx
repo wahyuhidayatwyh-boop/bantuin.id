@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, Suspense } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -10,6 +10,7 @@ import { INDONESIA_REGION_DATA, PROVINCE_LIST } from "@/lib/data/indonesiaRegion
 import { detectRealtimeLocation } from "@/lib/services/gpsService";
 import CustomSelect from "@/components/ui/CustomSelect";
 import { validateFile, getAcceptAttribute } from "@/lib/utils/fileValidation";
+import AuthSkeleton from "@/components/skeletons/AuthSkeleton";
 import {
   Store,
   ShieldCheck,
@@ -32,7 +33,7 @@ import {
 } from "lucide-react";
 import CategoryIcon from "@/components/common/CategoryIcon";
 
-export default function MitraRegisterPage() {
+function MitraRegisterPageContent() {
   const router = useRouter();
   const { addToast } = useApp();
 
@@ -822,5 +823,13 @@ export default function MitraRegisterPage() {
       </div>
 
     </div>
+  );
+}
+
+export default function MitraRegisterPage() {
+  return (
+    <Suspense fallback={<AuthSkeleton />}>
+      <MitraRegisterPageContent />
+    </Suspense>
   );
 }

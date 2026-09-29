@@ -89,15 +89,9 @@ function PembayaranContent() {
   const targetOffer = 
     (request?.offers || []).find((o) => o.id === offerId || o.helperId === offerId) ||
     request?.offers?.[0] ||
-    {
-      id: "off-301",
-      helperId: "user-hlp-4",
-      helperName: "Clarissa Putri, S.Ds",
-      helperAvatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80",
-      proposedPrice: 150000
-    };
+    null;
 
-  const helperProposedPrice = Number(targetOffer.proposedPrice) || Number(request?.rewardAmount) || 35000;
+  const helperProposedPrice = Number(targetOffer?.proposedPrice) || Number(request?.rewardAmount) || 0;
   const platformFee = Math.round(helperProposedPrice * 0.08); // 8% potongan Bantuin
   const helperNetPayout = helperProposedPrice - platformFee;
   
@@ -153,8 +147,8 @@ function PembayaranContent() {
       setIsProcessing(false);
       setIsSuccess(true);
 
-      const newRoomId = selectHelper ? selectHelper(request?.id, targetOffer, roomId) : null;
-      const targetRoomId = newRoomId || roomId || "order-room-101";
+      const newRoomId = selectHelper ? selectHelper(request?.id || id, targetOffer, roomId) : null;
+      const targetRoomId = newRoomId || roomId || request?.id || id;
       const next = encodeURIComponent(`/chat?room=${targetRoomId}`);
       router.push(`/pembayaran/berhasil?type=bantuan&title=${encodeURIComponent(request?.title || "Permintaan Bantuan")}&amount=${finalAmount}&next=${next}`);
     }, 1500);
@@ -208,6 +202,50 @@ function PembayaranContent() {
     }
   ];
 
+  if (isLoadingRequest) {
+    return (
+      <div className="min-h-screen flex flex-col bg-[#F4F7FB] text-slate-800 font-sans">
+        <Navbar />
+        <div className="flex-1 max-w-[1400px] w-full mx-auto px-4 sm:px-8 py-12 flex flex-col items-center justify-center">
+          <div className="bg-white p-8 rounded-3xl border border-slate-200/90 shadow-sm flex flex-col items-center text-center max-w-md w-full animate-in fade-in duration-300">
+            <Loader2 className="w-10 h-10 text-[#1683FF] animate-spin mb-4" />
+            <h3 className="font-bold text-slate-900 text-base sm:text-lg">Memuat Rincian Pembayaran</h3>
+            <p className="text-xs sm:text-sm text-slate-500 mt-1">
+              Menghubungkan ke sistem transaksi terverifikasi...
+            </p>
+          </div>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
+
+  if (!request) {
+    return (
+      <div className="min-h-screen flex flex-col bg-[#F4F7FB] text-slate-800 font-sans">
+        <Navbar />
+        <div className="flex-1 max-w-[1400px] w-full mx-auto px-4 sm:px-8 py-12 flex flex-col items-center justify-center">
+          <div className="bg-white p-8 rounded-3xl border border-slate-200/90 shadow-sm flex flex-col items-center text-center max-w-md w-full">
+            <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 mb-4">
+              <ShieldCheck className="w-7 h-7" />
+            </div>
+            <h3 className="font-bold text-slate-900 text-lg">Bantuan Tidak Ditemukan</h3>
+            <p className="text-sm text-slate-500 mt-1 mb-6">
+              Data permintaan bantuan tidak dapat dimuat atau telah dihapus.
+            </p>
+            <Link
+              href="/explore"
+              className="w-full py-3 px-4 bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-sm rounded-xl transition text-center"
+            >
+              Kembali ke Jelajah
+            </Link>
+          </div>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-[#F4F7FB] text-slate-800 font-sans">
       <Navbar />
@@ -216,7 +254,7 @@ function PembayaranContent() {
       <div className="bg-white border-b border-slate-200/80 shadow-2xs">
         <div className="max-w-[1400px] mx-auto px-4 sm:px-8 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-2.5">
           <Link
-            href={`/bantuan/${request.id}`}
+            href={`/bantuan/${request?.id || id}`}
             className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-slate-600 hover:text-[#1683FF] transition cursor-pointer shrink-0"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -384,17 +422,23 @@ function PembayaranContent() {
 
               {/* Helper & Task Card */}
               <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-50/70 border border-slate-200/80 flex items-start sm:items-center gap-3">
-                <img
-                  src={targetOffer.helperAvatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80"}
-                  alt={targetOffer.helperName}
-                  className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover shrink-0 border border-slate-200"
-                />
+                {targetOffer?.helperAvatar ? (
+                  <img
+                    src={targetOffer.helperAvatar}
+                    alt={targetOffer?.helperName || "Helper"}
+                    className="w-12 h-12 sm:w-14 sm:h-14 rounded-full object-cover shrink-0 border border-slate-200"
+                  />
+                ) : (
+                  <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-linear-to-br from-[#1683FF] to-[#0E5FCC] text-white flex items-center justify-center font-bold text-sm sm:text-base shrink-0 shadow-xs">
+                    {targetOffer?.helperName ? targetOffer.helperName.slice(0, 2).toUpperCase() : "HL"}
+                  </div>
+                )}
                 <div className="min-w-0 flex-1">
                   <h3 className="text-xs sm:text-sm font-bold text-slate-900 leading-snug break-words">
-                    {targetOffer.helperName}
+                    {targetOffer?.helperName || "Helper Terpilih"}
                   </h3>
                   <div className="text-xs text-slate-500 leading-snug break-words mt-0.5">
-                    Tugas: <strong className="text-slate-700">{request.title}</strong>
+                    Tugas: <strong className="text-slate-700">{request?.title || "Permintaan Bantuan"}</strong>
                   </div>
                 </div>
               </div>

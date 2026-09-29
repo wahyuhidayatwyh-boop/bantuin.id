@@ -16,7 +16,7 @@ export async function POST(req) {
 
     // 1. Verifikasi validity refresh token
     const decoded = verifyRefreshToken(refreshToken);
-    if (!decoded || decoded.type !== "refresh") {
+    if (!decoded || (!decoded.id && !decoded.email)) {
       return NextResponse.json(
         { error: "Refresh token tidak valid atau telah kedaluwarsa. Silakan login kembali." },
         { status: 401 }
@@ -24,8 +24,13 @@ export async function POST(req) {
     }
 
     // 2. Ambil profil user terbaru dari database
-    const profile = await prisma.profile.findUnique({
-      where: { email: decoded.email },
+    const profile = await prisma.profile.findFirst({
+      where: {
+        OR: [
+          ...(decoded.id ? [{ id: decoded.id }] : []),
+          ...(decoded.email ? [{ email: decoded.email.toLowerCase() }] : []),
+        ],
+      },
     });
 
     if (!profile) {
@@ -48,7 +53,7 @@ export async function POST(req) {
       storeName: profile.partnerBusinessName || "",
       campusName: profile.campusName || "Universitas Indonesia",
       address: profile.partnerAddress || profile.campusName || "",
-      avatarUrl: profile.avatarUrl || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80",
+      avatarUrl: profile.avatarUrl && !profile.avatarUrl.includes("images.unsplash.com") ? profile.avatarUrl : null,
       verificationStatus: profile.verificationStatus || "unverified",
       authProvider: profile.authProvider || "local",
       ratingAvg: Number(profile.ratingAvg) || 5.0,

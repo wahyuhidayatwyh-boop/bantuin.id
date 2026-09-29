@@ -8,8 +8,6 @@ import {
   INITIAL_SERVICES,
   INITIAL_HELPERS,
   INITIAL_PARTNERS,
-  INITIAL_ORDER_ROOMS,
-  INITIAL_ORDER_ROOM,
   BANTUIN_POINTS,
 } from "@/lib/mock/mockData";
 import { initialVouchers, isVoucherLocationMatch } from "@/lib/mock/voucherData";
@@ -75,17 +73,72 @@ export function AppProvider({ children }) {
   // A visitor is a guest until a valid persisted session is found. This avoids
   // treating the mock profile as an authenticated account.
   useEffect(() => {
+    let isMounted = true;
     const syncAuthSession = async () => {
       const session = await authService.getSession();
-      setCurrentUser(session?.user || INITIAL_USER);
-      setIsAuthenticated(Boolean(session?.user));
-      setIsAuthReady(true);
+      if (isMounted) {
+        const rawUser = session?.user || INITIAL_USER;
+        const baseUser = rawUser ? {
+          ...rawUser,
+          avatarUrl: rawUser.avatarUrl && rawUser.avatarUrl.includes("images.unsplash.com") ? null : (rawUser.avatarUrl || null),
+        } : null;
+        setCurrentUser(baseUser);
+        setIsAuthenticated(Boolean(session?.user));
+        setIsAuthReady(true);
+      }
       refreshUserActivities();
+
+      // Sinkronkan profil terbaru (termasuk avatarUrl resmi Supabase Storage dari DB)
+      try {
+        const token = await authService.getValidAccessToken();
+        if (token) {
+          const res = await fetch("/api/auth/me", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const json = await res.json();
+            if (json.success && json.data && isMounted) {
+              const freshProfile = json.data;
+              const cleanAvatarUrl = freshProfile.avatarUrl && freshProfile.avatarUrl.includes("images.unsplash.com")
+                ? null
+                : (freshProfile.avatarUrl || null);
+              
+              setCurrentUser((prev) => ({
+                ...prev,
+                ...freshProfile,
+                avatarUrl: cleanAvatarUrl,
+              }));
+              authService.updateProfile({ ...freshProfile, avatarUrl: cleanAvatarUrl }, false);
+            }
+          }
+        }
+      } catch (err) {
+        // silent fallback for offline / background sync
+      }
+
+      // Sinkronkan bilik chat resmi (order_rooms) dari database
+      try {
+        const token = await authService.getValidAccessToken();
+        if (token) {
+          const roomRes = await fetch("/api/chat/rooms", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (roomRes.ok) {
+            const roomJson = await roomRes.json();
+            if (roomJson.success && Array.isArray(roomJson.data) && isMounted) {
+              setOrderRooms(roomJson.data);
+            }
+          }
+        }
+      } catch (e) {
+        // silent fallback
+      }
     };
     syncAuthSession();
     window.addEventListener("bantuin_auth_changed", syncAuthSession);
     window.addEventListener("bantuin_activity_updated", refreshUserActivities);
     return () => {
+      isMounted = false;
       window.removeEventListener("bantuin_auth_changed", syncAuthSession);
       window.removeEventListener("bantuin_activity_updated", refreshUserActivities);
     };
@@ -289,7 +342,35 @@ export function AppProvider({ children }) {
   const [services, setServices] = useState(INITIAL_SERVICES);
   const [helpers, setHelpers] = useState(INITIAL_HELPERS);
   const [partners, setPartners] = useState(INITIAL_PARTNERS);
-  const [orderRooms, setOrderRooms] = useState(INITIAL_ORDER_ROOMS);
+  const [orderRooms, setOrderRooms] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("bantuin_order_rooms_state");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            // Bersihkan data dummy mockup
+            const clean = parsed.filter((r) => !r.id?.startsWith("order-room-10") && !r.id?.includes("mock") && !r.partner?.name?.includes("Focus Lens") && !r.partner?.name?.includes("ProSound") && !r.partner?.name?.includes("Garuda"));
+            return clean;
+          }
+        }
+      } catch (e) {}
+    }
+    return [];
+  });
+
+  // Sync orderRooms to localStorage whenever changed
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (orderRooms && orderRooms.length > 0) {
+        localStorage.setItem("bantuin_order_rooms_state", JSON.stringify(orderRooms));
+      }
+    } catch (e) {
+      console.warn("Could not sync orderRooms state:", e);
+    }
+  }, [orderRooms]);
+
   const [activeOrderRoomId, setActiveOrderRoomId] = useState("order-room-dedi");
   const [bantuinPoints] = useState(BANTUIN_POINTS);
 
@@ -948,31 +1029,36 @@ export function AppProvider({ children }) {
     const helperPayoutAmount = baseAmount - platformFee;
 
     const newOrderRoomId = existingRoomId || `order-room-${Date.now()}`;
+    const cleanHelperAvatar = offer?.helperAvatar && !offer.helperAvatar.includes("images.unsplash.com") ? offer.helperAvatar : null;
+    const cleanRequesterAvatar = selectedReq.requester?.avatar || selectedReq.requester?.avatarUrl || currentUser?.avatarUrl || null;
+
     const newOrderRoom = {
       id: newOrderRoomId,
       requestId: selectedReq.id,
       requestTitle: selectedReq.title,
+      categoryType: "bantuan",
+      orderType: "task",
+      category: selectedReq.category || "Bantuan",
       requester: {
         id: selectedReq.requester?.id || currentUser.id,
-        name: selectedReq.requester?.name || currentUser.fullName,
-        avatar: selectedReq.requester?.avatar || currentUser.avatar,
-        phone: "081298765432",
-        rating: selectedReq.requester?.rating || 4.95,
+        name: selectedReq.requester?.name || selectedReq.requester?.fullName || currentUser.fullName,
+        avatar: cleanRequesterAvatar,
+        phone: selectedReq.requester?.phoneNumber || "081298765432",
+        rating: selectedReq.requester?.rating || 5.0,
       },
       helper: {
         id: offer?.helperId || "user-hlp-1",
         name: offer?.helperName || "Helper Bantuin",
-        avatar: offer?.helperAvatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80",
-        phone: "081311223344",
-        rating: offer?.rating || 4.9,
+        avatar: cleanHelperAvatar,
+        phone: offer?.helperPhone || "081311223344",
+        rating: offer?.helperRating || offer?.rating || 5.0,
       },
       mode: selectedReq.mode || "offline",
-      category: selectedReq.category || "Bantuan",
       lockedAmount: baseAmount,
       platformFee: platformFee,
       helperPayoutAmount: helperPayoutAmount,
-      pickupPoint: selectedReq.pickupPoint || selectedReq.locationName,
-      destination: selectedReq.locationName,
+      pickupPoint: selectedReq.pickupPoint || selectedReq.locationName || "Titik Temu Aman",
+      destination: selectedReq.locationName || "Titik Temu Aman",
       deadline: selectedReq.deadline,
       orderStatus: "room_created",
       xenditStatus: "HELD_IN_ESCROW",
@@ -986,10 +1072,18 @@ export function AppProvider({ children }) {
           id: `msg-${Date.now()}`,
           senderId: "system",
           senderName: "Bantuin System",
-          message: `Dana sebesar Rp${baseAmount.toLocaleString('id-ID')} telah berhasil diverifikasi melalui Payment Gateway. Helper dapat segera mulai pengerjaan tugas!`,
+          message: `Dana sebesar Rp${baseAmount.toLocaleString('id-ID')} telah berhasil diverifikasi melalui Payment Gateway Resmi Bantuin. Helper dapat segera mulai pengerjaan tugas!`,
           timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
           isSystem: true,
         },
+        ...(offer?.pitchMessage ? [{
+          id: `msg-pitch-${Date.now()}`,
+          senderId: offer.helperId || "helper",
+          senderName: offer.helperName || "Helper",
+          senderAvatar: cleanHelperAvatar,
+          message: offer.pitchMessage,
+          timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
+        }] : [])
       ],
     };
 
@@ -997,8 +1091,9 @@ export function AppProvider({ children }) {
       const existingIdx = prev.findIndex(
         (r) => r.id === existingRoomId || (r.requestId === selectedReq.id && r.helper?.id === offer?.helperId)
       );
+      let updated;
       if (existingIdx !== -1) {
-        const updated = [...prev];
+        updated = [...prev];
         updated[existingIdx] = {
           ...updated[existingIdx],
           lockedAmount: baseAmount,
@@ -1012,15 +1107,21 @@ export function AppProvider({ children }) {
               id: `msg-${Date.now()}`,
               senderId: "system",
               senderName: "Bantuin System",
-              message: `Dana sebesar Rp${baseAmount.toLocaleString('id-ID')} telah berhasil diverifikasi melalui Payment Gateway Bantuin. Status penugasan kini AKTIF!`,
+              message: `Dana sebesar Rp${baseAmount.toLocaleString('id-ID')} telah berhasil diverifikasi melalui Payment Gateway Resmi Bantuin. Status penugasan kini AKTIF!`,
               timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
               isSystem: true,
             },
           ],
         };
-        return updated;
+      } else {
+        updated = [newOrderRoom, ...prev];
       }
-      return [newOrderRoom, ...prev];
+      try {
+        if (typeof window !== "undefined") {
+          localStorage.setItem("bantuin_order_rooms_state", JSON.stringify(updated));
+        }
+      } catch (e) {}
+      return updated;
     });
 
     setActiveOrderRoomId(newOrderRoomId);
@@ -1493,18 +1594,20 @@ export function AppProvider({ children }) {
     addToast("Pengaturan Jasa Disimpan", "Preferensi ketersediaan dan tarif berhasil diperbarui.");
   };
 
-  // 7. Send Chat Message with Anti-Disintermediation check
-  const sendChatMessage = (orderRoomId, messageText, extraData = {}) => {
+  // 7. Send Chat Message with Anti-Disintermediation check & PostgreSQL persistence
+  const sendChatMessage = async (orderRoomId, messageText, extraData = {}) => {
     const check = detectDisintermediation(messageText);
     
     const newMsg = {
       id: `msg-${Date.now()}`,
-      senderId: currentUser.id,
-      senderName: currentUser.fullName,
+      senderId: currentUser?.id || extraData?.senderId || "user-req",
+      senderName: currentUser?.fullName || extraData?.senderName || "Saya",
+      senderAvatar: currentUser?.avatarUrl || extraData?.senderAvatar || null,
       message: messageText,
       hasWarning: check.flagged,
       warningReason: check.reason,
-      timestamp: new Date().toISOString(),
+      timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
+      createdAt: new Date().toISOString(),
       ...extraData,
     };
 
@@ -1519,6 +1622,25 @@ export function AppProvider({ children }) {
         return room;
       })
     );
+
+    // Simpan pesan ke PostgreSQL chat_messages table
+    try {
+      const token = await authService.getValidAccessToken();
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      await fetch("/api/chat/messages", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          orderRoomId,
+          message: messageText,
+          senderId: currentUser?.id || extraData?.senderId,
+        }),
+      });
+    } catch (err) {
+      console.warn("Could not persist chat message to database:", err);
+    }
 
     if (check.flagged) {
       addToast("Peringatan Keamanan", check.reason, "warning");

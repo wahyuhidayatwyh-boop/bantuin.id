@@ -99,13 +99,8 @@ export async function POST(req) {
         payoutBank: bankInfo?.bankName || null,
         payoutAccountNumber: bankInfo?.accountNumber || null,
         payoutAccountHolder: bankInfo?.accountHolder || fullName || null,
-        verificationStatus: verificationStatus === "verified" ? "verified" : (idCardUrl ? "pending_review" : "unverified"),
-        avatarUrl:
-          accountRole === "provider"
-            ? "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80"
-            : isPartner
-            ? "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=400&q=80"
-            : "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80",
+        verificationStatus: idCardUrl ? "pending_review" : "unverified",
+        avatarUrl: null,
       },
     });
 
@@ -115,13 +110,13 @@ export async function POST(req) {
         where: { email: normalizedEmail },
         update: {
           name: fullName || "Pengguna Baru",
-          verified: verificationStatus === "verified" || authProvider === "google",
+          verified: false,
         },
         create: {
           email: normalizedEmail,
           name: fullName || "Pengguna Baru",
           password: hashedPassword,
-          verified: verificationStatus === "verified" || authProvider === "google",
+          verified: false,
         },
       });
     } catch {

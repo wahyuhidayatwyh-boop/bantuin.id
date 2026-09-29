@@ -75,7 +75,7 @@ export async function GET(req) {
       email: userProfile.email,
       fullName: userProfile.fullName || "",
       phoneNumber: userProfile.phoneNumber || "",
-      avatarUrl: userProfile.avatarUrl || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80",
+      avatarUrl: userProfile.avatarUrl && !userProfile.avatarUrl.includes("images.unsplash.com") ? userProfile.avatarUrl : null,
       bio: userProfile.bio || "",
       campusName: userProfile.campusName || "Bekasi Barat, Kota Bekasi",
       accountRole: userProfile.accountRole || "user",
@@ -87,9 +87,11 @@ export async function GET(req) {
       idNumber: userProfile.idNumber || "",
       idCardUrl: userProfile.idCardUrl || null,
       selfieUrl: userProfile.selfieUrl || null,
-      payoutBank: userProfile.payoutBank || "BCA",
+      payoutBank: userProfile.payoutBank || "",
       payoutAccountNumber: userProfile.payoutAccountNumber || "",
-      payoutAccountHolder: userProfile.payoutAccountHolder || userProfile.fullName || "",
+      payoutAccountHolder: userProfile.payoutAccountHolder || "",
+      authProvider: userProfile.authProvider || (userProfile.password ? "local" : "google"),
+      hasPassword: Boolean(userProfile.password),
       ratingAvg: Number(userProfile.ratingAvg) || 5.0,
       ratingCount: userProfile.ratingCount || 0,
       completedHelpsCount: totalCompleted > 0 ? totalCompleted : (userProfile.completedHelpsCount || 0),
@@ -168,6 +170,8 @@ export async function PUT(req) {
       idNumber,
       idCardUrl,
       selfieUrl,
+      accountRole,
+      verificationStatus,
       currentPassword,
       newPassword,
     } = body;
@@ -199,10 +203,10 @@ export async function PUT(req) {
       updateData.payoutAccountNumber = payoutAccountNumber.trim();
     }
     if (typeof payoutAccountHolder === "string") {
-      updateData.payoutAccountHolder = payoutAccountHolder.trim();
+      updateData.payoutAccountHolder = payoutAccountHolder.trim().toUpperCase();
     }
 
-    // 3. Update info KYC jika diberikan
+    // 3. Update info KYC dan Role Akun jika diberikan
     if (typeof idNumber === "string" && idNumber.trim()) {
       updateData.idNumber = idNumber.trim();
     }
@@ -212,29 +216,38 @@ export async function PUT(req) {
     if (typeof selfieUrl === "string" && selfieUrl.trim()) {
       updateData.selfieUrl = selfieUrl.trim();
     }
+    if (typeof accountRole === "string" && ["user", "provider", "partner", "admin"].includes(accountRole.trim().toLowerCase())) {
+      updateData.accountRole = accountRole.trim().toLowerCase();
+    }
+    if (typeof verificationStatus === "string" && ["unverified", "pending_review", "verified", "rejected", "suspended"].includes(verificationStatus.trim().toLowerCase())) {
+      updateData.verificationStatus = verificationStatus.trim().toLowerCase();
+    }
 
     // 4. Update Kata Sandi jika diminta
     if (newPassword) {
-      if (!currentPassword && userProfile.password) {
-        return NextResponse.json(
-          { success: false, error: "Kata sandi saat ini wajib diisi untuk mengubah kata sandi." },
-          { status: 400 }
-        );
-      }
-
-      if (userProfile.password) {
-        let isMatch = false;
-        if (userProfile.password.startsWith("$2a$") || userProfile.password.startsWith("$2b$") || userProfile.password.startsWith("$2y$")) {
-          isMatch = await bcrypt.compare(currentPassword, userProfile.password);
-        } else {
-          isMatch = currentPassword === userProfile.password;
-        }
-
-        if (!isMatch) {
+      const isGoogleAuth = userProfile.authProvider === "google" || !userProfile.password;
+      if (!isGoogleAuth) {
+        if (!currentPassword && userProfile.password) {
           return NextResponse.json(
-            { success: false, error: "Kata sandi saat ini tidak sesuai." },
+            { success: false, error: "Kata sandi saat ini wajib diisi untuk mengubah kata sandi." },
             { status: 400 }
           );
+        }
+
+        if (userProfile.password) {
+          let isMatch = false;
+          if (userProfile.password.startsWith("$2a$") || userProfile.password.startsWith("$2b$") || userProfile.password.startsWith("$2y$")) {
+            isMatch = await bcrypt.compare(currentPassword, userProfile.password);
+          } else {
+            isMatch = currentPassword === userProfile.password;
+          }
+
+          if (!isMatch) {
+            return NextResponse.json(
+              { success: false, error: "Kata sandi saat ini tidak sesuai." },
+              { status: 400 }
+            );
+          }
         }
       }
 
@@ -246,6 +259,7 @@ export async function PUT(req) {
       }
 
       updateData.password = await bcrypt.hash(newPassword, 10);
+      updateData.authProvider = "local";
     }
 
     // Simpan ke Prisma Profile
@@ -281,15 +295,15 @@ export async function PUT(req) {
       campusName: updatedProfile.campusName || "Bekasi Barat, Kota Bekasi",
       address: updatedProfile.partnerAddress || updatedProfile.campusName || "Bekasi Barat, Kota Bekasi",
       avatarUrl: updatedProfile.avatarUrl,
-      verificationStatus: updatedProfile.verificationStatus || "verified",
+      verificationStatus: updatedProfile.verificationStatus || "unverified",
       authProvider: updatedProfile.authProvider || "local",
-      payoutBank: updatedProfile.payoutBank || "BCA",
+      payoutBank: updatedProfile.payoutBank || "",
       payoutAccountNumber: updatedProfile.payoutAccountNumber || "",
-      payoutAccountHolder: updatedProfile.payoutAccountHolder || updatedProfile.fullName || "",
+      payoutAccountHolder: updatedProfile.payoutAccountHolder || "",
       bankInfo: {
-        bankName: updatedProfile.payoutBank || "BCA",
+        bankName: updatedProfile.payoutBank || "",
         accountNumber: updatedProfile.payoutAccountNumber || "",
-        accountHolder: updatedProfile.payoutAccountHolder || updatedProfile.fullName || "",
+        accountHolder: updatedProfile.payoutAccountHolder || "",
       },
       ratingAvg: Number(updatedProfile.ratingAvg) || 5.0,
       ratingCount: updatedProfile.ratingCount || 0,

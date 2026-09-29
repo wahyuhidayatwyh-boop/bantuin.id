@@ -124,8 +124,10 @@ export default function Navbar() {
   const recentChats = (orderRooms || []).slice(0, 5).map((room) => {
     const isRequesterMe = room.requester?.id === currentUser?.id;
     const partner = isRequesterMe ? room.helper : room.requester;
-    const partnerName = partner?.name || "Mitra / Pengguna";
-    const partnerAvatar = partner?.avatar || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80";
+    const partnerName = partner?.name || partner?.fullName || "Mitra / Pengguna";
+    const partnerAvatar = partner?.avatar && !partner.avatar.includes("images.unsplash.com") 
+      ? partner.avatar 
+      : (partner?.avatarUrl && !partner.avatarUrl.includes("images.unsplash.com") ? partner.avatarUrl : null);
     
     // Find last message
     const msgs = room.messages || [];
@@ -260,15 +262,26 @@ export default function Navbar() {
           <div className="hidden md:flex items-center gap-2">
             {isLoggedIn ? (
               <div className="flex items-center gap-2">
-                {/* Portal Jasa — Desktop */}
-                <Link
-                  href="/jasa/dashboard"
-                  className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-[#EAF4FF] hover:bg-[#1683FF] text-[#1683FF] hover:text-white border border-[#DCEAF7] hover:border-[#1683FF] shadow-2xs transition active:scale-95 shrink-0"
-                  title="Portal Jasa — Dashboard Penyedia Layanan"
-                >
-                  <Briefcase className="w-3.5 h-3.5" />
-                  <span>Portal Jasa</span>
-                </Link>
+                {/* Portal Jasa / Mitra — Desktop (Strictly Shown If Authorized) */}
+                {(currentUser?.accountRole === "provider" || currentUser?.accountType === "provider" || currentUser?.isProviderEnabled || currentUser?.role === "provider") ? (
+                  <Link
+                    href="/jasa/dashboard"
+                    className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-[#EAF4FF] hover:bg-[#1683FF] text-[#1683FF] hover:text-white border border-[#DCEAF7] hover:border-[#1683FF] shadow-2xs transition active:scale-95 shrink-0"
+                    title="Portal Jasa — Dashboard Penyedia Layanan"
+                  >
+                    <Briefcase className="w-3.5 h-3.5" />
+                    <span>Portal Jasa</span>
+                  </Link>
+                ) : (currentUser?.isPartner || currentUser?.accountRole === "partner" || currentUser?.accountType === "mitra") ? (
+                  <Link
+                    href="/mitra/dashboard"
+                    className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full bg-[#EAF4FF] hover:bg-[#1683FF] text-[#1683FF] hover:text-white border border-[#DCEAF7] hover:border-[#1683FF] shadow-2xs transition active:scale-95 shrink-0"
+                    title="Portal Mitra — Dashboard Mitra Sewa"
+                  >
+                    <Store className="w-3.5 h-3.5" />
+                    <span>Portal Mitra</span>
+                  </Link>
+                ) : null}
 
                 {/* Desktop Chat Button with Interactive Popover */}
                 <div className="relative" ref={chatRef}>
@@ -315,11 +328,17 @@ export default function Navbar() {
                               className="p-2.5 rounded-xl hover:bg-blue-50/70 transition cursor-pointer flex items-center gap-3 group border border-transparent hover:border-blue-100"
                             >
                               <div className="relative shrink-0">
-                                <img
-                                  src={chat.avatar}
-                                  alt={chat.name}
-                                  className="w-9 h-9 rounded-full object-cover ring-1 ring-slate-100"
-                                />
+                                {chat.avatar ? (
+                                  <img
+                                    src={chat.avatar}
+                                    alt={chat.name}
+                                    className="w-9 h-9 rounded-full object-cover ring-1 ring-slate-100"
+                                  />
+                                ) : (
+                                  <div className="w-9 h-9 rounded-full bg-blue-50 text-[#1683FF] flex items-center justify-center font-bold text-xs ring-1 ring-slate-100 border border-blue-200">
+                                    {(chat.name || "U")[0].toUpperCase()}
+                                  </div>
+                                )}
                                 {chat.unread && (
                                   <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-[#1683FF] ring-2 ring-white" />
                                 )}
@@ -475,7 +494,7 @@ export default function Navbar() {
                   <span className="text-xs font-bold text-slate-800 max-w-[75px] truncate">
                     {currentUser.fullName.split(" ")[0]}
                   </span>
-                  {currentUser.avatarUrl ? (
+                  {currentUser.avatarUrl && !currentUser.avatarUrl.includes("images.unsplash.com") ? (
                     <img
                       src={currentUser.avatarUrl}
                       alt={currentUser.fullName}
@@ -489,7 +508,7 @@ export default function Navbar() {
                     />
                   ) : null}
                   <div
-                    style={{ display: currentUser.avatarUrl ? "none" : "flex" }}
+                    style={{ display: currentUser.avatarUrl && !currentUser.avatarUrl.includes("images.unsplash.com") ? "none" : "flex" }}
                     className="w-7 h-7 rounded-full bg-blue-50 text-[#1683FF] items-center justify-center shrink-0 border border-blue-200"
                   >
                     <User className="w-3.5 h-3.5" />
@@ -561,7 +580,7 @@ export default function Navbar() {
             >
               {isLoggedIn ? (
                 <>
-                  {currentUser.avatarUrl && (
+                  {currentUser.avatarUrl && !currentUser.avatarUrl.includes("images.unsplash.com") && (
                     <img
                       src={currentUser.avatarUrl}
                       alt={currentUser.fullName}
@@ -575,7 +594,7 @@ export default function Navbar() {
                     />
                   )}
                   <div
-                    style={{ display: currentUser.avatarUrl ? "none" : "flex" }}
+                    style={{ display: currentUser.avatarUrl && !currentUser.avatarUrl.includes("images.unsplash.com") ? "none" : "flex" }}
                     className="w-full h-full bg-blue-50 text-[#1683FF] items-center justify-center"
                   >
                     <User className="w-4 h-4 text-[#1683FF]" />
@@ -607,11 +626,25 @@ export default function Navbar() {
               {/* Header: User Summary */}
               <div className="px-3 py-2.5 border-b border-[#DCEAF7] mb-1">
                 <div className="flex items-center gap-3">
-                  <img
-                    src={currentUser.avatarUrl}
-                    alt={currentUser.fullName}
-                    className="w-10 h-10 rounded-full object-cover ring-2 ring-[#DCEAF7] shrink-0"
-                  />
+                  {currentUser.avatarUrl && !currentUser.avatarUrl.includes("images.unsplash.com") ? (
+                    <img
+                      src={currentUser.avatarUrl}
+                      alt={currentUser.fullName}
+                      onError={(e) => {
+                        e.currentTarget.style.display = "none";
+                        if (e.currentTarget.nextElementSibling) {
+                          e.currentTarget.nextElementSibling.style.display = "flex";
+                        }
+                      }}
+                      className="w-10 h-10 rounded-full object-cover ring-2 ring-[#DCEAF7] shrink-0"
+                    />
+                  ) : null}
+                  <div
+                    style={{ display: currentUser.avatarUrl && !currentUser.avatarUrl.includes("images.unsplash.com") ? "none" : "flex" }}
+                    className="w-10 h-10 rounded-full bg-blue-50 text-[#1683FF] items-center justify-center shrink-0 border border-blue-200"
+                  >
+                    <User className="w-5 h-5 text-[#1683FF]" />
+                  </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs font-bold text-[#102A43] truncate">
@@ -622,10 +655,22 @@ export default function Navbar() {
                     <p className="text-[11px] text-[#61758A] truncate">
                       {currentUser.email}
                     </p>
-                    <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.2 rounded-full mt-1 border border-emerald-200/60">
-                      <ShieldCheck className="w-3 h-3 text-emerald-600" />
-                      <span>Terverifikasi KYC</span>
-                    </div>
+                    {currentUser?.verificationStatus === "verified" ? (
+                      <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.2 rounded-full mt-1 border border-emerald-200/60">
+                        <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                        <span>Terverifikasi KYC</span>
+                      </div>
+                    ) : currentUser?.verificationStatus === "pending_review" ? (
+                      <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.2 rounded-full mt-1 border border-amber-200/60">
+                        <ShieldCheck className="w-3 h-3 text-amber-600" />
+                        <span>Menunggu Verifikasi</span>
+                      </div>
+                    ) : (
+                      <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.2 rounded-full mt-1 border border-blue-200/60">
+                        <User className="w-3 h-3 text-blue-600" />
+                        <span>Akun Aktif</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -727,28 +772,45 @@ export default function Navbar() {
                   Bisnis &amp; Mitra
                 </div>
 
-                {/* Dashboard Jasa */}
-                <Link
-                  href="/jasa/dashboard"
-                  onClick={() => setIsProfileOpen(false)}
-                  className="flex items-center justify-between p-2 rounded-xl hover:bg-[#EAF4FF] transition group text-[#102A43] hover:text-[#1683FF]"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-[#EAF4FF] group-hover:bg-[#1683FF] text-[#1683FF] group-hover:text-white flex items-center justify-center transition shrink-0">
-                      <Briefcase className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="text-xs font-bold leading-none">
-                        {currentUser.accountType === "provider" ? "Dashboard Jasa" : "Portal Penyedia Jasa"}
+                {/* Dashboard Jasa / Daftar Akun Jasa */}
+                {(currentUser?.accountRole === "provider" || currentUser?.accountType === "provider" || currentUser?.isProviderEnabled || currentUser?.role === "provider") ? (
+                  <Link
+                    href="/jasa/dashboard"
+                    onClick={() => setIsProfileOpen(false)}
+                    className="flex items-center justify-between p-2 rounded-xl hover:bg-[#EAF4FF] transition group text-[#102A43] hover:text-[#1683FF]"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-[#EAF4FF] group-hover:bg-[#1683FF] text-[#1683FF] group-hover:text-white flex items-center justify-center transition shrink-0">
+                        <Briefcase className="w-4 h-4" />
                       </div>
-                      <div className="text-[10px] text-[#61758A] mt-1">Kelola katalog layanan &amp; keahlian</div>
+                      <div>
+                        <div className="text-xs font-bold leading-none">Dashboard Jasa</div>
+                        <div className="text-[10px] text-[#61758A] mt-1">Kelola katalog layanan &amp; keahlian</div>
+                      </div>
                     </div>
-                  </div>
-                  <ArrowRight className="w-3.5 h-3.5 text-[#61758A] group-hover:text-[#1683FF] shrink-0" />
-                </Link>
+                    <ArrowRight className="w-3.5 h-3.5 text-[#61758A] group-hover:text-[#1683FF] shrink-0" />
+                  </Link>
+                ) : (
+                  <Link
+                    href="/profile"
+                    onClick={() => setIsProfileOpen(false)}
+                    className="flex items-center justify-between p-2 rounded-xl hover:bg-[#EAF4FF] transition group text-[#102A43] hover:text-[#1683FF]"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-[#EAF4FF] group-hover:bg-[#1683FF] text-[#1683FF] group-hover:text-white flex items-center justify-center transition shrink-0">
+                        <Briefcase className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold leading-none">Daftar Akun Jasa</div>
+                        <div className="text-[10px] text-[#61758A] mt-1">Verifikasi identitas &amp; tawarkan keahlian</div>
+                      </div>
+                    </div>
+                    <ArrowRight className="w-3.5 h-3.5 text-[#61758A] group-hover:text-[#1683FF] shrink-0" />
+                  </Link>
+                )}
 
                 {/* Dashboard Mitra Sewa / Daftar Mitra */}
-                {currentUser.accountType === "mitra" ? (
+                {(currentUser?.isPartner || currentUser?.accountRole === "partner" || currentUser?.accountType === "mitra") ? (
                   <Link
                     href="/mitra/dashboard"
                     onClick={() => setIsProfileOpen(false)}

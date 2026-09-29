@@ -945,16 +945,18 @@ export default function PartnerDashboardPage() {
             <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
           </Link>
 
-          <Link
-            href="/jasa/dashboard"
-            className="flex items-center justify-between w-full px-3 py-2 rounded-xl bg-blue-50/60 hover:bg-blue-100 text-slate-700 hover:text-[#1683FF] text-xs font-bold transition border border-blue-200/80"
-          >
-            <div className="flex items-center gap-2">
-              <Briefcase className="w-3.5 h-3.5 text-[#1683FF]" />
-              <span>Dashboard Jasa</span>
-            </div>
-            <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-          </Link>
+          {(currentUser?.accountRole === "provider" || currentUser?.accountType === "provider" || currentUser?.isProviderEnabled || currentUser?.role === "provider" || currentUser?.isAdmin) && (
+            <Link
+              href="/jasa/dashboard"
+              className="flex items-center justify-between w-full px-3 py-2 rounded-xl bg-blue-50/60 hover:bg-blue-100 text-slate-700 hover:text-[#1683FF] text-xs font-bold transition border border-blue-200/80"
+            >
+              <div className="flex items-center gap-2">
+                <Briefcase className="w-3.5 h-3.5 text-[#1683FF]" />
+                <span>Dashboard Jasa</span>
+              </div>
+              <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+            </Link>
+          )}
 
           <Link
             href={`/mitra/${store.id}`}
@@ -4065,13 +4067,15 @@ export default function PartnerDashboardPage() {
                 <ExternalLink className="w-3.5 h-3.5" />
                 <span>Toko Publik</span>
               </Link>
-              <Link
-                href="/jasa/dashboard"
-                className="flex-1 py-2 px-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold text-center flex items-center justify-center gap-1.5"
-              >
-                <Briefcase className="w-3.5 h-3.5" />
-                <span>Portal Jasa</span>
-              </Link>
+              {(currentUser?.accountRole === "provider" || currentUser?.accountType === "provider" || currentUser?.isProviderEnabled || currentUser?.role === "provider" || currentUser?.isAdmin) && (
+                <Link
+                  href="/jasa/dashboard"
+                  className="flex-1 py-2 px-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold text-center flex items-center justify-center gap-1.5"
+                >
+                  <Briefcase className="w-3.5 h-3.5" />
+                  <span>Portal Jasa</span>
+                </Link>
+              )}
               <Link
                 href="/"
                 className="py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold text-center flex items-center justify-center gap-1"

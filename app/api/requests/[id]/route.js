@@ -41,9 +41,11 @@ export async function GET(req, { params }) {
             helper: {
               select: {
                 id: true,
+                email: true,
                 fullName: true,
                 avatarUrl: true,
                 campusName: true,
+                accountRole: true,
                 ratingAvg: true,
                 completedHelpsCount: true,
                 reliabilityScore: true,
@@ -76,8 +78,8 @@ export async function GET(req, { params }) {
         campus: request.requester?.campusName && request.requester.campusName !== "Universitas Indonesia"
           ? request.requester.campusName
           : (request.locationName ? request.locationName.split(",").slice(1, 3).join(", ").trim() : "Bekasi, Jawa Barat"),
-        avatar: request.requester?.avatarUrl || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80",
-        avatarUrl: request.requester?.avatarUrl || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80",
+        avatar: request.requester?.avatarUrl && !request.requester.avatarUrl.includes("images.unsplash.com") ? request.requester.avatarUrl : null,
+        avatarUrl: request.requester?.avatarUrl && !request.requester.avatarUrl.includes("images.unsplash.com") ? request.requester.avatarUrl : null,
         rating: Number(request.requester?.ratingAvg) || 5.0,
         ratingCount: request.requester?.ratingCount || 0,
         completedHelps: request.requester?.completedHelpsCount || 0,
@@ -86,7 +88,7 @@ export async function GET(req, { params }) {
       },
       userName: request.requester?.fullName || "Pengguna Bantuin",
       userRole: "Pengguna Terverifikasi",
-      userAvatar: request.requester?.avatarUrl || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80",
+      userAvatar: request.requester?.avatarUrl && !request.requester.avatarUrl.includes("images.unsplash.com") ? request.requester.avatarUrl : null,
       userRating: Number(request.requester?.ratingAvg) || 5.0,
       userRatingCount: request.requester?.ratingCount || 0,
       userHelpsCount: request.requester?.completedHelpsCount || 0,
@@ -112,21 +114,37 @@ export async function GET(req, { params }) {
       selectedHelper: request.selectedHelper,
       photos: request.attachments || [],
       attachments: request.attachments || [],
-      offers: request.offers.map((o) => ({
-        id: o.id,
-        helperId: o.helperId,
-        helperName: o.helper?.fullName || "Helper Terverifikasi",
-        helperAvatar: o.helper?.avatarUrl || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80",
-        helperRating: Number(o.helper?.ratingAvg) || 5.0,
-        helperHelpsCount: o.helper?.completedHelpsCount || 0,
-        helperVerified: o.helper?.verificationStatus === "verified",
-        pitch: o.pitchMessage,
-        pitchMessage: o.pitchMessage,
-        proposedPrice: o.proposedPrice ? Number(o.proposedPrice) : null,
-        estimatedArrivalMinutes: o.estimatedArrivalMinutes,
-        status: o.status,
-        createdAt: o.createdAt,
-      })),
+      offers: request.offers.map((o) => {
+        const helper = o.helper;
+        const helperAvatar = helper?.avatarUrl && !helper.avatarUrl.includes("images.unsplash.com") ? helper.avatarUrl : null;
+        const helperName = helper?.fullName || "Helper Terverifikasi";
+        const helperRole = helper?.accountRole === "provider" 
+          ? "Penyedia Jasa" 
+          : (helper?.accountRole === "partner" ? "Mitra Toko" : (helper?.verificationStatus === "verified" ? "Helper Terverifikasi" : "Pengguna Komunitas"));
+        const helperCampus = helper?.campusName || null;
+        const helperRating = helper?.ratingAvg !== null && helper?.ratingAvg !== undefined ? Number(helper.ratingAvg) : null;
+        const completedHelps = typeof helper?.completedHelpsCount === "number" ? helper.completedHelpsCount : 0;
+
+        return {
+          id: o.id,
+          helperId: o.helperId,
+          helperEmail: helper?.email || null,
+          helperName,
+          helperRole,
+          helperCampus,
+          helperAvatar,
+          helperRating,
+          helperHelpsCount: completedHelps,
+          completedHelps,
+          helperVerified: helper?.verificationStatus === "verified",
+          pitch: o.pitchMessage,
+          pitchMessage: o.pitchMessage,
+          proposedPrice: o.proposedPrice ? Number(o.proposedPrice) : null,
+          estimatedArrivalMinutes: o.estimatedArrivalMinutes,
+          status: o.status,
+          createdAt: o.createdAt,
+        };
+      }),
       orderRoom: request.orderRoom,
       createdAt: request.createdAt,
     };
@@ -152,7 +170,62 @@ export async function PATCH(req, { params }) {
     const updated = await prisma.request.update({
       where: { id },
       data: body,
+      include: {
+        requester: true,
+        selectedHelper: true,
+      },
     });
+
+    // Jika helper dipilih / status helper_selected, buatkan record OrderRoom & ChatMessage resmi di database
+    if ((body.status === "helper_selected" || body.selectedHelperId) && (updated.selectedHelperId || body.selectedHelperId)) {
+      try {
+        const helperId = body.selectedHelperId || updated.selectedHelperId;
+        const reward = Number(updated.rewardAmount) || 0;
+        const platformFee = Math.round(reward * 0.08);
+        const helperPayout = reward - platformFee;
+
+        const existingRoom = await prisma.orderRoom.findUnique({
+          where: { requestId: updated.id },
+        });
+
+        let currentRoom = existingRoom;
+        if (!existingRoom) {
+          currentRoom = await prisma.orderRoom.create({
+            data: {
+              requestId: updated.id,
+              requesterId: updated.requesterId,
+              helperId: helperId,
+              lockedAmount: reward,
+              platformFee: platformFee,
+              helperPayoutAmount: helperPayout,
+              orderStatus: "room_created",
+            },
+          });
+
+          // Insert verified escrow message to chat_messages table
+          await prisma.chatMessage.create({
+            data: {
+              orderRoomId: currentRoom.id,
+              senderId: updated.requesterId,
+              message: `Dana sebesar Rp${reward.toLocaleString("id-ID")} telah aman terverifikasi di Rekening Bersama Bantuin.id. Helper dapat segera mulai pengerjaan tugas!`,
+            },
+          });
+        } else {
+          currentRoom = await prisma.orderRoom.update({
+            where: { id: existingRoom.id },
+            data: {
+              helperId: helperId,
+              lockedAmount: reward,
+              platformFee: platformFee,
+              helperPayoutAmount: helperPayout,
+              orderStatus: "room_created",
+            },
+          });
+        }
+      } catch (orderRoomErr) {
+        console.warn("Could not sync OrderRoom to database:", orderRoomErr);
+      }
+    }
 
     return NextResponse.json({
       success: true,
