@@ -1148,7 +1148,7 @@ export function AppProvider({ children }) {
   };
 
   // 4. Update Order Room Status
-  const updateOrderStatus = (orderRoomId, newStatus) => {
+  const updateOrderStatus = async (orderRoomId, newStatus) => {
     setOrderRooms((prev) =>
       prev.map((room) => {
         if (room.id === orderRoomId) {
@@ -1157,6 +1157,27 @@ export function AppProvider({ children }) {
         return room;
       })
     );
+
+    try {
+      const token = await authService.getValidAccessToken();
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      await fetch("/api/chat/rooms", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          orderRoomId,
+          status: newStatus,
+        }),
+      });
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("bantuin_activity_updated"));
+      }
+    } catch (err) {
+      console.warn("Could not sync room status to database:", err);
+    }
 
     setAuditLogs((prev) => [
       {
@@ -1172,19 +1193,25 @@ export function AppProvider({ children }) {
   };
 
   // 5. Submit Proof of Work (Handles Photo and Digital Files / Links)
-  const submitProof = (orderRoomId, proofData, notes = "") => {
+  const submitProof = async (orderRoomId, proofData, notes = "") => {
+    const isObj = typeof proofData === "object" && proofData !== null;
+    const photoUrl = isObj ? proofData.photoUrl : (typeof proofData === "string" ? proofData : "");
+    // Support both single photoUrl and multiple photoUrls array
+    const allPhotoUrls = isObj && proofData.photoUrls?.length
+      ? proofData.photoUrls
+      : photoUrl
+        ? [photoUrl]
+        : [];
+    const digitalFiles = isObj ? proofData.digitalFiles || [] : [];
+    const submissionUrl = isObj ? proofData.submissionUrl || "" : "";
+    const finalNotes = notes || (isObj ? proofData.notes : "") || "Bukti pengerjaan berhasil diserahkan.";
+
     setOrderRooms((prev) =>
       prev.map((room) => {
         if (room.id === orderRoomId) {
-          const isObj = typeof proofData === "object" && proofData !== null;
-          const photoUrl = isObj ? proofData.photoUrl : (typeof proofData === "string" ? proofData : "");
-          const digitalFiles = isObj ? proofData.digitalFiles || [] : [];
-          const submissionUrl = isObj ? proofData.submissionUrl || "" : "";
-          const finalNotes = notes || (isObj ? proofData.notes : "") || "Bukti pengerjaan berhasil diserahkan.";
-
           return {
             ...room,
-            proofPhotos: photoUrl ? [photoUrl, ...(room.proofPhotos || [])] : (room.proofPhotos || []),
+            proofPhotos: allPhotoUrls.length > 0 ? [...allPhotoUrls, ...(room.proofPhotos || [])] : (room.proofPhotos || []),
             digitalFiles: digitalFiles.length > 0 ? digitalFiles : (room.digitalFiles || []),
             submissionUrl: submissionUrl || room.submissionUrl || "",
             proofNotes: finalNotes,
@@ -1195,11 +1222,34 @@ export function AppProvider({ children }) {
       })
     );
 
+    try {
+      const token = await authService.getValidAccessToken();
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      await fetch("/api/chat/rooms", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          orderRoomId,
+          status: "proof_submitted",
+          proofPhotoUrls: allPhotoUrls,
+          proofNotes: finalNotes,
+        }),
+      });
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("bantuin_activity_updated"));
+      }
+    } catch (err) {
+      console.warn("Could not sync proof_submitted status:", err);
+    }
+
     addToast("Bukti Tugas Berhasil Dikirim", "Pemesan akan menerima notifikasi untuk memeriksa & mengkonfirmasi hasil kerja.");
   };
 
   // 6. Confirm Complete & Release Payout (Requester) with Rating and Profile Updates
-  const confirmOrderCompletion = (orderRoomId, reviewData = { rating: 5, feedback: "" }) => {
+  const confirmOrderCompletion = async (orderRoomId, reviewData = { rating: 5, feedback: "" }) => {
     const numericRating = Number(reviewData?.rating) || 5;
     const reviewFeedback = reviewData?.feedback || "Tugas diselesaikan dengan sangat baik & tepat waktu.";
     let releasedAmount = 35000;
@@ -1248,6 +1298,27 @@ export function AppProvider({ children }) {
         return room;
       })
     );
+
+    try {
+      const token = await authService.getValidAccessToken();
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      await fetch("/api/chat/rooms", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          orderRoomId,
+          status: "completed",
+        }),
+      });
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("bantuin_activity_updated"));
+      }
+    } catch (err) {
+      console.warn("Could not sync completed status:", err);
+    }
 
     // Shift Mitra Entitlement status from PENDING to AVAILABLE
     setMitraPendingBalance((prev) => Math.max(0, prev - releasedAmount));
@@ -1606,7 +1677,7 @@ export function AppProvider({ children }) {
       message: messageText,
       hasWarning: check.flagged,
       warningReason: check.reason,
-      timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
+      timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }).replace(".", ":"),
       createdAt: new Date().toISOString(),
       ...extraData,
     };
@@ -1623,6 +1694,27 @@ export function AppProvider({ children }) {
       })
     );
 
+    // Build attachmentUrls from proofPhotos or photos in extraData
+    const attachmentUrls = extraData?.attachmentUrls?.length
+      ? extraData.attachmentUrls
+      : extraData?.proofPhotos?.length
+        ? extraData.proofPhotos
+        : extraData?.photos?.length
+          ? extraData.photos
+          : [];
+
+    // Encode metadata flags into message for retrieval
+    const metaFields = {};
+    if (extraData?.isTaskProof) metaFields.isTaskProof = true;
+    if (extraData?.isHandoverProof) metaFields.isHandoverProof = true;
+    if (extraData?.isTaskCompletion) metaFields.isTaskCompletion = true;
+    if (extraData?.notes) metaFields.notes = extraData.notes;
+    if (extraData?.proofPhotos) metaFields.proofPhotos = extraData.proofPhotos;
+
+    const metaSuffix = Object.keys(metaFields).length > 0
+      ? `||META||${JSON.stringify(metaFields)}`
+      : "";
+
     // Simpan pesan ke PostgreSQL chat_messages table
     try {
       const token = await authService.getValidAccessToken();
@@ -1634,8 +1726,9 @@ export function AppProvider({ children }) {
         headers,
         body: JSON.stringify({
           orderRoomId,
-          message: messageText,
+          message: messageText + metaSuffix,
           senderId: currentUser?.id || extraData?.senderId,
+          attachmentUrls,
         }),
       });
     } catch (err) {
@@ -1648,7 +1741,7 @@ export function AppProvider({ children }) {
   };
 
   // 7b. Delete Chat Message
-  const deleteChatMessage = (orderRoomId, messageId) => {
+  const deleteChatMessage = async (orderRoomId, messageId) => {
     setOrderRooms((prev) =>
       prev.map((room) => {
         if (room.id === orderRoomId) {
@@ -1660,17 +1753,39 @@ export function AppProvider({ children }) {
         return room;
       })
     );
-    addToast("Pesan Dihapus", "Pesan telah berhasil dihapus dari ruang obrolan.");
+    addToast("Pesan Dihapus", "Pesan telah berhasil dihapus.");
+
+    try {
+      const token = await authService.getValidAccessToken();
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      await fetch(`/api/chat/messages?messageId=${encodeURIComponent(messageId)}`, {
+        method: "DELETE",
+        headers,
+      });
+    } catch (e) {
+      console.warn("deleteChatMessage API error:", e);
+    }
   };
 
   // 7c. Delete Entire Chat Room / Conversation
-  const deleteChatRoom = (orderRoomId) => {
+  const deleteChatRoom = async (orderRoomId) => {
     setOrderRooms((prev) => prev.filter((room) => room.id !== orderRoomId));
     addToast("Obrolan Dihapus", "Seluruh percakapan telah berhasil dihapus.");
+
+    try {
+      const token = await authService.getValidAccessToken();
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      await fetch(`/api/chat/rooms?roomId=${encodeURIComponent(orderRoomId)}`, {
+        method: "DELETE",
+        headers,
+      });
+    } catch (e) {
+      console.warn("deleteChatRoom API error:", e);
+    }
   };
 
   // 7d. Edit Chat Message
-  const editChatMessage = (orderRoomId, messageId, newText) => {
+  const editChatMessage = async (orderRoomId, messageId, newText) => {
     if (!newText || !newText.trim()) return;
     const check = detectDisintermediation(newText);
     setOrderRooms((prev) =>
@@ -1699,6 +1814,19 @@ export function AppProvider({ children }) {
       addToast("Peringatan Keamanan", check.reason, "warning");
     } else {
       addToast("Pesan Diperbarui", "Pesan telah berhasil diedit.");
+    }
+
+    try {
+      const token = await authService.getValidAccessToken();
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      await fetch("/api/chat/messages", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ messageId, message: newText.trim() }),
+      });
+    } catch (e) {
+      console.warn("editChatMessage API error:", e);
     }
   };
 
@@ -2518,13 +2646,58 @@ export function AppProvider({ children }) {
     return newRoom;
   };
 
-  // 8g. Start Task Inquiry (Chat dengan Pelamar Tugas sebelum bayar escrow)
+  // 8g. Start Task Inquiry (Chat dengan Pelamar Tugas sebelum bayar escrow atau setelah diterima)
   const startTaskInquiry = ({ request, offer }) => {
     const helperId = offer?.helperId || offer?.id || "user-hlp-1";
+    const isHelperAccepted =
+      (request?.selectedHelperId && (request.selectedHelperId === helperId || request.selectedHelper?.id === helperId)) ||
+      request?.status === "helper_selected" ||
+      request?.status === "in_progress" ||
+      offer?.status === "accepted";
+
+    const baseAmount = Number(offer?.proposedPrice) || Number(request?.rewardAmount) || 35000;
+    const cleanHelperAvatar = offer?.helperAvatar && !offer.helperAvatar.includes("images.unsplash.com") ? offer.helperAvatar : null;
+    const cleanRequesterAvatar = request?.requester?.avatar || request?.requester?.avatarUrl || currentUser?.avatarUrl || null;
+
     const existing = orderRooms.find(
       (r) => r.requestId === request?.id && (r.helper?.id === helperId || r.id === `inquiry-${request?.id}-${helperId}`)
     );
+
     if (existing) {
+      if (isHelperAccepted && (existing.stage === "inquiry" || existing.orderStatus === "inquiry")) {
+        const hasAcceptedMsg = (existing.messages || []).some((m) => m.message?.includes("resmi diterima") || m.message?.includes("resmi dipilih"));
+        const upgraded = {
+          ...existing,
+          stage: "active",
+          orderStatus: "room_created",
+          lockedAmount: baseAmount,
+          messages: [
+            ...(existing.messages || []),
+            ...(!hasAcceptedMsg
+              ? [
+                  {
+                    id: `msg-sys-accept-${Date.now()}`,
+                    senderId: "system",
+                    senderName: "Bantuin System",
+                    message: `Dana sebesar Rp${baseAmount.toLocaleString("id-ID")} telah aman terverifikasi di Rekening Bersama Bantuin.id. Helper telah resmi diterima!`,
+                    timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
+                    isSystem: true,
+                  },
+                  {
+                    id: `msg-accepted-${Date.now()}`,
+                    senderId: request?.requester?.id || currentUser?.id,
+                    senderName: request?.requester?.name || request?.requester?.fullName || currentUser?.fullName || "Pemohon",
+                    senderAvatar: cleanRequesterAvatar,
+                    message: `Halo! Anda telah resmi diterima sebagai Helper untuk tugas "${request?.title}". Dana imbalan telah diamankan di Rekening Bersama Bantuin. Silakan mulai koordinasi dan bantu saya mengerjakan tugas ini.`,
+                    timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
+                  },
+                ]
+              : []),
+          ],
+        };
+        setOrderRooms((prev) => prev.map((r) => (r.id === existing.id ? upgraded : r)));
+        return upgraded;
+      }
       return existing;
     }
 
@@ -2533,45 +2706,70 @@ export function AppProvider({ children }) {
       id: roomId,
       categoryType: "bantuan",
       orderType: "task",
-      stage: "inquiry",
-      orderStatus: "inquiry",
+      stage: isHelperAccepted ? "active" : "inquiry",
+      orderStatus: isHelperAccepted ? "room_created" : "inquiry",
       requestId: request?.id || `req-${Date.now()}`,
       requestTitle: request?.title || "Permintaan Bantuan",
       category: request?.category || "Bantuan Komunitas",
       mode: request?.mode || "offline",
       requester: {
         id: request?.requester?.id || currentUser?.id,
-        name: request?.requester?.name || currentUser?.fullName,
-        avatar: request?.requester?.avatar || currentUser?.avatar,
-        phone: "081298765432",
+        name: request?.requester?.name || request?.requester?.fullName || currentUser?.fullName,
+        avatar: cleanRequesterAvatar,
+        phone: request?.requester?.phoneNumber || "081298765432",
         rating: 4.95,
       },
       helper: {
         id: helperId,
         name: offer?.helperName || "Helper Bantuin",
-        avatar: offer?.helperAvatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80",
-        phone: "081311223344",
+        avatar: cleanHelperAvatar,
+        phone: offer?.helperPhone || "081311223344",
         rating: offer?.helperRating || 4.9,
       },
-      lockedAmount: Number(offer?.proposedPrice) || Number(request?.rewardAmount) || 35000,
+      lockedAmount: baseAmount,
       messages: [
-        {
-          id: `msg-sys-${Date.now()}`,
-          senderId: "system",
-          senderName: "Bantuin System",
-          message: `Ruang diskusi pra-transaksi untuk tugas "${request?.title}". Diskusikan teknis pelaksanaan dan ketersediaan waktu sebelum melanjutkan pembayaran.`,
-          timestamp: "Sekarang",
-          isSystem: true,
-        },
-        {
-          id: `msg-pitch-${Date.now()}`,
-          senderId: helperId,
-          senderName: offer?.helperName || "Helper",
-          senderAvatar: offer?.helperAvatar,
-          message: offer?.pitchMessage || "Halo! Saya telah mengajukan penawaran untuk membantu tugas Anda. Ada yang perlu dikoordinasikan terlebih dahulu?",
-          timestamp: "Sekarang",
-        }
-      ]
+        ...(isHelperAccepted
+          ? [
+              {
+                id: `msg-sys-${Date.now()}`,
+                senderId: "system",
+                senderName: "Bantuin System",
+                message: `Dana sebesar Rp${baseAmount.toLocaleString("id-ID")} telah aman terverifikasi di Rekening Bersama Bantuin.id. Helper telah resmi diterima!`,
+                timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
+                isSystem: true,
+              },
+              {
+                id: `msg-accepted-${Date.now()}`,
+                senderId: request?.requester?.id || currentUser?.id,
+                senderName: request?.requester?.name || request?.requester?.fullName || currentUser?.fullName || "Pemohon",
+                senderAvatar: cleanRequesterAvatar,
+                message: `Halo! Anda telah resmi diterima sebagai Helper untuk tugas "${request?.title}". Dana imbalan telah diamankan di Rekening Bersama Bantuin. Silakan mulai koordinasi dan bantu saya mengerjakan tugas ini.`,
+                timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
+              },
+            ]
+          : [
+              {
+                id: `msg-sys-${Date.now()}`,
+                senderId: "system",
+                senderName: "Bantuin System",
+                message: `Ruang diskusi pra-transaksi untuk tugas "${request?.title}". Diskusikan teknis pelaksanaan dan ketersediaan waktu sebelum melanjutkan pembayaran.`,
+                timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
+                isSystem: true,
+              },
+            ]),
+        ...(offer?.pitchMessage
+          ? [
+              {
+                id: `msg-pitch-${Date.now()}`,
+                senderId: helperId,
+                senderName: offer?.helperName || "Helper",
+                senderAvatar: cleanHelperAvatar,
+                message: offer.pitchMessage,
+                timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
+              },
+            ]
+          : []),
+      ],
     };
 
     setOrderRooms((prev) => [newRoom, ...prev]);

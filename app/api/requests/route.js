@@ -12,11 +12,11 @@ export async function GET(req) {
 
     const where = {};
 
-    // Filter status: tampilkan yang published atau has_offers (kecuali requesterId tertentu)
+    // Filter status: tampilkan yang aktif (published, has_offers, helper_selected, in_progress, awaiting_confirmation)
     if (requesterId) {
       where.requesterId = requesterId;
     } else {
-      where.status = { in: ["published", "has_offers"] };
+      where.status = { in: ["published", "has_offers", "helper_selected", "in_progress", "awaiting_confirmation"] };
     }
 
     // Filter Kategori
@@ -64,11 +64,27 @@ export async function GET(req) {
             verificationStatus: true,
           },
         },
+        selectedHelper: {
+          select: {
+            id: true,
+            fullName: true,
+            avatarUrl: true,
+            phoneNumber: true,
+          },
+        },
         offers: {
           select: {
             id: true,
             status: true,
             proposedPrice: true,
+            helperId: true,
+            helper: {
+              select: {
+                id: true,
+                fullName: true,
+                avatarUrl: true,
+              },
+            },
           },
         },
         bantuinPoint: true,
@@ -243,6 +259,7 @@ export async function GET(req) {
         isVoluntary: item.isVoluntary,
         status: item.status,
         selectedHelperId: item.selectedHelperId,
+        selectedHelper: item.selectedHelper || null,
         photos: item.attachments || [],
         attachments: item.attachments || [],
         applicantsCount: item.offers?.length || 0,

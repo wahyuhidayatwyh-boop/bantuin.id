@@ -93,12 +93,19 @@ export default function RentalFlowTracker({ room, activeRole = "requester" }) {
   // Handover Photo Proof state
   const [handoverPhotos, setHandoverPhotos] = useState([]);
   const [handoverNotes, setHandoverNotes] = useState("");
+  const [isDragging, setIsDragging] = useState(false);
   const handoverFileInputRef = useRef(null);
+  const MAX_PHOTOS = 3;
 
-  const handleHandoverPhotoUpload = (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
-    files.forEach((file) => {
+  const processImageFiles = (files) => {
+    const imageFiles = files.filter((f) => f.type.startsWith("image/"));
+    if (imageFiles.length === 0) return;
+    const remaining = MAX_PHOTOS - handoverPhotos.length;
+    if (remaining <= 0) {
+      addToast?.("Batas Foto", `Maksimal ${MAX_PHOTOS} foto yang dapat diunggah.`);
+      return;
+    }
+    imageFiles.slice(0, remaining).forEach((file) => {
       const reader = new FileReader();
       reader.onload = (event) => {
         if (event.target?.result) {
@@ -107,21 +114,28 @@ export default function RentalFlowTracker({ room, activeRole = "requester" }) {
       };
       reader.readAsDataURL(file);
     });
+    if (imageFiles.length > remaining) {
+      addToast?.("Batas Foto", `Hanya ${remaining} foto pertama yang ditambahkan (maks. ${MAX_PHOTOS}).`);
+    }
+  };
+
+  const handleHandoverPhotoUpload = (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    processImageFiles(files);
   };
 
   const handleRemoveHandoverPhoto = (indexToRemove) => {
     setHandoverPhotos((prev) => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
-  const handleUseSamplePhotos = () => {
-    setHandoverPhotos([
-      rental.photoUrl || "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=800&q=80",
-      "https://images.unsplash.com/photo-1502920917128-1aa500764cbd?auto=format&fit=crop&w=800&q=80"
-    ]);
-    if (!handoverNotes) {
-      setHandoverNotes("Kondisi bodi 98% mulus, sensor bersih tanpa jamur/debu, include 2 baterai original, charger, strap & tas kamera.");
-    }
-    addToast?.("Foto Contoh Dimuat", "2 Foto baseline & catatan fisik siap disimpan ke obrolan.");
+  const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
+  const handleDragLeave = () => setIsDragging(false);
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const files = Array.from(e.dataTransfer.files || []);
+    processImageFiles(files);
   };
 
   if (!room || room.orderType !== "rental") return null;
@@ -218,17 +232,11 @@ export default function RentalFlowTracker({ room, activeRole = "requester" }) {
 
   const handleHandoverSubmit = (e) => {
     e.preventDefault();
-    const photosToSubmit = handoverPhotos.length > 0
-      ? handoverPhotos
-      : [
-          rental.photoUrl || "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=800&q=80",
-          "https://images.unsplash.com/photo-1502920917128-1aa500764cbd?auto=format&fit=crop&w=800&q=80"
-        ];
     confirmRentalHandover(room.id, {
-      photos: photosToSubmit,
-      serialNumber: serialNumber || "SN-82910482-BANTUIN",
+      photos: handoverPhotos,
+      serialNumber: serialNumber || "",
       eAgreementConfirmed: true,
-      notes: handoverNotes || "Kondisi fisik bodi, sensor, fungsi tombol & kelengkapan (2 baterai + charger + tas) telah diverifikasi bersama pihak toko dalam kondisi prima.",
+      notes: handoverNotes,
     });
     setIsHandoverModalOpen(false);
   };
@@ -654,16 +662,9 @@ export default function RentalFlowTracker({ room, activeRole = "requester" }) {
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="block font-bold text-slate-800 text-xs">
-                    Foto Baseline Kondisi Fisik Alat (Wajib di Chat):
+                    Foto Baseline Kondisi Fisik Alat <span className="text-rose-500 font-bold ml-0.5">*</span>
                   </label>
-                  <button
-                    type="button"
-                    onClick={handleUseSamplePhotos}
-                    className="text-[11px] font-bold text-[#1683FF] hover:underline cursor-pointer flex items-center gap-1"
-                  >
-                    <ImageIcon className="w-3 h-3" />
-                    <span>Gunakan Foto Contoh</span>
-                  </button>
+                  <span className="text-[10px] text-slate-400 font-medium">{handoverPhotos.length}/{MAX_PHOTOS} foto</span>
                 </div>
 
                 <input
@@ -675,22 +676,39 @@ export default function RentalFlowTracker({ room, activeRole = "requester" }) {
                   className="hidden"
                 />
 
-                {handoverPhotos.length === 0 ? (
-                  <div
-                    onClick={() => handoverFileInputRef.current?.click()}
-                    className="border-2 border-dashed border-blue-200 rounded-2xl p-4 text-center bg-blue-50/40 hover:bg-blue-50/80 transition cursor-pointer group"
-                  >
-                    <div className="w-10 h-10 rounded-full bg-blue-100 text-[#1683FF] flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition">
-                      <Camera className="w-5 h-5" />
-                    </div>
-                    <div className="font-bold text-slate-800 text-xs">
-                      Klik untuk Ambil / Unggah Foto Alat
-                    </div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">
-                      Unggah foto bodi, lensa, dan kelengkapan. Foto otomatis tersimpan di ruang transaksi sebagai bukti serah terima resmi.
-                    </div>
+                {/* Drop zone – always visible so user can drag files regardless of count */}
+                <div
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  onClick={() => handoverPhotos.length < MAX_PHOTOS && handoverFileInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-2xl p-4 text-center transition cursor-pointer group ${
+                    isDragging
+                      ? "border-[#1683FF] bg-blue-50/80 scale-[1.01]"
+                      : handoverPhotos.length >= MAX_PHOTOS
+                      ? "border-slate-200 bg-slate-50 cursor-not-allowed opacity-60"
+                      : "border-blue-200 bg-blue-50/40 hover:bg-blue-50/80"
+                  }`}
+                >
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-2 transition ${
+                    isDragging ? "bg-[#1683FF] text-white scale-110" : "bg-blue-100 text-[#1683FF] group-hover:scale-110"
+                  }`}>
+                    <Camera className="w-5 h-5" />
                   </div>
-                ) : (
+                  {isDragging ? (
+                    <div className="font-bold text-[#1683FF] text-xs">Lepaskan untuk mengunggah foto</div>
+                  ) : handoverPhotos.length >= MAX_PHOTOS ? (
+                    <div className="font-bold text-slate-500 text-xs">Batas maksimal {MAX_PHOTOS} foto tercapai</div>
+                  ) : (
+                    <>
+                      <div className="font-bold text-slate-800 text-xs">Klik atau seret foto ke sini</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">Format gambar saja (JPG, PNG, WEBP) • Maks. {MAX_PHOTOS} foto</div>
+                    </>
+                  )}
+                </div>
+
+                {/* Photo preview grid */}
+                {handoverPhotos.length > 0 && (
                   <div className="space-y-2">
                     <div className="grid grid-cols-3 gap-2">
                       {handoverPhotos.map((photo, idx) => (
@@ -713,15 +731,6 @@ export default function RentalFlowTracker({ room, activeRole = "requester" }) {
                           </span>
                         </div>
                       ))}
-
-                      <button
-                        type="button"
-                        onClick={() => handoverFileInputRef.current?.click()}
-                        className="rounded-xl border-2 border-dashed border-slate-200 hover:border-[#1683FF] flex flex-col items-center justify-center text-slate-400 hover:text-[#1683FF] aspect-video transition cursor-pointer bg-slate-50"
-                      >
-                        <Plus className="w-4 h-4 mb-0.5" />
-                        <span className="text-[10px] font-bold">Tambah</span>
-                      </button>
                     </div>
 
                     <div className="flex items-center justify-between text-[10px] text-[#1683FF] bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-100">

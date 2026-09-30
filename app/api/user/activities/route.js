@@ -127,10 +127,14 @@ export async function GET(req) {
         orderBy: { createdAt: "desc" },
       }),
 
-      // c) Permintaan Bantuan / Jasa Terpublikasi yang dibuat user
+      // c) Permintaan Bantuan / Jasa Terpublikasi yang dibuat user atau di mana user adalah helper / pelamar
       prisma.request.findMany({
         where: {
-          requesterId: userId,
+          OR: [
+            { requesterId: userId },
+            { selectedHelperId: userId },
+            { offers: { some: { helperId: userId } } },
+          ],
         },
         include: {
           requester: {
@@ -269,7 +273,7 @@ export async function GET(req) {
         platformFee: Number(room.platformFee || 0),
         image:
           room.request?.attachments?.[0] ||
-          room.helper?.avatarUrl ||
+          (isRequester ? room.helper?.avatarUrl : room.requester?.avatarUrl) ||
           "https://images.unsplash.com/photo-1544717305-2782549b5136?auto=format&fit=crop&w=600&q=80",
         partner: {
           id: partner?.id,
@@ -293,21 +297,50 @@ export async function GET(req) {
     for (const reqItem of standaloneRequests) {
       if (handledRequestIds.has(reqItem.id)) continue;
 
+      const isRequester = reqItem.requesterId === userId;
+      const isSelectedHelper = reqItem.selectedHelperId === userId;
+      const myOffer = reqItem.offers?.find((o) => o.helperId === userId);
+
       const categoryName = (reqItem.category || "").toLowerCase();
       const isJasa = categoryName.includes("jasa") || categoryName.includes("desain") || categoryName.includes("servis");
       const orderType = isJasa ? "service" : "task";
       const categoryType = isJasa ? "jasa" : "bantuan";
       const categoryPill = isJasa ? "Jasa" : "Bantuan";
 
-      const isCancelled = reqItem.status === "cancelled";
+      const isOfferRejected = myOffer && myOffer.status === "rejected" && !isSelectedHelper;
+      const isCancelled = reqItem.status === "cancelled" || isOfferRejected;
       const isCompleted = reqItem.status === "completed" || isCancelled;
       const isOngoing = !isCompleted && !isCancelled;
 
+      let partner;
       let partnerName = "Mencari Helper...";
-      if (reqItem.selectedHelper) {
-        partnerName = reqItem.selectedHelper.fullName;
-      } else if (reqItem.offers && reqItem.offers.length > 0) {
-        partnerName = `${reqItem.offers.length} Helper Melamar`;
+
+      if (isRequester) {
+        if (reqItem.selectedHelper) {
+          partner = reqItem.selectedHelper;
+          partnerName = reqItem.selectedHelper.fullName;
+        } else if (reqItem.offers && reqItem.offers.length > 0) {
+          partner = reqItem.offers[0].helper;
+          partnerName = `${reqItem.offers.length} Helper Melamar`;
+        }
+      } else {
+        // User bertindak sebagai Helper
+        partner = reqItem.requester;
+        partnerName = reqItem.requester?.fullName || "Pemohon";
+      }
+
+      // Tentukan status yang sesuai untuk ditampilkan di UI
+      let derivedStatus = reqItem.status;
+      if (isSelectedHelper && (reqItem.status === "published" || reqItem.status === "has_offers")) {
+        derivedStatus = "helper_selected";
+      } else if (!isRequester && myOffer && !isSelectedHelper) {
+        if (myOffer.status === "accepted") {
+          derivedStatus = "helper_selected";
+        } else if (myOffer.status === "rejected") {
+          derivedStatus = "cancelled";
+        } else {
+          derivedStatus = "submitted";
+        }
       }
 
       activities.push({
@@ -321,17 +354,19 @@ export async function GET(req) {
         isJasa,
         title: reqItem.title,
         requestTitle: reqItem.title,
-        orderStatus: reqItem.status,
-        status: reqItem.status,
-        lockedAmount: Number(reqItem.rewardAmount || 0),
+        orderStatus: derivedStatus,
+        status: derivedStatus,
+        lockedAmount: Number(myOffer?.proposedPrice || reqItem.rewardAmount || 0),
         image:
           reqItem.attachments?.[0] ||
-          "https://images.unsplash.com/photo-1450133064473-71024230f91b?auto=format&fit=crop&w=600&q=80",
+          (isRequester
+            ? (reqItem.selectedHelper?.avatarUrl || "https://images.unsplash.com/photo-1450133064473-71024230f91b?auto=format&fit=crop&w=600&q=80")
+            : (reqItem.requester?.avatarUrl || "https://images.unsplash.com/photo-1450133064473-71024230f91b?auto=format&fit=crop&w=600&q=80")),
         partner: {
-          id: reqItem.selectedHelper?.id || null,
+          id: partner?.id || null,
           name: partnerName,
-          avatar: reqItem.selectedHelper?.avatarUrl || null,
-          phone: reqItem.selectedHelper?.phoneNumber || null,
+          avatar: partner?.avatarUrl || null,
+          phone: partner?.phoneNumber || null,
         },
         pickupPoint:
           reqItem.bantuinPoint?.name ||

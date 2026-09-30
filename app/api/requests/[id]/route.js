@@ -167,17 +167,20 @@ export async function PATCH(req, { params }) {
     const { id } = await params;
     const body = await req.json();
 
+    // Destructure custom fields that are not in Prisma Request model
+    const { startMessage, ...dataToUpdate } = body;
+
     const updated = await prisma.request.update({
       where: { id },
-      data: body,
+      data: dataToUpdate,
       include: {
         requester: true,
         selectedHelper: true,
       },
     });
 
-    // Jika helper dipilih / status helper_selected, buatkan record OrderRoom & ChatMessage resmi di database
-    if ((body.status === "helper_selected" || body.selectedHelperId) && (updated.selectedHelperId || body.selectedHelperId)) {
+    // Jika helper dipilih / status helper_selected / in_progress, buatkan record OrderRoom & ChatMessage resmi di database
+    if ((body.status === "helper_selected" || body.status === "in_progress" || body.selectedHelperId) && (updated.selectedHelperId || body.selectedHelperId)) {
       try {
         const helperId = body.selectedHelperId || updated.selectedHelperId;
         const reward = Number(updated.rewardAmount) || 0;
@@ -198,7 +201,7 @@ export async function PATCH(req, { params }) {
               lockedAmount: reward,
               platformFee: platformFee,
               helperPayoutAmount: helperPayout,
-              orderStatus: "room_created",
+              orderStatus: body.status === "in_progress" ? "in_progress" : "room_created",
             },
           });
 
@@ -210,6 +213,15 @@ export async function PATCH(req, { params }) {
               message: `Dana sebesar Rp${reward.toLocaleString("id-ID")} telah aman terverifikasi di Rekening Bersama Bantuin.id. Helper dapat segera mulai pengerjaan tugas!`,
             },
           });
+
+          // Insert template pesan penerimaan helper resmi
+          await prisma.chatMessage.create({
+            data: {
+              orderRoomId: currentRoom.id,
+              senderId: updated.requesterId,
+              message: `Halo! Anda telah resmi diterima sebagai Helper untuk tugas "${updated.title}". Dana imbalan telah diamankan di Rekening Bersama Bantuin. Silakan mulai koordinasi dan bantu saya mengerjakan tugas ini.`,
+            },
+          });
         } else {
           currentRoom = await prisma.orderRoom.update({
             where: { id: existingRoom.id },
@@ -218,10 +230,41 @@ export async function PATCH(req, { params }) {
               lockedAmount: reward,
               platformFee: platformFee,
               helperPayoutAmount: helperPayout,
-              orderStatus: "room_created",
+              orderStatus: body.status === "in_progress" ? "in_progress" : existingRoom.orderStatus,
             },
           });
+
+          // Insert template pesan penerimaan helper jika belum ada
+          await prisma.chatMessage.create({
+            data: {
+              orderRoomId: currentRoom.id,
+              senderId: updated.requesterId,
+              message: `Halo! Anda telah resmi diterima sebagai Helper untuk tugas "${updated.title}". Dana imbalan telah diamankan di Rekening Bersama Bantuin. Silakan mulai koordinasi dan bantu saya mengerjakan tugas ini.`,
+            },
+          }).catch(() => null);
         }
+
+        // Jika ada startMessage dari helper (misal saat Mulai Kerjakan diklik)
+        if (startMessage && helperId) {
+          await prisma.chatMessage.create({
+            data: {
+              orderRoomId: currentRoom.id,
+              senderId: helperId,
+              message: startMessage,
+            },
+          }).catch(() => null);
+        }
+
+        // Tandai tawaran pelamar menjadi accepted di tabel offers
+        await prisma.offer.updateMany({
+          where: {
+            requestId: updated.id,
+            helperId: helperId,
+          },
+          data: {
+            status: "accepted",
+          },
+        });
       } catch (orderRoomErr) {
         console.warn("Could not sync OrderRoom to database:", orderRoomErr);
       }

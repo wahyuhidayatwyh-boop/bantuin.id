@@ -44,6 +44,7 @@ export async function GET(req) {
     }
 
     const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const EXTRACT_UUID_REGEX = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
     const isValidUuid = (str) => typeof str === "string" && UUID_REGEX.test(str.trim());
 
     // Bangun filter OR untuk orderRoom
@@ -54,8 +55,12 @@ export async function GET(req) {
       whereConditions.push({ helperId: userId });
     }
 
-    if (roomIdParam && isValidUuid(roomIdParam)) {
-      whereConditions.push({ id: roomIdParam });
+    if (roomIdParam) {
+      const extracted = roomIdParam.match(EXTRACT_UUID_REGEX) || [];
+      for (const uid of extracted) {
+        whereConditions.push({ id: uid });
+        whereConditions.push({ requestId: uid });
+      }
     }
 
     if (requestIdParam && isValidUuid(requestIdParam)) {
@@ -125,16 +130,36 @@ export async function GET(req) {
       const reqTitle = room.request?.title || "Bantuan Bantuin.id";
       const locked = Number(room.lockedAmount || room.request?.rewardAmount || 0);
 
-      const messages = (room.chatMessages || []).map((msg) => ({
-        id: msg.id,
-        senderId: msg.senderId,
-        senderName: msg.sender?.fullName || "Pengguna",
-        senderAvatar: msg.sender?.avatarUrl && !msg.sender.avatarUrl.includes("images.unsplash.com") ? msg.sender.avatarUrl : null,
-        message: msg.message,
-        timestamp: new Date(msg.createdAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
-        createdAt: msg.createdAt,
-        isSystem: msg.senderId === "system" || msg.message.includes("Rekening Bersama") || msg.message.includes("diverifikasi"),
-      }));
+      const messages = (room.chatMessages || []).map((msg) => {
+        // Parse metadata JSON stored in message if present (e.g. "||META||{...}")
+        let meta = {};
+        let cleanMessage = msg.message || "";
+        const metaSep = "||META||";
+        if (cleanMessage.includes(metaSep)) {
+          const parts = cleanMessage.split(metaSep);
+          cleanMessage = parts[0];
+          try { meta = JSON.parse(parts[1]); } catch (_) { meta = {}; }
+        }
+
+        return {
+          id: msg.id,
+          senderId: msg.senderId,
+          senderName: msg.sender?.fullName || "Pengguna",
+          senderAvatar: msg.sender?.avatarUrl && !msg.sender.avatarUrl.includes("images.unsplash.com") ? msg.sender.avatarUrl : null,
+          message: cleanMessage,
+          // Proof/attachment fields
+          attachmentUrls: msg.attachmentUrls || [],
+          proofPhotos: msg.attachmentUrls?.length ? msg.attachmentUrls : (meta.proofPhotos || []),
+          isTaskProof: meta.isTaskProof || false,
+          isHandoverProof: meta.isHandoverProof || false,
+          notes: meta.notes || "",
+          isEdited: meta.isEdited || false,
+          // Timing
+          timestamp: new Date(msg.createdAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
+          createdAt: msg.createdAt,
+          isSystem: msg.senderId === "system" || msg.message.includes("Rekening Bersama") || msg.message.includes("diverifikasi"),
+        };
+      });
 
       // Pesan escrow awal otomatis jika chat_messages baru kosong
       if (messages.length === 0) {
@@ -183,6 +208,10 @@ export async function GET(req) {
         },
         pickupPoint: room.request?.bantuinPoint?.name || room.request?.locationName || "Titik Temu",
         messages,
+        // Bukti penyelesaian tersimpan langsung di order_rooms
+        proofPhotos: room.proofPhotoUrls || [],
+        proofNotes: room.proofNotes || "",
+        proofSubmittedAt: room.proofSubmittedAt || null,
         createdAt: room.createdAt,
         updatedAt: room.updatedAt,
       };
@@ -201,3 +230,99 @@ export async function GET(req) {
     );
   }
 }
+
+export async function PATCH(req) {
+  try {
+    const body = await req.json();
+    const { orderRoomId, status, requestId, proofPhotoUrls, proofNotes } = body;
+
+    const EXTRACT_UUID_REGEX = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+    const extractedUuids = ((orderRoomId || "") + " " + (requestId || "")).match(EXTRACT_UUID_REGEX) || [];
+
+    if (extractedUuids.length > 0) {
+      const updateData = {};
+      if (status) updateData.orderStatus = status;
+      if (proofPhotoUrls && Array.isArray(proofPhotoUrls)) updateData.proofPhotoUrls = proofPhotoUrls;
+      if (proofNotes !== undefined && proofNotes !== null) updateData.proofNotes = proofNotes;
+      if (status === "proof_submitted") updateData.proofSubmittedAt = new Date();
+
+      if (Object.keys(updateData).length > 0) {
+        await prisma.orderRoom.updateMany({
+          where: {
+            OR: [
+              ...extractedUuids.map((uid) => ({ id: uid })),
+              ...extractedUuids.map((uid) => ({ requestId: uid })),
+            ],
+          },
+          data: updateData,
+        });
+      }
+
+      // Sinkronisasi status ke tabel requests
+      const requestStatusMap = {
+        in_progress: "in_progress",
+        on_the_way: "in_progress",
+        item_picked_up: "in_progress",
+        proof_submitted: "awaiting_confirmation",
+        awaiting_confirmation: "awaiting_confirmation",
+        completed: "completed",
+      };
+
+      if (status && requestStatusMap[status]) {
+        const reqStatus = requestStatusMap[status];
+        for (const uid of extractedUuids) {
+          await prisma.request.updateMany({
+            where: { id: uid },
+            data: { status: reqStatus },
+          }).catch(() => null);
+        }
+      }
+    }
+
+    return NextResponse.json({ success: true, message: "Status room berhasil diperbarui." });
+  } catch (error) {
+    console.error("PATCH /api/chat/rooms Error:", error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
+
+/**
+ * DELETE /api/chat/rooms?roomId=...
+ * Menghapus ruang obrolan beserta seluruh pesannya dari PostgreSQL.
+ */
+export async function DELETE(req) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const roomId = searchParams.get("roomId");
+
+    if (!roomId) {
+      return NextResponse.json(
+        { success: false, error: "roomId diperlukan." },
+        { status: 400 }
+      );
+    }
+
+    const EXTRACT_UUID_REGEX = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+    const extractedUuids = roomId.match(EXTRACT_UUID_REGEX) || [];
+
+    for (const uid of extractedUuids) {
+      // Hapus pesan terkait lebih dahulu
+      await prisma.chatMessage.deleteMany({
+        where: { orderRoomId: uid },
+      }).catch(() => null);
+
+      // Hapus orderRoom
+      await prisma.orderRoom.deleteMany({
+        where: {
+          OR: [{ id: uid }, { requestId: uid }],
+        },
+      }).catch(() => null);
+    }
+
+    return NextResponse.json({ success: true, message: "Ruang obrolan berhasil dihapus." });
+  } catch (error) {
+    console.error("DELETE /api/chat/rooms Error:", error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
+

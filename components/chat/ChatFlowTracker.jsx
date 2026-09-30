@@ -87,6 +87,81 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
   const [checklistIdConfirmed, setChecklistIdConfirmed] = useState(true);
   const [checklistConditionConfirmed, setChecklistConditionConfirmed] = useState(true);
 
+  // Drag & drop states
+  const [isDraggingTaskProof, setIsDraggingTaskProof] = useState(false);
+  const [isDraggingHandover, setIsDraggingHandover] = useState(false);
+
+  // File input refs
+  const taskProofFileRef = useRef(null);
+  const handoverFileRef = useRef(null);
+  const deliverablesFileRef = useRef(null);
+
+  // Helper untuk proses file gambar dengan batasan format gambar & maksimal 3 foto
+  const processImageFiles = (rawFiles, currentPhotos, setPhotosFunc, labelName = "Foto") => {
+    if (!rawFiles || rawFiles.length === 0) return;
+    const files = Array.from(rawFiles);
+    
+    // Filter file gambar saja
+    const imageFiles = files.filter((f) => f.type && f.type.startsWith("image/"));
+    const nonImageFiles = files.filter((f) => !f.type || !f.type.startsWith("image/"));
+
+    if (nonImageFiles.length > 0) {
+      addToast?.("Format Tidak Didukung", "Hanya berkas gambar (JPG, PNG, WebP, GIF) yang dapat diunggah.", "warning");
+    }
+
+    if (imageFiles.length === 0) return;
+
+    const maxAllowed = 3;
+    const currentCount = currentPhotos.length;
+    const availableSlots = maxAllowed - currentCount;
+
+    if (availableSlots <= 0) {
+      addToast?.("Batas Maksimal", `Maksimal hanya ${maxAllowed} ${labelName.toLowerCase()} yang diperbolehkan.`, "warning");
+      return;
+    }
+
+    if (imageFiles.length > availableSlots) {
+      addToast?.("Batas Jumlah Foto", `Hanya ${availableSlots} foto yang ditambahkan karena batas maksimal adalah 3 foto.`, "info");
+    }
+
+    const filesToRead = imageFiles.slice(0, availableSlots);
+    filesToRead.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        if (ev.target?.result) {
+          setPhotosFunc((prev) => {
+            if (prev.length >= maxAllowed) return prev;
+            return [...prev, ev.target.result];
+          });
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleTaskProofFilesSelected = (e) => {
+    processImageFiles(e.target.files, taskProofPhotos, setTaskProofPhotos, "Foto Bukti");
+    e.target.value = "";
+  };
+
+  const handleHandoverFilesSelected = (e) => {
+    processImageFiles(e.target.files, handoverPhotos, setHandoverPhotos, "Foto Baseline");
+    e.target.value = "";
+  };
+
+  const handleDeliverablesFilesSelected = (e) => {
+    const files = Array.from(e.target.files || []);
+    const newItems = files.map((f) => ({
+      id: `df-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      name: f.name,
+      size: `${(f.size / (1024 * 1024)).toFixed(1)} MB`,
+      type: f.type || "application/octet-stream",
+      uploadedAt: "Baru saja",
+    }));
+    setDigitalFiles((prev) => [...prev, ...newItems]);
+    e.target.value = "";
+  };
+
   if (!room) return null;
 
   // Configuration single source of truth based on orderStatus and transactionType
@@ -144,24 +219,23 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
   // 4. JASA: Submit Deliverables
   const handleSubmitDeliverables = (e) => {
     e.preventDefault();
+    if (digitalFiles.length === 0 && !submissionUrl.trim()) {
+      addToast?.("Berkas / Tautan Diperlukan", "Mohon sertakan minimal satu berkas pekerjaan atau cantumkan tautan cloud/drive.", "warning");
+      return;
+    }
+    if (!deliverableNotes.trim()) {
+      addToast?.("Catatan Diperlukan", "Mohon isi catatan serah terima hasil pekerjaan.", "warning");
+      return;
+    }
+
     setIsSubmitting(true);
-
-    const filesToSubmit = digitalFiles.length > 0 ? digitalFiles : [
-      {
-        id: `df-${Date.now()}`,
-        name: "Hasil_Pekerjaan_Final.zip",
-        size: "4.2 MB",
-        type: "application/zip",
-        uploadedAt: "Baru saja"
-      }
-    ];
-
-    const finalNotes = deliverableNotes || "Pekerjaan telah selesai dikerjakan sesuai brief pesanan. Silakan diperiksa berkas dan tautan di atas.";
+    const filesToSubmit = digitalFiles;
+    const finalNotes = deliverableNotes.trim();
 
     setTimeout(() => {
       submitProof(room.id, {
         digitalFiles: filesToSubmit,
-        submissionUrl: submissionUrl || "https://drive.google.com/drive/folders/sample",
+        submissionUrl: submissionUrl.trim() || "-",
         notes: finalNotes
       }, finalNotes);
 
@@ -172,7 +246,7 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
           isJasaDeliverablesProof: true,
           proofData: {
             serviceTitle: itemTitle,
-            submissionUrl: submissionUrl || "https://drive.google.com/drive/folders/sample",
+            submissionUrl: submissionUrl.trim() || "-",
             files: filesToSubmit,
             notes: finalNotes,
             submittedAt: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
@@ -182,7 +256,6 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
 
       setIsSubmitting(false);
       setActiveModal(null);
-      // toast handled by AppContext submitProof
     }, 700);
   };
 
@@ -236,18 +309,43 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
   };
 
   // 7. BANTUAN: Submit Task Proof
-  const handleSubmitTaskProof = (e) => {
+  const handleSubmitTaskProof = async (e) => {
     e.preventDefault();
+    if (!taskProofPhotos || taskProofPhotos.length === 0) {
+      addToast?.("Foto Bukti Diperlukan", "Mohon unggah minimal 1 foto bukti penyelesaian tugas.", "warning");
+      return;
+    }
+    if (!deliverableNotes || !deliverableNotes.trim()) {
+      addToast?.("Catatan Diperlukan", "Mohon isi catatan ringkas mengenai penyelesaian tugas.", "warning");
+      return;
+    }
+
     setIsSubmitting(true);
+    const finalNotes = deliverableNotes.trim();
 
-    const photosToSubmit = taskProofPhotos.length > 0 ? taskProofPhotos : [
-      "https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&w=600&q=80"
-    ];
-    const finalNotes = deliverableNotes || "Tugas bantuan lapangan telah berhasil diselesaikan dengan baik sesuai instruksi.";
+    try {
+      // Upload setiap foto ke bantuin-proofs bucket
+      const uploadedUrls = [];
+      for (const dataUrl of taskProofPhotos) {
+        // Konversi base64 data URL ke Blob
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        const ext = blob.type.split("/")[1] || "jpg";
+        const form = new FormData();
+        form.append("file", blob, `proof-${Date.now()}.${ext}`);
+        form.append("bucket", "bantuin-proofs");
+        form.append("folder", `tasks/${room.id}`);
 
-    setTimeout(() => {
+        const uploadRes = await fetch("/api/upload", { method: "POST", body: form });
+        const uploadData = await uploadRes.json();
+        const url = uploadData?.url || uploadData?.urls?.[0];
+        if (!uploadRes.ok || !url) throw new Error(uploadData?.error || "Upload bukti gagal");
+        uploadedUrls.push(url);
+      }
+
       submitProof(room.id, {
-        photoUrl: photosToSubmit[0],
+        photoUrl: uploadedUrls[0],
+        photoUrls: uploadedUrls,
         notes: finalNotes,
       }, finalNotes);
 
@@ -256,15 +354,19 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
         "Helper telah menyelesaikan tugas dan mengunggah bukti penyelesaian. Pemesan dapat memeriksa lalu menekan 'Konfirmasi Tugas Selesai'.",
         {
           isTaskProof: true,
-          proofPhotos: photosToSubmit,
+          proofPhotos: uploadedUrls,
           notes: finalNotes,
         }
       );
 
+      addToast?.("Bukti Terkirim", "Foto bukti berhasil diunggah ke server.");
+    } catch (err) {
+      console.error("Task proof upload error:", err);
+      addToast?.("Gagal Mengunggah", err.message || "Terjadi kesalahan saat mengunggah foto bukti.", "error");
+    } finally {
       setIsSubmitting(false);
       setActiveModal(null);
-      // toast handled by AppContext submitProof
-    }, 700);
+    }
   };
 
   // 8. BANTUAN: Confirm Task Completion & Rating
@@ -297,17 +399,22 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
   // 9. SEWA: Handover Submit
   const handleRentalHandoverSubmit = (e) => {
     e.preventDefault();
-    const photosToSubmit = handoverPhotos.length > 0
-      ? handoverPhotos
-      : [
-          room?.rentalDetails?.photoUrl || "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=800&q=80"
-        ];
+    if (handoverPhotos.length === 0) {
+      addToast?.("Foto Baseline Diperlukan", "Mohon unggah minimal 1 foto fisik unit saat serah terima.", "warning");
+      return;
+    }
+    if (!handoverNotes.trim()) {
+      addToast?.("Catatan Fisik Diperlukan", "Mohon cantumkan catatan kondisi fisik unit.", "warning");
+      return;
+    }
+
+    const photosToSubmit = handoverPhotos;
 
     confirmRentalHandover(room.id, {
       photos: photosToSubmit,
-      serialNumber: serialNumber || "SN-82910482-BANTUIN",
+      serialNumber: serialNumber || "-",
       eAgreementConfirmed: true,
-      notes: handoverNotes || "Kondisi fisik unit bodi, fungsi utama, dan kelengkapan aksesoris telah diverifikasi bersama pihak toko dalam kondisi prima.",
+      notes: handoverNotes.trim(),
     });
 
     setActiveModal(null);
@@ -325,46 +432,17 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
   // 11. SEWA: Review Submit
   const handleRentalReviewSubmit = (e) => {
     e.preventDefault();
+    if (!reviewComment.trim()) {
+      addToast?.("Ulasan Diperlukan", "Mohon berikan ulasan singkat mengenai pengalaman sewa Anda.", "warning");
+      return;
+    }
     submitRentalReview(
       room.id,
       selectedRating,
-      reviewComment || "Pelayanan toko sangat ramah, unit terawat dan berfungsi prima!"
+      reviewComment.trim()
     );
     setActiveModal(null);
     addToast?.("Ulasan Disimpan", "Terima kasih telah memberikan ulasan untuk toko rental.");
-  };
-
-  // Sample files helpers
-  const handleUseSampleDeliverables = () => {
-    setSubmissionUrl("https://drive.google.com/drive/folders/1Bantuin-Project-Final-Assets?usp=sharing");
-    setDigitalFiles([
-      {
-        id: "file-sample-1",
-        name: "Final_Design_Assets_HighRes.png",
-        size: "3.4 MB",
-        type: "image/png",
-        uploadedAt: "Baru saja",
-      },
-      {
-        id: "file-sample-2",
-        name: "Master_Vector_Source.zip",
-        size: "16.8 MB",
-        type: "application/zip",
-        uploadedAt: "Baru saja",
-      }
-    ]);
-    if (!deliverableNotes) {
-      setDeliverableNotes("Seluruh file desain master resolusi tinggi (PNG transparan, JPG, dan berkas vector ZIP) telah siap diunduh pada tautan Google Drive di atas.");
-    }
-  };
-
-  const handleUseSampleTaskProof = () => {
-    setTaskProofPhotos([
-      "https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&w=600&q=80"
-    ]);
-    if (!deliverableNotes) {
-      setDeliverableNotes("Dokumen akta notaris telah diambil dari resepsionis lantai 5 dan diserahterimakan di titik temu.");
-    }
   };
 
   const handleUseSampleHandoverPhotos = () => {
@@ -675,44 +753,124 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-bold text-slate-700">Foto Kondisi Fisik Baseline</label>
-                  <button
-                    type="button"
-                    onClick={handleUseSampleHandoverPhotos}
-                    className="text-[11px] text-[#1683FF] hover:underline font-semibold"
-                  >
-                    Gunakan Foto Contoh
-                  </button>
+                <input
+                  type="file"
+                  ref={handoverFileRef}
+                  onChange={handleHandoverFilesSelected}
+                  accept="image/png, image/jpeg, image/jpg, image/webp, image/gif"
+                  className="hidden"
+                  multiple
+                />
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-slate-700">
+                    Foto Kondisi Fisik Baseline <span className="text-rose-500 font-bold ml-0.5">*</span>
+                  </label>
+                  <span className="text-[11px] font-semibold text-slate-400">
+                    {handoverPhotos.length}/3 Foto
+                  </span>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {handoverPhotos.map((url, idx) => (
-                    <div key={idx} className="relative w-16 h-16 rounded-lg overflow-hidden border border-slate-200">
-                      <img src={url} alt={`Handover ${idx}`} className="w-full h-full object-cover" />
-                      <button
-                        type="button"
-                        onClick={() => setHandoverPhotos((p) => p.filter((_, i) => i !== idx))}
-                        className="absolute top-1 right-1 p-0.5 bg-black/60 text-white rounded-full"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
+
+                {handoverPhotos.length === 0 ? (
+                  <div
+                    onClick={() => handoverFileRef.current?.click()}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsDraggingHandover(true);
+                    }}
+                    onDragLeave={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsDraggingHandover(false);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsDraggingHandover(false);
+                      processImageFiles(e.dataTransfer.files, handoverPhotos, setHandoverPhotos, "Foto Baseline");
+                    }}
+                    className={`border-2 border-dashed rounded-2xl p-4 text-center transition cursor-pointer flex flex-col items-center justify-center gap-1.5 ${
+                      isDraggingHandover
+                        ? "border-[#1683FF] bg-blue-50/90 scale-[1.01]"
+                        : "border-slate-200 bg-slate-50/60 hover:bg-blue-50/50 hover:border-[#1683FF]"
+                    }`}
+                  >
+                    <div className="w-9 h-9 rounded-xl bg-blue-50 text-[#1683FF] flex items-center justify-center">
+                      <Camera className="w-5 h-5" />
                     </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={handleUseSampleHandoverPhotos}
-                    className="w-16 h-16 rounded-lg border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 hover:border-[#1683FF] hover:text-[#1683FF] transition"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span className="text-[9px]">Tambah</span>
-                  </button>
-                </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-700">
+                        {isDraggingHandover ? "Lepaskan foto di sini" : "Tarik & lepas foto ke sini, atau klik untuk memilih"}
+                      </p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Hanya format gambar (PNG, JPG, WebP) • Maksimal 3 foto
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap gap-2">
+                      {handoverPhotos.map((url, idx) => (
+                        <div key={idx} className="relative w-20 h-20 rounded-xl overflow-hidden border border-slate-200 shadow-2xs group">
+                          <img src={url} alt={`Handover ${idx}`} className="w-full h-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => setHandoverPhotos((p) => p.filter((_, i) => i !== idx))}
+                            className="absolute top-1 right-1 p-1 bg-black/60 text-white rounded-md hover:bg-rose-600 transition cursor-pointer"
+                            title="Hapus foto"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                          <span className="absolute bottom-1 left-1 px-1.5 py-0.2 rounded bg-black/60 text-[9px] text-white font-bold">
+                            Foto {idx + 1}
+                          </span>
+                        </div>
+                      ))}
+
+                      {handoverPhotos.length < 3 && (
+                        <div
+                          onClick={() => handoverFileRef.current?.click()}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setIsDraggingHandover(true);
+                          }}
+                          onDragLeave={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setIsDraggingHandover(false);
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setIsDraggingHandover(false);
+                            processImageFiles(e.dataTransfer.files, handoverPhotos, setHandoverPhotos, "Foto Baseline");
+                          }}
+                          className={`w-20 h-20 rounded-xl border-2 border-dashed flex flex-col items-center justify-center text-slate-400 hover:border-[#1683FF] hover:text-[#1683FF] transition cursor-pointer ${
+                            isDraggingHandover ? "border-[#1683FF] bg-blue-50/90 text-[#1683FF]" : "border-slate-200 bg-slate-50"
+                          }`}
+                        >
+                          <Plus className="w-5 h-5 mb-0.5" />
+                          <span className="text-[9px] font-bold">Tambah</span>
+                        </div>
+                      )}
+                    </div>
+                    {handoverPhotos.length >= 3 && (
+                      <p className="text-[10px] text-slate-400 italic">
+                        Batas maksimal 3 foto telah tercapai.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Catatan Kondisi Fisik</label>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Catatan Kondisi Fisik <span className="text-rose-500 font-bold ml-0.5">*</span>
+                </label>
                 <textarea
                   rows={2}
+                  required
                   value={handoverNotes}
                   onChange={(e) => setHandoverNotes(e.target.value)}
                   placeholder="Kondisi unit, aksesoris lengkap, fungsi normal..."
@@ -847,6 +1005,9 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
 
             <form onSubmit={handleRentalReviewSubmit} className="space-y-4">
               <div className="flex flex-col items-center py-2 space-y-1">
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Rating Toko Mitra <span className="text-rose-500 font-bold ml-0.5">*</span>
+                </label>
                 <div className="flex gap-1">
                   {[1, 2, 3, 4, 5].map((star) => (
                     <button
@@ -875,9 +1036,12 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Komentar &amp; Ulasan</label>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Komentar &amp; Ulasan <span className="text-rose-500 font-bold ml-0.5">*</span>
+                </label>
                 <textarea
                   rows={3}
+                  required
                   value={reviewComment}
                   onChange={(e) => setReviewComment(e.target.value)}
                   placeholder="Kondisi alat sangat bagus, toko ramah dan responsif..."
@@ -916,7 +1080,7 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
                 </div>
                 <div>
                   <h3 className="font-bold text-slate-800 text-sm">Serahkan Hasil Pekerjaan Jasa</h3>
-                  <p className="text-[11px] text-slate-500">Unggah berkas digital atau tautan Google Drive / Cloud</p>
+                  <p className="text-[11px] text-slate-500">Unggah berkas digital atau cantumkan tautan Google Drive / Cloud</p>
                 </div>
               </div>
               <button 
@@ -930,16 +1094,7 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
 
             <form onSubmit={handleSubmitDeliverables} className="space-y-4">
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-bold text-slate-700">Tautan Cloud / Drive (Opsional)</label>
-                  <button
-                    type="button"
-                    onClick={handleUseSampleDeliverables}
-                    className="text-[11px] text-[#1683FF] hover:underline font-semibold"
-                  >
-                    Gunakan Data Contoh
-                  </button>
-                </div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Tautan Cloud / Drive (Opsional)</label>
                 <input
                   type="url"
                   value={submissionUrl}
@@ -950,7 +1105,16 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Daftar Berkas Digital</label>
+                <input
+                  type="file"
+                  ref={deliverablesFileRef}
+                  onChange={handleDeliverablesFilesSelected}
+                  className="hidden"
+                  multiple
+                />
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Daftar Berkas Digital <span className="text-rose-500 font-bold ml-0.5">*</span>
+                </label>
                 <div className="space-y-1.5 mb-2">
                   {digitalFiles.map((file) => (
                     <div key={file.id} className="p-2 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
@@ -962,7 +1126,7 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
                       <button
                         type="button"
                         onClick={() => setDigitalFiles((prev) => prev.filter((f) => f.id !== file.id))}
-                        className="text-slate-400 hover:text-rose-500 p-1"
+                        className="text-slate-400 hover:text-rose-500 p-1 cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -971,8 +1135,8 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
                 </div>
                 <button
                   type="button"
-                  onClick={handleUseSampleDeliverables}
-                  className="w-full py-3 border-2 border-dashed border-slate-200 rounded-xl text-xs text-slate-500 hover:border-[#1683FF] hover:text-[#1683FF] transition flex items-center justify-center gap-1.5"
+                  onClick={() => deliverablesFileRef.current?.click()}
+                  className="w-full py-3 border-2 border-dashed border-slate-200 rounded-xl text-xs text-slate-500 hover:border-[#1683FF] hover:text-[#1683FF] transition flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Tambahkan Berkas Pekerjaan</span>
@@ -980,9 +1144,12 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Catatan Serah Terima</label>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Catatan Serah Terima <span className="text-rose-500 font-bold ml-0.5">*</span>
+                </label>
                 <textarea
                   rows={3}
+                  required
                   value={deliverableNotes}
                   onChange={(e) => setDeliverableNotes(e.target.value)}
                   placeholder="Deskripsikan hasil pekerjaan yang telah diselesaikan..."
@@ -1037,7 +1204,9 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
 
             <form onSubmit={handleRequestRevision} className="space-y-4">
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Catatan Revisi</label>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Catatan Revisi <span className="text-rose-500 font-bold ml-0.5">*</span>
+                </label>
                 <textarea
                   rows={4}
                   required
@@ -1093,6 +1262,9 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
 
             <form onSubmit={handleConfirmJasaCompletion} className="space-y-4">
               <div className="flex flex-col items-center py-2 space-y-1">
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Rating Pekerjaan <span className="text-rose-500 font-bold ml-0.5">*</span>
+                </label>
                 <div className="flex gap-1">
                   {[1, 2, 3, 4, 5].map((star) => (
                     <button
@@ -1121,9 +1293,12 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Ulasan Pekerjaan</label>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Ulasan Pekerjaan <span className="text-rose-500 font-bold ml-0.5">*</span>
+                </label>
                 <textarea
                   rows={3}
+                  required
                   value={reviewComment}
                   onChange={(e) => setReviewComment(e.target.value)}
                   placeholder="Hasil kerja sangat rapi, komunikasi responsif, terima kasih..."
@@ -1189,44 +1364,124 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
 
             <form onSubmit={handleSubmitTaskProof} className="space-y-4">
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-bold text-slate-700">Foto Bukti Tugas</label>
-                  <button
-                    type="button"
-                    onClick={handleUseSampleTaskProof}
-                    className="text-[11px] text-[#1683FF] hover:underline font-semibold"
-                  >
-                    Gunakan Foto Contoh
-                  </button>
+                <input
+                  type="file"
+                  ref={taskProofFileRef}
+                  onChange={handleTaskProofFilesSelected}
+                  accept="image/png, image/jpeg, image/jpg, image/webp, image/gif"
+                  className="hidden"
+                  multiple
+                />
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-slate-700">
+                    Foto Bukti Tugas <span className="text-rose-500 font-bold ml-0.5">*</span>
+                  </label>
+                  <span className="text-[11px] font-semibold text-slate-400">
+                    {taskProofPhotos.length}/3 Foto
+                  </span>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {taskProofPhotos.map((url, idx) => (
-                    <div key={idx} className="relative w-16 h-16 rounded-lg overflow-hidden border border-slate-200">
-                      <img src={url} alt={`Bukti ${idx}`} className="w-full h-full object-cover" />
-                      <button
-                        type="button"
-                        onClick={() => setTaskProofPhotos((p) => p.filter((_, i) => i !== idx))}
-                        className="absolute top-1 right-1 p-0.5 bg-black/60 text-white rounded-full"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
+
+                {taskProofPhotos.length === 0 ? (
+                  <div
+                    onClick={() => taskProofFileRef.current?.click()}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsDraggingTaskProof(true);
+                    }}
+                    onDragLeave={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsDraggingTaskProof(false);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setIsDraggingTaskProof(false);
+                      processImageFiles(e.dataTransfer.files, taskProofPhotos, setTaskProofPhotos, "Foto Bukti");
+                    }}
+                    className={`border-2 border-dashed rounded-2xl p-4 text-center transition cursor-pointer flex flex-col items-center justify-center gap-1.5 ${
+                      isDraggingTaskProof
+                        ? "border-[#1683FF] bg-blue-50/90 scale-[1.01]"
+                        : "border-slate-200 bg-slate-50/60 hover:bg-blue-50/50 hover:border-[#1683FF]"
+                    }`}
+                  >
+                    <div className="w-9 h-9 rounded-xl bg-blue-50 text-[#1683FF] flex items-center justify-center">
+                      <Camera className="w-5 h-5" />
                     </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={handleUseSampleTaskProof}
-                    className="w-16 h-16 rounded-lg border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 hover:border-[#1683FF] hover:text-[#1683FF] transition"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span className="text-[9px]">Tambah</span>
-                  </button>
-                </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-700">
+                        {isDraggingTaskProof ? "Lepaskan foto bukti di sini" : "Tarik & lepas foto bukti ke sini, atau klik untuk memilih"}
+                      </p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Hanya format gambar (PNG, JPG, WebP) • Maksimal 3 foto
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap gap-2">
+                      {taskProofPhotos.map((url, idx) => (
+                        <div key={idx} className="relative w-20 h-20 rounded-xl overflow-hidden border border-slate-200 shadow-2xs group">
+                          <img src={url} alt={`Bukti ${idx}`} className="w-full h-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => setTaskProofPhotos((p) => p.filter((_, i) => i !== idx))}
+                            className="absolute top-1 right-1 p-1 bg-black/60 text-white rounded-md hover:bg-rose-600 transition cursor-pointer"
+                            title="Hapus foto"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                          <span className="absolute bottom-1 left-1 px-1.5 py-0.2 rounded bg-black/60 text-[9px] text-white font-bold">
+                            Foto {idx + 1}
+                          </span>
+                        </div>
+                      ))}
+
+                      {taskProofPhotos.length < 3 && (
+                        <div
+                          onClick={() => taskProofFileRef.current?.click()}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setIsDraggingTaskProof(true);
+                          }}
+                          onDragLeave={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setIsDraggingTaskProof(false);
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setIsDraggingTaskProof(false);
+                            processImageFiles(e.dataTransfer.files, taskProofPhotos, setTaskProofPhotos, "Foto Bukti");
+                          }}
+                          className={`w-20 h-20 rounded-xl border-2 border-dashed flex flex-col items-center justify-center text-slate-400 hover:border-[#1683FF] hover:text-[#1683FF] transition cursor-pointer ${
+                            isDraggingTaskProof ? "border-[#1683FF] bg-blue-50/90 text-[#1683FF]" : "border-slate-200 bg-slate-50"
+                          }`}
+                        >
+                          <Plus className="w-5 h-5 mb-0.5" />
+                          <span className="text-[9px] font-bold">Tambah</span>
+                        </div>
+                      )}
+                    </div>
+                    {taskProofPhotos.length >= 3 && (
+                      <p className="text-[10px] text-slate-400 italic">
+                        Batas maksimal 3 foto telah tercapai.
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Catatan Penyelesaian</label>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Catatan Penyelesaian <span className="text-rose-500 font-bold ml-0.5">*</span>
+                </label>
                 <textarea
                   rows={3}
+                  required
                   value={deliverableNotes}
                   onChange={(e) => setDeliverableNotes(e.target.value)}
                   placeholder="Tugas telah selesai dilaksanakan sesuai instruksi pemesan..."
@@ -1257,9 +1512,10 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
 
       {/* MODAL: BANTUAN KONFIRMASI SELESAI & RATING */}
       {activeModal === "task_completion" && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-start justify-center overflow-y-auto px-4 pt-20 pb-6">
+          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150 flex flex-col">
+            {/* Header — fixed */}
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100 shrink-0">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-xl bg-blue-50 text-[#1683FF] flex items-center justify-center">
                   <CheckCircle2 className="w-4 h-4" />
@@ -1278,8 +1534,83 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
               </button>
             </div>
 
-            <form onSubmit={handleConfirmTaskCompletion} className="space-y-4">
+            <form onSubmit={handleConfirmTaskCompletion} className="px-5 pb-4 space-y-4">
+              <div className="pt-4 space-y-4">
+
+              {/* BUKTI PENYELESAIAN TUGAS — foto & catatan dari helper */}
+              {(() => {
+                const proofPhotos = (() => {
+                  const all = [];
+                  if (room?.proofPhotos?.length) all.push(...room.proofPhotos);
+                  if (room?.messages?.length) {
+                    room.messages.forEach((m) => {
+                      if (m.proofPhotos?.length) all.push(...m.proofPhotos);
+                      if (m.photos?.length && (m.isTaskProof || m.isHandoverProof)) all.push(...m.photos);
+                    });
+                  }
+                  return Array.from(new Set(all.filter(Boolean)));
+                })();
+                const proofNotes = room?.proofNotes || (() => {
+                  const msg = room?.messages?.find((m) => (m.isTaskProof || m.isHandoverProof) && m.notes);
+                  return msg?.notes || "";
+                })();
+
+                return (
+                  <div className="p-3.5 bg-blue-50/70 rounded-2xl border border-blue-200/80 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-[#1683FF]">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        <span>Bukti Penyelesaian Tugas</span>
+                      </div>
+                      {proofPhotos.length > 0 && (
+                        <span className="text-[10px] font-semibold text-slate-600 bg-white px-2 py-0.5 rounded-full border border-blue-100">
+                          {proofPhotos.length} Foto Bukti
+                        </span>
+                      )}
+                    </div>
+
+                    {proofPhotos.length > 0 ? (
+                      <div className="grid grid-cols-3 gap-2 pt-1">
+                        {proofPhotos.map((imgUrl, pIdx) => (
+                          <a
+                            key={pIdx}
+                            href={imgUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="relative group aspect-video rounded-xl overflow-hidden border border-blue-200 bg-slate-900/10 cursor-pointer shadow-xs block"
+                          >
+                            <img
+                              src={imgUrl}
+                              alt={`Bukti Tugas ${pIdx + 1}`}
+                              className="w-full h-full object-cover group-hover:scale-105 transition"
+                            />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[10px] font-bold gap-1">
+                              <Eye className="w-3 h-3" />
+                              <span>Lihat</span>
+                            </div>
+                          </a>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-slate-500 italic bg-white/80 p-2.5 rounded-xl border border-blue-100">
+                        Helper telah menyatakan tugas selesai. Tinjau percakapan untuk detail.
+                      </p>
+                    )}
+
+                    {proofNotes && (
+                      <div className="text-xs bg-white p-2.5 rounded-xl border border-blue-100 leading-relaxed">
+                        <span className="font-bold text-slate-800 text-[11px] block mb-0.5">Catatan Helper:</span>
+                        <p className="italic text-slate-600 text-[11px]">&ldquo;{proofNotes}&rdquo;</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               <div className="flex flex-col items-center py-2 space-y-1">
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Rating untuk Helper <span className="text-rose-500 font-bold ml-0.5">*</span>
+                </label>
                 <div className="flex gap-1">
                   {[1, 2, 3, 4, 5].map((star) => (
                     <button
@@ -1308,9 +1639,12 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Ulasan untuk Helper</label>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Ulasan untuk Helper <span className="text-rose-500 font-bold ml-0.5">*</span>
+                </label>
                 <textarea
                   rows={3}
+                  required
                   value={reviewComment}
                   onChange={(e) => setReviewComment(e.target.value)}
                   placeholder="Helper sangat cekatan, ramah, dan tepat waktu..."
@@ -1330,7 +1664,10 @@ export default function ChatFlowTracker({ room, activeRole = "requester" }) {
                 </p>
               </div>
 
-              <div className="flex gap-2 justify-end pt-2 border-t border-slate-100">
+              </div>{/* end body */}
+
+              {/* Footer */}
+              <div className="flex gap-2 justify-end px-5 py-4 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setActiveModal(null)}

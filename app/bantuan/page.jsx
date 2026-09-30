@@ -116,19 +116,61 @@ function BantuanContent() {
     };
   }, []);
 
+  function isTaskMine(r, user) {
+    if (!user || (!user.id && !user.fullName && !user.email)) return false;
+    const isRequester =
+      (user.id && (r.requesterId === user.id || r.requester?.id === user.id)) ||
+      (user.fullName && (r.userName === user.fullName || r.requester?.fullName === user.fullName)) ||
+      (user.email && (r.userEmail === user.email || r.requester?.email === user.email));
+
+    const isSelectedHelper =
+      (user.id && (r.selectedHelperId === user.id || r.selectedHelper?.id === user.id)) ||
+      (user.fullName && r.selectedHelper?.fullName === user.fullName) ||
+      (Array.isArray(r.offers) && r.offers.some((o) => 
+        ((user.id && (o.helperId === user.id || o.helper?.id === user.id)) || (user.fullName && o.helper?.fullName === user.fullName)) &&
+        o.status === "accepted"
+      ));
+
+    const hasApplied =
+      Array.isArray(r.offers) && r.offers.some((o) => 
+        (user.id && (o.helperId === user.id || o.helper?.id === user.id)) ||
+        (user.fullName && o.helper?.fullName === user.fullName)
+      );
+
+    return Boolean(isRequester || isSelectedHelper || hasApplied);
+  }
+
   // Counts for scope tabs
   const countAll = useMemo(() => {
     return dbRequests.filter((r) => {
-      const isClosed = r.status === "closed" || r.status === "completed";
-      if (isClosed) return false;
-      const isMine = r.requesterId === currentUser?.id || (currentUser?.fullName && r.userName === currentUser?.fullName);
-      if (filterByKabupaten && !isMine && !isItemInCurrentKabupaten(r)) return false;
+      // Sembunyikan jika sudah ada helper terpilih atau status tidak open
+      const isUnavailable =
+        r.status === "closed" ||
+        r.status === "completed" ||
+        r.status === "cancelled" ||
+        r.status === "in_progress" ||
+        r.status === "awaiting_confirmation" ||
+        r.status === "helper_selected" ||
+        !!r.selectedHelperId;
+      if (isUnavailable) return false;
+      if (filterByKabupaten && !isItemInCurrentKabupaten(r)) return false;
       return true;
     }).length;
   }, [dbRequests, filterByKabupaten, isItemInCurrentKabupaten, currentUser]);
 
   const countMyRequests = useMemo(() => {
-    return dbRequests.filter((r) => r.requesterId === currentUser?.id || (currentUser?.fullName && r.userName === currentUser?.fullName)).length;
+    return dbRequests.filter((r) => {
+      if (!isTaskMine(r, currentUser)) return false;
+      const isUnavailable =
+        r.status === "completed" ||
+        r.status === "closed" ||
+        r.status === "cancelled" ||
+        r.status === "in_progress" ||
+        r.status === "awaiting_confirmation" ||
+        r.status === "helper_selected" ||
+        !!r.selectedHelperId;
+      return !isUnavailable;
+    }).length;
   }, [dbRequests, currentUser]);
 
   // Unified categories for dropdown from canonical source of truth
@@ -137,29 +179,33 @@ function BantuanContent() {
   // Filtered Requests Logic
   const filteredRequests = useMemo(() => {
     let list = dbRequests.filter((item) => {
-      const isMine = item.requesterId === currentUser?.id || (currentUser?.fullName && item.userName === currentUser?.fullName);
+      const isMine = isTaskMine(item, currentUser);
 
       // Filter Scope: 'all' vs 'my_requests'
       if (scopeFilter === "my_requests" && !isMine) return false;
 
-      // Exclude requests where a helper has already finished/closed unless viewing my own requests
-      if (!isMine) {
-        const isAcceptedOrFinished =
-          item.status === "completed" ||
-          item.status === "closed";
-        if (isAcceptedOrFinished) return false;
-      }
+      // Sembunyikan tugas yang sudah ada helper terpilih atau tidak open lagi
+      // (berlaku untuk semua user, termasuk pemilik tugas sendiri)
+      const isUnavailable =
+        item.status === "completed" ||
+        item.status === "closed" ||
+        item.status === "cancelled" ||
+        item.status === "in_progress" ||
+        item.status === "awaiting_confirmation" ||
+        item.status === "helper_selected" ||
+        !!item.selectedHelperId;
+      if (isUnavailable) return false;
 
-      // Filter Kabupaten: Hanya muncul di kabupaten yang sama jika filter aktif
+      // Filter Kabupaten: Hanya muncul di kabupaten yang sama jika filter aktif (kecuali jika tugas saya)
       if (filterByKabupaten && !isMine && !isItemInCurrentKabupaten(item)) {
         return false;
       }
 
       const matchQuery =
         !searchQuery ||
-        item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.category.toLowerCase().includes(searchQuery.toLowerCase());
+        item.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.category?.toLowerCase().includes(searchQuery.toLowerCase());
 
       const matchCategory = matchesCategory(item, selectedCategory, "bantuan");
 

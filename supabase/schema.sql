@@ -500,3 +500,13 @@ CREATE TRIGGER update_order_rooms_modtime BEFORE UPDATE ON public.order_rooms FO
 CREATE TRIGGER update_rentals_modtime BEFORE UPDATE ON public.rentals FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 CREATE TRIGGER update_rental_bookings_modtime BEFORE UPDATE ON public.rental_bookings FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 CREATE TRIGGER update_services_modtime BEFORE UPDATE ON public.services FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+-- ============================================================
+-- SUPABASE REALTIME: Aktifkan publikasi PostgreSQL
+-- Diperlukan agar Supabase Realtime WebSocket bisa mendengarkan
+-- perubahan tabel chat_messages dan order_rooms secara real-time.
+-- Jalankan perintah ini di Supabase SQL Editor jika belum ada.
+-- ============================================================
+ALTER PUBLICATION supabase_realtime ADD TABLE public.chat_messages;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.order_rooms;
+

@@ -40,7 +40,8 @@ import {
   Trash2,
   AlertTriangle,
   XCircle,
-  X
+  X,
+  Play
 } from "lucide-react";
 import DetailSkeleton from "@/components/skeletons/DetailSkeleton";
 
@@ -53,6 +54,7 @@ export default function RequestDetailPage() {
     getDistanceToUser,
     detectUserLocation,
     startTaskInquiry,
+    sendChatMessage,
     addToast
   } = useApp();
 
@@ -63,6 +65,65 @@ export default function RequestDetailPage() {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [selectedOfferToAccept, setSelectedOfferToAccept] = useState(null);
+  const [isStartingWork, setIsStartingWork] = useState(false);
+
+  const handleStartWork = async (offer) => {
+    if (!id || isStartingWork) return;
+    setIsStartingWork(true);
+    try {
+      const startMsg = `Halo! Saya sudah siap membantu sekarang, dan akan segera mengabari Anda jika ada kendala atau saat tugas selesai dikerjakan.`;
+
+      const res = await fetch(`/api/requests/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "in_progress",
+          selectedHelperId: offer?.helperId || currentUser?.id,
+          startMessage: startMsg,
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || "Gagal memulai pengerjaan tugas.");
+      }
+
+      // Inisiasi room chat & kirim pesan
+      let roomId = request?.id || id;
+      if (startTaskInquiry && request) {
+        const inqRoom = startTaskInquiry({ request, offer });
+        if (inqRoom?.id) roomId = inqRoom.id;
+      }
+
+      if (sendChatMessage) {
+        await sendChatMessage(roomId, startMsg, {
+          senderId: currentUser?.id,
+          senderName: currentUser?.fullName || "Helper",
+        });
+      }
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("bantuin_activity_updated"));
+      }
+
+      addToast?.(
+        "Pengerjaan Tugas Dimulai!",
+        "Tugas kini berstatus Sedang Dikerjakan dan pesan otomatis telah dikirim ke pembuat tugas.",
+        "success"
+      );
+
+      // Update state request lokal
+      setRequest((prev) => (prev ? { ...prev, status: "in_progress" } : prev));
+
+      // Navigasi ke chat peminta
+      router.push(`/chat?room=${roomId}`);
+    } catch (err) {
+      console.error("Start work error:", err);
+      addToast?.("Gagal Memulai", err.message || "Terjadi kesalahan saat memulai pengerjaan.", "error");
+    } finally {
+      setIsStartingWork(false);
+    }
+  };
 
   const handleCancelRequest = async () => {
     if (!id || isCancelling) return;
@@ -603,9 +664,16 @@ export default function RequestDetailPage() {
                           {isMyOffer ? (
                             <div className="flex flex-wrap items-center justify-between w-full gap-2">
                               {isThisOfferAccepted ? (
-                                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 text-white font-bold text-xs shadow-xs">
-                                  <CheckCircle2 className="w-4 h-4 text-white" />
-                                  <span>Lamaran Diterima</span>
+                                <div className="flex items-center gap-2">
+                                  <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 text-white font-bold text-xs shadow-xs">
+                                    <CheckCircle2 className="w-4 h-4 text-white" />
+                                    <span>Lamaran Diterima</span>
+                                  </div>
+                                  {request.status === "in_progress" && (
+                                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-blue-50 text-[#1683FF] border border-blue-200 font-bold text-[11px] animate-pulse">
+                                      <span>Sedang Dikerjakan</span>
+                                    </div>
+                                  )}
                                 </div>
                               ) : isThisOfferRejected ? (
                                 <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 font-bold text-xs">
@@ -619,8 +687,28 @@ export default function RequestDetailPage() {
                                 </div>
                               )}
 
-                              {/* Tombol chat hanya muncul jika lamaran DITERIMA atau MASIH MENUNGGU (hilang jika tidak diterima) */}
-                              {!isThisOfferRejected && (
+                              {/* Jika lamaran DITERIMA dan BELUM mulai dikerjakan: Tombol "Mulai Kerjakan" */}
+                              {isThisOfferAccepted && request.status !== "in_progress" && request.status !== "completed" ? (
+                                <button
+                                  type="button"
+                                  disabled={isStartingWork}
+                                  onClick={() => handleStartWork(offer)}
+                                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl font-black text-xs text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 shadow-md hover:shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0 disabled:opacity-50"
+                                >
+                                  {isStartingWork ? (
+                                    <>
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      <span>Memulai...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Play className="w-3.5 h-3.5 fill-white" />
+                                      <span>Mulai Kerjakan</span>
+                                    </>
+                                  )}
+                                </button>
+                              ) : isThisOfferAccepted ? (
+                                /* Jika lamaran DITERIMA dan SUDAH mulai dikerjakan: Tombol "Chat Peminta Tugas" */
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -631,16 +719,29 @@ export default function RequestDetailPage() {
                                       router.push(`/chat?room=${request?.id || id}`);
                                     }
                                   }}
-                                  className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-bold text-xs transition cursor-pointer shrink-0 ${
-                                    isThisOfferAccepted
-                                      ? "bg-[#1683FF] hover:bg-[#0F6FE5] text-white shadow-xs"
-                                      : "border border-slate-200 bg-white hover:bg-slate-50 text-slate-700"
-                                  }`}
+                                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-bold text-xs bg-[#1683FF] hover:bg-[#0F6FE5] text-white shadow-xs transition cursor-pointer shrink-0"
                                 >
                                   <MessageSquare className="w-3.5 h-3.5" />
-                                  <span>{isThisOfferAccepted ? "Chat Peminta Tugas" : "Chat Peminta"}</span>
+                                  <span>Chat Peminta Tugas</span>
                                 </button>
-                              )}
+                              ) : !isThisOfferRejected ? (
+                                /* Jika lamaran masih menunggu seleksi: Chat Peminta */
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (startTaskInquiry && request) {
+                                      const inqRoom = startTaskInquiry({ request, offer });
+                                      router.push(`/chat?room=${inqRoom?.id || request.id}`);
+                                    } else {
+                                      router.push(`/chat?room=${request?.id || id}`);
+                                    }
+                                  }}
+                                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-bold text-xs border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition cursor-pointer shrink-0"
+                                >
+                                  <MessageSquare className="w-3.5 h-3.5" />
+                                  <span>Chat Peminta</span>
+                                </button>
+                              ) : null}
                             </div>
                           ) : isOwner ? (
                             <>

@@ -97,7 +97,7 @@ function getStatusBadge(order) {
     };
   }
 
-  if (orderType === "task" || orderType === "bantuan") {
+  if (orderType === "task" || orderType === "bantuan" || orderType === "service" || orderType === "jasa") {
     if (status === "item_picked_up") {
       return {
         label: "Barang Diambil · Menuju Lokasi",
@@ -122,12 +122,44 @@ function getStatusBadge(order) {
         icon: Clock,
       };
     }
+    if (status === "helper_selected" || status === "room_created") {
+      return {
+        label: "Helper Terpilih · Proses Pengerjaan",
+        color: "bg-emerald-50 text-emerald-700 border-emerald-200",
+        dot: "bg-emerald-500 animate-pulse",
+        icon: Loader2,
+      };
+    }
+    if (status === "in_progress") {
+      return {
+        label: "Sedang Dikerjakan",
+        color: "bg-[#EAF4FF] text-[#1683FF] border-[#DCEAF7]",
+        dot: "bg-[#1683FF] animate-pulse",
+        icon: Loader2,
+      };
+    }
+    if (status === "awaiting_confirmation") {
+      return {
+        label: "Menunggu Konfirmasi Selesai",
+        color: "bg-amber-50 text-amber-800 border-amber-200",
+        dot: "bg-amber-500 animate-pulse",
+        icon: Clock,
+      };
+    }
     if (status === "has_offers") {
       return {
         label: "Tawaran Masuk · Pilih Helper",
         color: "bg-blue-50 text-blue-700 border-blue-200",
         dot: "bg-blue-500 animate-pulse",
         icon: User,
+      };
+    }
+    if (status === "submitted") {
+      return {
+        label: "Lamaran Terkirim · Menunggu Review",
+        color: "bg-blue-50 text-blue-700 border-blue-200",
+        dot: "bg-blue-500 animate-pulse",
+        icon: Clock,
       };
     }
     if (status === "published") {
@@ -139,9 +171,9 @@ function getStatusBadge(order) {
       };
     }
     return {
-      label: "Dana Terverifikasi · Cari Helper",
-      color: "bg-amber-50 text-amber-800 border-amber-200",
-      dot: "bg-amber-500 animate-pulse",
+      label: "Dalam Proses Pengerjaan",
+      color: "bg-[#EAF4FF] text-[#1683FF] border-[#DCEAF7]",
+      dot: "bg-[#1683FF] animate-pulse",
       icon: Clock,
     };
   }

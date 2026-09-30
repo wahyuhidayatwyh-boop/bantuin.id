@@ -42,10 +42,31 @@ export default function RequestCard({ request }) {
   const requesterRole = request.requester?.campusName || request.userRole || "Pengguna Terverifikasi";
   const isVerified = request.requester?.verificationStatus === "verified" || request.userVerified !== false;
 
-  const isMine = Boolean(
+  const isRequester = Boolean(
     (currentUser?.id && requesterId && currentUser.id === requesterId) ||
-    (currentUser?.email && (request.requester?.email === currentUser.email || request.userEmail === currentUser.email))
+    (currentUser?.email && (request.requester?.email === currentUser.email || request.userEmail === currentUser.email)) ||
+    (currentUser?.fullName && (requesterName === currentUser.fullName || request.userName === currentUser.fullName))
   );
+
+  const isSelectedHelper = Boolean(
+    currentUser && (
+      (currentUser.id && (request.selectedHelperId === currentUser.id || request.selectedHelper?.id === currentUser.id)) ||
+      (currentUser.fullName && request.selectedHelper?.fullName === currentUser.fullName) ||
+      (Array.isArray(request.offers) && request.offers.some((o) => 
+        ((currentUser.id && (o.helperId === currentUser.id || o.helper?.id === currentUser.id)) || (currentUser.fullName && o.helper?.fullName === currentUser.fullName)) &&
+        o.status === "accepted"
+      ))
+    )
+  );
+
+  const hasApplied = Boolean(
+    currentUser && Array.isArray(request.offers) && request.offers.some((o) => 
+      (currentUser.id && (o.helperId === currentUser.id || o.helper?.id === currentUser.id)) ||
+      (currentUser.fullName && o.helper?.fullName === currentUser.fullName)
+    )
+  );
+
+  const isMine = isRequester || isSelectedHelper || hasApplied;
 
   const offersCount = request.offers?.length || 0;
 
@@ -65,7 +86,9 @@ export default function RequestCard({ request }) {
   return (
     <div
       className={`w-full rounded-2xl border p-4 sm:p-5 transition-all duration-200 bg-white group flex flex-col justify-between gap-3 sm:gap-4 ${
-        isMine 
+        isSelectedHelper
+          ? "border-emerald-300 bg-emerald-50/20 shadow-2xs ring-1 ring-emerald-500/20"
+          : isMine 
           ? "border-blue-200 bg-blue-50/15 shadow-2xs ring-1 ring-blue-500/10" 
           : "border-slate-200/90 shadow-2xs hover:shadow-md hover:border-[#1683FF]/40"
       }`}
@@ -96,7 +119,7 @@ export default function RequestCard({ request }) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-xs sm:text-sm font-bold text-slate-800 truncate">
-                {isMine ? "Saya" : requesterName}
+                {isRequester ? "Saya (Pembuat)" : requesterName}
               </span>
               {requesterRole && (
                 <span className="hidden sm:inline text-[11px] text-slate-400">
@@ -106,9 +129,17 @@ export default function RequestCard({ request }) {
             </div>
 
             <div className="mt-0.5 flex items-center gap-1.5">
-              {isMine ? (
+              {isSelectedHelper ? (
                 <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  <Star className="w-3 h-3 fill-emerald-600" /> Milik Saya
+                  <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Helper Diterima
+                </span>
+              ) : isRequester ? (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-50 text-[#1683FF] border border-blue-200">
+                  <Star className="w-3 h-3 fill-[#1683FF]" /> Tugas Saya
+                </span>
+              ) : hasApplied ? (
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200">
+                  <Clock className="w-3 h-3 text-amber-600" /> Lamaran Terkirim
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-50 text-[#1683FF] border border-blue-100">
@@ -123,7 +154,7 @@ export default function RequestCard({ request }) {
         {/* Budget with clear hierarchy on Right */}
         <div className="text-right shrink-0">
           <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-            {isMine ? "Budget" : "Imbalan"}
+            {isRequester ? "Budget" : "Imbalan"}
           </div>
           <div className="font-black text-sm sm:text-base text-slate-900 mt-0.5">
             {request.isVoluntary ? "Sukarela" : formatIDR(request.rewardAmount || request.reward || 0)}
@@ -214,12 +245,26 @@ export default function RequestCard({ request }) {
 
         {/* Action Button CTA */}
         <div className="shrink-0 ml-auto sm:ml-0">
-          {isMine ? (
+          {isSelectedHelper ? (
+            <Link
+              href={`/bantuan/${request.id}`}
+              className="px-4 py-1.5 sm:px-5 sm:py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-2xs transition active:scale-95 inline-flex items-center justify-center min-w-[70px]"
+            >
+              <span>Kerjakan</span>
+            </Link>
+          ) : isRequester ? (
             <Link
               href={`/bantuan/${request.id}`}
               className="px-4 py-1.5 sm:px-5 sm:py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-2xs transition active:scale-95 inline-flex items-center justify-center min-w-[70px]"
             >
               <span>Lihat</span>
+            </Link>
+          ) : hasApplied ? (
+            <Link
+              href={`/bantuan/${request.id}`}
+              className="px-4 py-1.5 sm:px-5 sm:py-2 rounded-xl bg-blue-50 border border-blue-200 text-[#1683FF] hover:bg-blue-100 font-bold text-xs shadow-2xs transition active:scale-95 inline-flex items-center justify-center min-w-[70px]"
+            >
+              <span>Detail</span>
             </Link>
           ) : (
             <Link

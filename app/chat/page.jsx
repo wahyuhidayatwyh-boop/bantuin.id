@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState, useRef, useEffect, Suspense } from "react";
+import React, { useState, useRef, useEffect, Suspense, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useApp } from "@/lib/context/AppContext";
+import { authService } from "@/lib/services/authService";
+import { useChatRealtime } from "@/lib/hooks/useChatRealtime";
 import { formatIDR } from "@/lib/utils";
 import { PROVIDERS_DATA, getCatalogServiceById } from "@/lib/mock/providersData";
 import {
@@ -51,7 +53,8 @@ import {
   PhoneCall,
   PhoneOff,
   HeartHandshake,
-  Flag
+  Flag,
+  CheckCircle
 } from "lucide-react";
 import ChatFlowTracker from "@/components/chat/ChatFlowTracker";
 import InAppVoiceCallModal from "@/components/chat/InAppVoiceCallModal";
@@ -200,6 +203,37 @@ export function getCategoryMeta(room) {
   };
 }
 
+/**
+ * Format timestamp pesan chat agar akurat dan tersinkronisasi
+ */
+function formatMessageTime(msg) {
+  if (!msg) return "";
+  const raw = msg.createdAt || msg.timestamp;
+  if (!raw) return "";
+
+  if (typeof raw === "string" && /^\d{1,2}[:.]\d{2}$/.test(raw.trim())) {
+    return raw.trim().replace(".", ":");
+  }
+
+  try {
+    const d = new Date(raw);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleTimeString("id-ID", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).replace(".", ":");
+    }
+  } catch {
+    // fallback
+  }
+
+  if (typeof msg.timestamp === "string" && msg.timestamp) {
+    return msg.timestamp;
+  }
+  return "Baru saja";
+}
+
 function ChatWorkspaceContent() {
   const searchParams = useSearchParams();
   const roomParam = searchParams?.get("room");
@@ -222,56 +256,75 @@ function ChatWorkspaceContent() {
     startJasaInquiry,
   } = useApp() || {};
 
-  // Real Database Chat Rooms (Pure database tables without mockup)
+  // Real Database Chat Rooms — diisi oleh Supabase Realtime hook (tanpa polling)
   const [realDbRooms, setRealDbRooms] = useState([]);
   const [isLoadingRooms, setIsLoadingRooms] = useState(true);
 
-  useEffect(() => {
-    let isMounted = true;
-    const fetchDbRooms = async () => {
-      try {
-        setIsLoadingRooms(true);
-        const token = localStorage.getItem("bantuin_auth_token") || localStorage.getItem("bantuin_token");
-        const headers = token ? { Authorization: `Bearer ${token}` } : {};
-        const url = roomParam ? `/api/chat/rooms?roomId=${encodeURIComponent(roomParam)}` : "/api/chat/rooms";
-        const res = await fetch(url, { headers });
-        if (!res.ok) {
-          setIsLoadingRooms(false);
-          return;
-        }
-        const json = await res.json();
-        if (json.success && Array.isArray(json.data) && isMounted) {
-          setRealDbRooms(json.data);
-          if (roomParam) {
-            setSelectedRoomId(roomParam);
-          } else if (json.data.length > 0 && !selectedRoomId) {
-            setSelectedRoomId(json.data[0].id);
-          }
-        }
-      } catch (e) {
-        console.warn("Fetch chat rooms failed:", e);
-      } finally {
-        if (isMounted) setIsLoadingRooms(false);
+  // Callback stabil agar hook tidak re-subscribe setiap render
+  const handleRoomsUpdate = useCallback((rooms, isInitial) => {
+    setRealDbRooms(rooms);
+    if (isInitial) {
+      setIsLoadingRooms(false);
+      if (roomParam) {
+        setSelectedRoomId(roomParam);
+      } else if (rooms.length > 0 && !selectedRoomId) {
+        setSelectedRoomId(rooms[0].id);
       }
-    };
+    } else if (roomParam && rooms.length > 0) {
+      setSelectedRoomId(roomParam);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomParam]);
 
-    fetchDbRooms();
-  }, [currentUser, roomParam]);
+  const { notifyChatUpdate } = useChatRealtime({
+    currentUserId: currentUser?.id || null,
+    roomParam: roomParam || null,
+    onRoomsUpdate: handleRoomsUpdate,
+    enabled: true,
+  });
 
   // Combined rooms prioritizing real database rooms (No Mockups)
   const allAvailableRooms = React.useMemo(() => {
     const map = new Map();
     // 1. Real DB rooms first
     realDbRooms.forEach((r) => map.set(r.id, r));
-    // 2. Real orderRooms from AppContext if any
+    
+    // 2. Real orderRooms from AppContext overlay
     (orderRooms || []).forEach((r) => {
-      if (r && r.id && !map.has(r.id)) {
-        map.set(r.id, r);
+      if (r && r.id) {
+        if (map.has(r.id)) {
+          const dbRoom = map.get(r.id);
+          map.set(r.id, {
+            ...dbRoom,
+            ...r,
+            orderStatus: r.orderStatus || dbRoom.orderStatus,
+            stage: r.stage || dbRoom.stage,
+            messages: (r.messages && r.messages.length >= (dbRoom.messages?.length || 0)) ? r.messages : dbRoom.messages,
+          });
+        } else {
+          map.set(r.id, r);
+        }
       }
     });
 
-    return Array.from(map.values());
-  }, [realDbRooms, orderRooms]);
+    return Array.from(map.values()).map((r) => {
+      // Periksa apakah request terkait sudah memilih helper di database / context
+      const relatedReq = (requests || []).find((req) => req.id === r.requestId);
+      const isHelperAccepted =
+        Boolean(relatedReq?.selectedHelperId && (relatedReq.selectedHelperId === r.helper?.id || relatedReq.selectedHelper?.id === r.helper?.id)) ||
+        relatedReq?.status === "helper_selected" ||
+        relatedReq?.status === "in_progress";
+
+      if (isHelperAccepted && (r.orderStatus === "inquiry" || r.stage === "inquiry")) {
+        return {
+          ...r,
+          stage: "active",
+          orderStatus: "room_created",
+        };
+      }
+      return r;
+    });
+  }, [realDbRooms, orderRooms, requests]);
 
   // Selected Room State
   const [selectedRoomId, setSelectedRoomId] = useState(() => {
@@ -345,9 +398,10 @@ function ChatWorkspaceContent() {
   const [isVoiceCallOpen, setIsVoiceCallOpen] = useState(false); // Modal Telepon In-App
   const [isReportModalOpen, setIsReportModalOpen] = useState(false); // Modal Pelaporan & Pengaduan (Notice & Takedown)
 
-  // Edit Message State
+  // Edit & Delete Message State
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [editingText, setEditingText] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState(null); // { type: 'message' | 'room', roomId, msgId }
 
   // Deliverables Modal
   const [isProofModalOpen, setIsProofModalOpen] = useState(false);
@@ -375,12 +429,59 @@ function ChatWorkspaceContent() {
     selectedRoom?.category?.toLowerCase?.()?.includes("desain") ||
     selectedRoom?.category?.toLowerCase?.()?.includes("tugas")
   );
+
+  const isOrderActive = Boolean(
+    selectedRoom &&
+    (selectedRoom.orderStatus === "room_created" ||
+     selectedRoom.orderStatus === "paid_escrow" ||
+     selectedRoom.orderStatus === "on_the_way" ||
+     selectedRoom.orderStatus === "item_picked_up" ||
+     selectedRoom.orderStatus === "in_progress" ||
+     selectedRoom.orderStatus === "task_delivered" ||
+     selectedRoom.orderStatus === "proof_submitted" ||
+     selectedRoom.orderStatus === "completed" ||
+     selectedRoom.stage === "active")
+  );
+
   const isInquiry = Boolean(
-    selectedRoom?.stage === "inquiry" ||
-    selectedRoom?.orderStatus === "inquiry" ||
-    selectedRoom?.id?.startsWith("inquiry-")
+    selectedRoom &&
+    !isOrderActive &&
+    (selectedRoom.stage === "inquiry" || selectedRoom.orderStatus === "inquiry" || selectedRoom.orderStatus === "not_selected")
   );
   const isNotSelected = selectedRoom?.orderStatus === "not_selected";
+
+  // Collect all completion proof photos & notes from selectedRoom or messages
+  const currentProofPhotos = React.useMemo(() => {
+    if (!selectedRoom) return [];
+    const photos = [];
+    if (selectedRoom.proofPhotos && Array.isArray(selectedRoom.proofPhotos)) {
+      photos.push(...selectedRoom.proofPhotos);
+    }
+    if (selectedRoom.messages && Array.isArray(selectedRoom.messages)) {
+      selectedRoom.messages.forEach((m) => {
+        if (m.proofPhotos && Array.isArray(m.proofPhotos)) {
+          photos.push(...m.proofPhotos);
+        }
+        if (m.photos && Array.isArray(m.photos) && (m.isTaskProof || m.isHandoverProof)) {
+          photos.push(...m.photos);
+        }
+        if (m.isJasaDeliverablesProof && m.proofData?.photos) {
+          photos.push(...m.proofData.photos);
+        }
+      });
+    }
+    return Array.from(new Set(photos.filter(Boolean)));
+  }, [selectedRoom]);
+
+  const currentProofNotes = React.useMemo(() => {
+    if (!selectedRoom) return "";
+    if (selectedRoom.proofNotes) return selectedRoom.proofNotes;
+    if (selectedRoom.messages && Array.isArray(selectedRoom.messages)) {
+      const proofMsg = selectedRoom.messages.find((m) => (m.isTaskProof || m.isHandoverProof || m.isJasaDeliverablesProof) && (m.notes || m.proofData?.notes));
+      if (proofMsg) return proofMsg.notes || proofMsg.proofData?.notes || "";
+    }
+    return "";
+  }, [selectedRoom]);
 
   // Workflow Stepper definition (for active orders)
   const steps = isOnline
@@ -481,6 +582,7 @@ function ChatWorkspaceContent() {
         };
 
     sendChatMessage(selectedRoom.id, text, senderData);
+    notifyChatUpdate?.();
     setChatInput("");
   };
 
@@ -493,7 +595,22 @@ function ChatWorkspaceContent() {
   // Save Edit Message
   const handleSaveEdit = (msgId) => {
     if (!editingText.trim() || !selectedRoom) return;
-    editChatMessage(selectedRoom.id, msgId, editingText.trim());
+    const newText = editingText.trim();
+    editChatMessage(selectedRoom.id, msgId, newText);
+    setRealDbRooms((prev) =>
+      prev.map((r) => {
+        if (r.id === selectedRoom.id) {
+          return {
+            ...r,
+            messages: (r.messages || []).map((m) =>
+              m.id === msgId ? { ...m, message: newText, isEdited: true } : m
+            ),
+          };
+        }
+        return r;
+      })
+    );
+    notifyChatUpdate?.();
     setEditingMessageId(null);
     setEditingText("");
   };
@@ -504,58 +621,102 @@ function ChatWorkspaceContent() {
     setEditingText("");
   };
 
-  // Handle Delete Chat Room
-  const handleDeleteRoom = (roomId, e) => {
+  // Trigger Delete Confirmation Modal for Message
+  const promptDeleteMessage = (roomId, msgId) => {
+    setDeleteTarget({ type: "message", roomId, msgId });
+  };
+
+  // Trigger Delete Confirmation Modal for Room
+  const promptDeleteRoom = (roomId, e) => {
     e?.stopPropagation();
-    const isConfirm = window.confirm("Apakah Anda yakin ingin menghapus seluruh percakapan ini?");
-    if (!isConfirm) return;
-    deleteChatRoom(roomId);
-    if (selectedRoomId === roomId) {
-      const remaining = orderRooms.filter((r) => r.id !== roomId);
-      if (remaining.length > 0) {
-        setSelectedRoomId(remaining[0].id);
+    setDeleteTarget({ type: "room", roomId });
+  };
+
+  // Execute Confirmed Delete (Message or Room)
+  const handleConfirmDelete = () => {
+    if (!deleteTarget) return;
+
+    if (deleteTarget.type === "message") {
+      const { roomId, msgId } = deleteTarget;
+      deleteChatMessage(roomId, msgId);
+      setRealDbRooms((prev) =>
+        prev.map((r) => {
+          if (r.id === roomId) {
+            return {
+              ...r,
+              messages: (r.messages || []).filter((m) => m.id !== msgId),
+            };
+          }
+          return r;
+        })
+      );
+    } else if (deleteTarget.type === "room") {
+      const { roomId } = deleteTarget;
+      deleteChatRoom(roomId);
+      setRealDbRooms((prev) => prev.filter((r) => r.id !== roomId));
+      if (selectedRoomId === roomId) {
+        const remaining = realDbRooms.filter((r) => r.id !== roomId);
+        setSelectedRoomId(remaining.length > 0 ? remaining[0].id : null);
       }
     }
+
+    notifyChatUpdate?.();
+    setDeleteTarget(null);
   };
 
   // Chat Attachment File (Photos & Documents)
-  const handleChatFileUpload = (e) => {
+  const handleChatFileUpload = async (e) => {
     const file = e.target.files?.[0];
-    if (file && selectedRoom) {
-      const isImg = file.type.startsWith("image/");
-      const fileSizeStr = file.size > 1024 * 1024 ? `${(file.size / (1024 * 1024)).toFixed(2)} MB` : `${(file.size / 1024).toFixed(1)} KB`;
+    e.target.value = "";
+    if (!file || !selectedRoom) return;
 
-      const senderData = activeRole === "helper"
-        ? {
-            senderId: selectedRoom?.helper?.id || "user-hlp-1",
-            senderName: selectedRoom?.helper?.name || "Mitra",
-            senderAvatar: selectedRoom?.helper?.avatar
-          }
-        : {
-            senderId: selectedRoom?.requester?.id || currentUser?.id || "user-current-01",
-            senderName: selectedRoom?.requester?.name || currentUser?.fullName || "Pemesan",
-            senderAvatar: selectedRoom?.requester?.avatar || currentUser?.avatarUrl
-          };
+    if (!file.type.startsWith("image/")) {
+      addToast?.("Format Tidak Didukung", "Hanya file gambar (JPG, PNG, WebP) yang dapat dilampirkan.", "warning");
+      return;
+    }
 
-      if (isImg) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          sendChatMessage(selectedRoom.id, `Foto terlampir: ${file.name}`, {
-            ...senderData,
-            photos: [event.target.result],
-            attachment: { name: file.name, size: fileSizeStr, dataUrl: event.target.result, isImage: true }
-          });
-          addToast?.("Foto Terkirim", `Foto "${file.name}" berhasil dikirim ke obrolan.`);
+    const fileSizeStr = file.size > 1024 * 1024
+      ? `${(file.size / (1024 * 1024)).toFixed(2)} MB`
+      : `${(file.size / 1024).toFixed(1)} KB`;
+
+    const senderData = activeRole === "helper"
+      ? {
+          senderId: selectedRoom?.helper?.id || "user-hlp-1",
+          senderName: selectedRoom?.helper?.name || "Mitra",
+          senderAvatar: selectedRoom?.helper?.avatar
+        }
+      : {
+          senderId: selectedRoom?.requester?.id || currentUser?.id || "user-current-01",
+          senderName: selectedRoom?.requester?.name || currentUser?.fullName || "Pemesan",
+          senderAvatar: selectedRoom?.requester?.avatar || currentUser?.avatarUrl
         };
-        reader.readAsDataURL(file);
-      } else {
-        sendChatMessage(selectedRoom.id, `[Lampiran Berkas]: ${file.name} (${fileSizeStr})`, {
-          ...senderData,
-          attachment: { name: file.name, size: fileSizeStr, isImage: false }
-        });
-        addToast?.("Berkas Terkirim", `File "${file.name}" berhasil dikirim.`);
+
+    addToast?.("Mengunggah Foto...", `Foto "${file.name}" sedang dikirim ke server.`);
+
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("bucket", "bantuin-chat-attachments");
+      form.append("folder", `chat/${selectedRoom.id}`);
+
+      const res = await fetch("/api/upload", { method: "POST", body: form });
+      const data = await res.json();
+
+      const imageUrl = data?.url || data?.urls?.[0] || null;
+
+      if (!res.ok || !imageUrl) {
+        throw new Error(data?.error || "Upload gagal");
       }
-      e.target.value = "";
+
+      sendChatMessage(selectedRoom.id, `Foto terlampir: ${file.name}`, {
+        ...senderData,
+        photos: [imageUrl],
+        attachment: { name: file.name, size: fileSizeStr, url: imageUrl, isImage: true }
+      });
+      addToast?.("Foto Terkirim", `Foto "${file.name}" berhasil dikirim ke obrolan.`);
+    } catch (err) {
+      console.error("Chat file upload error:", err);
+      addToast?.("Gagal Mengunggah", err.message || "Terjadi kesalahan saat mengunggah foto.", "error");
     }
   };
 
@@ -629,7 +790,18 @@ function ChatWorkspaceContent() {
 
     if (!matchQuery) return false;
 
-    const roomIsInquiry = room.stage === "inquiry" || room.orderStatus === "inquiry" || (room.id && room.id.startsWith("inquiry-")) || room.orderStatus === "not_selected";
+    const isActivelyWorking =
+      room.orderStatus === "room_created" ||
+      room.orderStatus === "paid_escrow" ||
+      room.orderStatus === "on_the_way" ||
+      room.orderStatus === "item_picked_up" ||
+      room.orderStatus === "in_progress" ||
+      room.orderStatus === "task_delivered" ||
+      room.orderStatus === "proof_submitted" ||
+      room.orderStatus === "completed" ||
+      room.stage === "active";
+
+    const roomIsInquiry = !isActivelyWorking && (room.stage === "inquiry" || room.orderStatus === "inquiry" || room.orderStatus === "not_selected");
     
     if (statusFilter === "inquiry") return roomIsInquiry;
     if (statusFilter === "active") return !roomIsInquiry;
@@ -902,7 +1074,13 @@ function ChatWorkspaceContent() {
                 const meta = getCategoryMeta(room);
                 const isSelected = room.id === selectedRoom?.id;
                 const lastMsg = room.messages?.[room.messages.length - 1]?.message || "Belum ada pesan";
-                const partner = room.helper || { name: "Helper", avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80" };
+                
+                // Tentukan partner lawan bicara yang sebenarnya
+                const isUserRequesterInRoom = room.requesterId ? room.requesterId === currentUser?.id : (activeRole === "requester");
+                const partner = isUserRequesterInRoom
+                  ? (room.helper || { name: "Helper Bantuin", avatar: null })
+                  : (room.requester || room.helper || { name: "Pemesan", avatar: null });
+
                 const isRoomInquiry = room.stage === "inquiry" || room.orderStatus === "inquiry" || (room.id && room.id.startsWith("inquiry-"));
                 const isRoomClosed = room.orderStatus === "not_selected";
 
@@ -923,11 +1101,11 @@ function ChatWorkspaceContent() {
                       <img
                         src={partner.avatar}
                         alt={partner.name}
-                        className="w-9 h-9 rounded-full object-cover border border-slate-200 shrink-0 mt-0.5"
+                        className="w-9 h-9 rounded-full object-cover border border-slate-200 shrink-0 mt-0.5 shadow-2xs"
                       />
                     ) : (
                       <div className="w-9 h-9 rounded-full bg-linear-to-br from-[#1683FF] to-[#0E5FCC] text-white flex items-center justify-center font-bold text-xs shrink-0 mt-0.5 shadow-2xs">
-                        {partner.name ? partner.name.slice(0, 2).toUpperCase() : "HL"}
+                        {partner.name ? partner.name.slice(0, 2).toUpperCase() : "US"}
                       </div>
                     )}
                     <div className="flex-1 min-w-0 pr-7">
@@ -968,7 +1146,7 @@ function ChatWorkspaceContent() {
                     {/* Delete entire room button on item hover */}
                     <button
                       type="button"
-                      onClick={(e) => handleDeleteRoom(room.id, e)}
+                      onClick={(e) => promptDeleteRoom(room.id, e)}
                       className="opacity-0 group-hover:opacity-100 absolute right-2 top-3 p-1.5 rounded-lg hover:bg-rose-50 text-slate-300 hover:text-rose-500 transition"
                       title="Hapus Obrolan"
                     >
@@ -1019,20 +1197,43 @@ function ChatWorkspaceContent() {
           ) : (
             <>
               {/* ============================================================= */}
-              {/* 2. IDENTITAS TOKO / MITRA (~48-52px) */}
+              {/* 2. IDENTITAS TOKO / MITRA (~52-56px) */}
               {/* ============================================================= */}
-              <div className="h-12 border-b border-slate-100 px-3 sm:px-4 flex items-center justify-between gap-2 bg-white shrink-0 overflow-hidden">
-                <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 inline-block" />
-                  <span className="font-bold text-slate-900 text-xs sm:text-sm truncate min-w-0">
-                    {activeRole === "requester" ? selectedRoom.helper?.name : selectedRoom.requester?.name}
-                  </span>
-                  <span className="text-[11px] text-slate-500 font-medium shrink-0 whitespace-nowrap">
-                    ({activeRole === "requester"
-                      ? (selectedRoom.orderType === "rental" ? "Mitra Sewa" : selectedRoom.orderType === "bantuan" ? "Helper" : "Mitra Jasa")
-                      : (selectedRoom.orderType === "rental" ? "Penyewa" : "Pemesan")})
-                  </span>
-                </div>
+              {(() => {
+                const isSelectedRoomRequester = selectedRoom.requesterId ? selectedRoom.requesterId === currentUser?.id : (activeRole === "requester");
+                const activePartner = isSelectedRoomRequester
+                  ? (selectedRoom.helper || { name: "Helper Bantuin", avatar: null })
+                  : (selectedRoom.requester || selectedRoom.helper || { name: "Pemesan", avatar: null });
+
+                return (
+                  <div className="h-14 border-b border-slate-100 px-3 sm:px-4 flex items-center justify-between gap-2 bg-white shrink-0 overflow-hidden">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1 overflow-hidden">
+                      {activePartner.avatar && !activePartner.avatar.includes("images.unsplash.com") ? (
+                        <img
+                          src={activePartner.avatar}
+                          alt={activePartner.name}
+                          className="w-8 h-8 rounded-full object-cover border border-slate-200 shrink-0 shadow-2xs"
+                        />
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-linear-to-br from-[#1683FF] to-[#0E5FCC] text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs">
+                          {activePartner.name ? activePartner.name.slice(0, 2).toUpperCase() : "US"}
+                        </div>
+                      )}
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 inline-block" />
+                          <span className="font-bold text-slate-900 text-xs sm:text-sm truncate min-w-0">
+                            {activePartner.name}
+                          </span>
+                          <span className="text-[11px] text-slate-500 font-medium shrink-0 whitespace-nowrap">
+                            ({isSelectedRoomRequester
+                              ? (selectedRoom.orderType === "rental" ? "Mitra Sewa" : selectedRoom.orderType === "bantuan" ? "Helper" : "Mitra Jasa")
+                              : (selectedRoom.orderType === "rental" ? "Penyewa" : "Pemesan")})
+                          </span>
+                        </div>
+                      </div>
+                    </div>
 
               <div className="flex items-center gap-1 shrink-0">
                 {/* Telepon Action */}
@@ -1060,7 +1261,7 @@ function ChatWorkspaceContent() {
                 {/* Hapus Obrolan Action */}
                 <button
                   type="button"
-                  onClick={(e) => handleDeleteRoom(selectedRoom.id, e)}
+                  onClick={(e) => promptDeleteRoom(selectedRoom.id, e)}
                   className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition cursor-pointer"
                   title="Hapus Obrolan"
                 >
@@ -1068,6 +1269,8 @@ function ChatWorkspaceContent() {
                 </button>
               </div>
             </div>
+            );
+          })()}
 
             {/* ============================================================= */}
             {/* 3. STATUS TRANSAKSI + AKSI */}
@@ -1440,19 +1643,30 @@ function ChatWorkspaceContent() {
                   key={msg.id || index}
                   className={`group flex items-end gap-2 ${isMe ? "justify-end" : "justify-start"}`}
                 >
-                  {!isMe && (
-                    selectedRoom?.helper?.avatar && !selectedRoom.helper.avatar.includes("images.unsplash.com") ? (
+                  {!isMe && (() => {
+                    const opponentAvatar = msg.senderAvatar || (
+                      selectedRoom?.requesterId === currentUser?.id
+                        ? selectedRoom?.helper?.avatar
+                        : (selectedRoom?.requester?.avatar || selectedRoom?.helper?.avatar)
+                    );
+                    const opponentName = msg.senderName || (
+                      selectedRoom?.requesterId === currentUser?.id
+                        ? (selectedRoom?.helper?.name || "Helper")
+                        : (selectedRoom?.requester?.name || selectedRoom?.helper?.name || "Pengguna")
+                    );
+
+                    return opponentAvatar && !opponentAvatar.includes("images.unsplash.com") ? (
                       <img
-                        src={selectedRoom.helper.avatar}
-                        alt={msg.senderName}
-                        className="w-7 h-7 rounded-full object-cover border border-slate-200 shrink-0 mb-0.5"
+                        src={opponentAvatar}
+                        alt={opponentName}
+                        className="w-7 h-7 rounded-full object-cover border border-slate-200 shrink-0 mb-0.5 shadow-2xs"
                       />
                     ) : (
-                      <div className="w-7 h-7 rounded-full bg-blue-100 text-[#1683FF] font-bold text-[10px] flex items-center justify-center shrink-0 mb-0.5 border border-blue-200">
-                        {(msg.senderName || selectedRoom?.helper?.name || "H")[0].toUpperCase()}
+                      <div className="w-7 h-7 rounded-full bg-linear-to-br from-[#1683FF] to-[#0E5FCC] text-white font-bold text-[10px] flex items-center justify-center shrink-0 mb-0.5 shadow-2xs">
+                        {(opponentName || "U")[0].toUpperCase()}
                       </div>
-                    )
-                  )}
+                    );
+                  })()}
 
                   <div className={`flex flex-col ${
                     isMe ? "items-end" : "items-start"
@@ -1500,7 +1714,7 @@ function ChatWorkspaceContent() {
                             </button>
                             <button
                               type="button"
-                              onClick={() => deleteChatMessage(selectedRoom.id, msg.id)}
+                              onClick={() => promptDeleteMessage(selectedRoom.id, msg.id)}
                               className="p-1 text-slate-300 hover:text-rose-500 hover:bg-slate-100 rounded-md transition"
                               title="Hapus pesan"
                             >
@@ -1559,33 +1773,11 @@ function ChatWorkspaceContent() {
                             </div>
                           )}
                         </div>
-
-                        {/* Action buttons (Right of bubble for partner messages in preview) */}
-                        {!isMe && (
-                          <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition">
-                            <button
-                              type="button"
-                              onClick={() => handleStartEdit(msg)}
-                              className="p-1 text-slate-300 hover:text-[#1683FF] hover:bg-slate-100 rounded-md transition"
-                              title="Edit pesan"
-                            >
-                              <Pencil className="w-3 h-3" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => deleteChatMessage(selectedRoom.id, msg.id)}
-                              className="p-1 text-slate-300 hover:text-rose-500 hover:bg-slate-100 rounded-md transition"
-                              title="Hapus pesan"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                        )}
                       </div>
                     )}
 
                     <span className="text-[10px] text-slate-400 mt-0.5 px-0.5 flex items-center gap-1 select-none">
-                      <span>{msg.timestamp?.slice(11, 16) || "10:35"}</span>
+                      <span>{formatMessageTime(msg)}</span>
                       {msg.isEdited && <span className="italic opacity-70">(diedit)</span>}
                       {isMe && <Check className="w-3 h-3 text-[#1683FF] shrink-0" />}
                     </span>
@@ -1596,6 +1788,29 @@ function ChatWorkspaceContent() {
             <div ref={messagesEndRef} />
           </div>
 
+          {selectedRoom?.orderStatus === "completed" ? (
+            /* ── COMPLETED: Chat Arsip Banner ── */
+            <div className="border-t border-slate-200 bg-gradient-to-r from-slate-50 to-blue-50/40 px-4 py-3 shrink-0">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-8 h-8 rounded-xl bg-blue-100 text-[#1683FF] flex items-center justify-center shrink-0">
+                    <CheckCircle className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-slate-700 truncate">Transaksi Selesai & Diarsipkan</p>
+                    <p className="text-[11px] text-slate-500 truncate">Chat ini tidak bisa dibalas. Buka bantuan baru untuk berinteraksi lagi.</p>
+                  </div>
+                </div>
+                <a
+                  href={`/bantuan/buat${selectedRoom?.helper?.id ? `?helperId=${selectedRoom.helper.id}` : ""}`}
+                  className="shrink-0 px-3 py-1.5 bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-[11px] font-bold rounded-xl transition whitespace-nowrap shadow-sm"
+                >
+                  + Buka Bantuan Baru
+                </a>
+              </div>
+            </div>
+          ) : (
+            <>
           {/* Quick Reply Bar */}
           <div className="h-11 px-3 bg-white border-t border-slate-100 flex items-center gap-2 overflow-x-auto scrollbar-none shrink-0">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider shrink-0">Cepat:</span>
@@ -1700,6 +1915,7 @@ function ChatWorkspaceContent() {
               type="file"
               ref={chatFileInputRef}
               onChange={handleChatFileUpload}
+              accept="image/*"
               className="hidden"
             />
 
@@ -1733,6 +1949,8 @@ function ChatWorkspaceContent() {
               <Send className="w-4 h-4" />
             </button>
           </form>
+            </>
+          )}
           </>
         )}
         </div>
@@ -1774,37 +1992,48 @@ function ChatWorkspaceContent() {
           </div>
 
           {/* Partner Simple Card with Direct Call Action */}
-          <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200/80 rounded-2xl gap-2">
-            <div className="flex items-center gap-3 min-w-0">
-              <img
-                src={
-                  activeRole === "requester"
-                    ? (selectedRoom?.helper?.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80")
-                    : (selectedRoom?.requester?.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80")
-                }
-                alt="Partner"
-                className="w-10 h-10 rounded-full object-cover border border-slate-200 shrink-0"
-              />
-              <div className="min-w-0">
-                <h3 className="font-bold text-xs sm:text-sm text-slate-900 truncate">
-                  {activeRole === "requester" ? selectedRoom?.helper?.name : selectedRoom?.requester?.name}
-                </h3>
-                <p className="text-[11px] text-slate-400 truncate">
-                  {isInquiry ? "Kandidat Diskusi" : isNotSelected ? "Kandidat Tidak Terpilih" : "Mitra Terverifikasi"}
-                </p>
-              </div>
-            </div>
+          {(() => {
+            const isSelectedRoomRequester = selectedRoom.requesterId ? selectedRoom.requesterId === currentUser?.id : (activeRole === "requester");
+            const activePartner = isSelectedRoomRequester
+              ? (selectedRoom.helper || { name: "Helper Bantuin", avatar: null })
+              : (selectedRoom.requester || selectedRoom.helper || { name: "Pemesan", avatar: null });
 
-            <button
-              type="button"
-              onClick={handleStartCall}
-              className="px-2.5 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#1683FF] border border-blue-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs shrink-0"
-              title="Telepon Panggilan Suara In-App"
-            >
-              <Phone className="w-3.5 h-3.5 text-[#1683FF]" />
-              <span>Telepon</span>
-            </button>
-          </div>
+            return (
+              <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200/80 rounded-2xl gap-2">
+                <div className="flex items-center gap-3 min-w-0">
+                  {activePartner.avatar && !activePartner.avatar.includes("images.unsplash.com") ? (
+                    <img
+                      src={activePartner.avatar}
+                      alt={activePartner.name}
+                      className="w-10 h-10 rounded-full object-cover border border-slate-200 shrink-0 shadow-2xs"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-full bg-linear-to-br from-[#1683FF] to-[#0E5FCC] text-white flex items-center justify-center font-bold text-sm shrink-0 shadow-2xs">
+                      {activePartner.name ? activePartner.name.slice(0, 2).toUpperCase() : "US"}
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <h3 className="font-bold text-xs sm:text-sm text-slate-900 truncate">
+                      {activePartner.name}
+                    </h3>
+                    <p className="text-[11px] text-slate-400 truncate">
+                      {isInquiry ? "Kandidat Diskusi" : isNotSelected ? "Kandidat Tidak Terpilih" : "Mitra Terverifikasi"}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleStartCall}
+                  className="px-2.5 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#1683FF] border border-blue-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs shrink-0"
+                  title="Telepon Panggilan Suara In-App"
+                >
+                  <Phone className="w-3.5 h-3.5 text-[#1683FF]" />
+                  <span>Telepon</span>
+                </button>
+              </div>
+            );
+          })()}
 
           {/* JIKA PESANAN SEWA (ALAT MULTIMEDIA / KENDARAAN) */}
           {selectedRoomMeta?.type === "sewa" ? (
@@ -2316,6 +2545,54 @@ function ChatWorkspaceContent() {
               </div>
             </div>
 
+            {/* BUKTI PENYELESAIAN TUGAS (FOTO BUKTI & CATATAN HELPER) */}
+            <div className="p-3.5 bg-blue-50/70 rounded-2xl border border-blue-200/80 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-[#1683FF]">
+                  <CheckCircle2 className="w-4 h-4 text-[#1683FF] shrink-0" />
+                  <span>Bukti Penyelesaian Tugas</span>
+                </div>
+                <span className="text-[10px] font-semibold text-slate-600 bg-white px-2 py-0.5 rounded-full border border-blue-100">
+                  {currentProofPhotos.length > 0 ? `${currentProofPhotos.length} Foto Bukti` : "Diunggah Helper"}
+                </span>
+              </div>
+
+              {/* Grid Foto Bukti */}
+              {currentProofPhotos.length > 0 ? (
+                <div className="grid grid-cols-3 gap-2 pt-1">
+                  {currentProofPhotos.map((imgUrl, pIdx) => (
+                    <div
+                      key={pIdx}
+                      onClick={() => setLightboxImage(imgUrl)}
+                      className="relative group aspect-video rounded-xl overflow-hidden border border-blue-200 bg-slate-900/10 cursor-pointer shadow-2xs"
+                    >
+                      <img
+                        src={imgUrl}
+                        alt={`Bukti Tugas ${pIdx + 1}`}
+                        className="w-full h-full object-cover group-hover:scale-105 transition"
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-[10px] font-bold gap-1">
+                        <Search className="w-3 h-3" />
+                        <span>Perbesar</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-[11px] text-slate-500 italic bg-white/80 p-2.5 rounded-xl border border-blue-100">
+                  Foto bukti penyelesaian diunggah langsung oleh Helper untuk verifikasi tugas ini.
+                </div>
+              )}
+
+              {/* Catatan / Keterangan Pengerjaan */}
+              {currentProofNotes && (
+                <div className="text-xs text-slate-700 bg-white p-2.5 rounded-xl border border-blue-100 leading-relaxed">
+                  <span className="font-bold text-slate-800 text-[11px] block mb-0.5">Catatan Helper:</span>
+                  <p className="italic text-slate-600 text-[11px]">&ldquo;{currentProofNotes}&rdquo;</p>
+                </div>
+              )}
+            </div>
+
             {/* Interactive 5 Stars */}
             <div className="text-center py-2 space-y-2">
               <div className="text-xs font-bold text-slate-700">Bagaimana kualitas bantuan yang diberikan?</div>
@@ -2487,6 +2764,41 @@ function ChatWorkspaceContent() {
         targetRoom={selectedRoom}
         targetUser={activeRole === "requester" ? selectedRoom?.helper : selectedRoom?.requester}
       />
+
+      {/* MODAL KONFIRMASI HAPUS PESAN / OBROLAN */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200">
+            <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center mx-auto mb-4 border border-rose-100">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h3 className="text-base font-bold text-slate-900 text-center mb-1">
+              {deleteTarget.type === "message" ? "Hapus Pesan Ini?" : "Hapus Obrolan Ini?"}
+            </h3>
+            <p className="text-xs text-slate-500 text-center mb-6 leading-relaxed">
+              {deleteTarget.type === "message"
+                ? "Pesan ini akan dihapus secara permanen untuk semua pihak. Tindakan ini tidak dapat dibatalkan."
+                : "Seluruh riwayat percakapan dalam ruang obrolan ini akan dihapus secara permanen."}
+            </p>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-xs font-semibold hover:bg-slate-50 transition cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-semibold shadow-sm transition cursor-pointer"
+              >
+                Ya, Hapus
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
