@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Navbar from "@/components/layout/Navbar";
@@ -36,15 +36,85 @@ export default function JasaCheckoutDetailPage() {
   const { id } = useParams();
   const router = useRouter();
 
-  const service = getCatalogServiceById(id);
-
   const { 
+    services = [],
     userCoordinates, 
     userRealLocation, 
     selectedLocation, 
     detectUserLocation,
     startJasaInquiry 
   } = useApp() || {};
+
+  const [dbService, setDbService] = useState(null);
+
+  useEffect(() => {
+    if (!id) return;
+    const mockFound = getCatalogServiceById(id);
+    if (!mockFound) {
+      fetch(`/api/services/${id}`)
+        .then((res) => res.json())
+        .then((json) => {
+          if (json.success && json.data) {
+            const s = json.data;
+            setDbService({
+              id: s.id,
+              title: s.title,
+              desc: s.description,
+              price: s.startingPrice,
+              image: s.coverImageUrl || s.portfolioUrls?.[0] || "https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=800&auto=format&fit=crop&q=80",
+              photos: s.portfolioUrls?.length ? s.portfolioUrls : [s.coverImageUrl || "https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=800&auto=format&fit=crop&q=80"],
+              category: s.category || "Jasa",
+              categoryGroup: s.category?.includes("Desain") ? "Desain" : s.category?.includes("Foto") ? "Fotografi" : s.category?.includes("Laptop") ? "Komputer" : s.category?.includes("AC") ? "Teknisi" : "Jasa",
+              provider: {
+                id: s.provider?.id,
+                name: s.provider?.fullName || "Mitra Jasa Bantuin",
+                avatar: s.provider?.avatarUrl,
+                location: s.provider?.campusName || "Purwokerto",
+                rating: s.provider?.ratingAvg || 4.9,
+                reviewsCount: s.provider?.ratingCount || 10,
+                completedJobs: s.provider?.completedHelpsCount || 12,
+                verified: s.provider?.verificationStatus === "verified",
+              },
+              packages: [
+                { id: "pkg-std", name: "Paket Standar", price: s.startingPrice, desc: s.description }
+              ]
+            });
+          }
+        })
+        .catch(() => {});
+    }
+  }, [id]);
+
+  const service = useMemo(() => {
+    if (dbService) return dbService;
+    const fromContext = services.find((s) => s.id === id);
+    if (fromContext) {
+      return {
+        id: fromContext.id,
+        title: fromContext.title,
+        desc: fromContext.description,
+        price: fromContext.startingPrice,
+        image: fromContext.coverImageUrl || "https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=800&auto=format&fit=crop&q=80",
+        photos: fromContext.portfolioUrls?.length ? fromContext.portfolioUrls : [fromContext.coverImageUrl || "https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=800&auto=format&fit=crop&q=80"],
+        category: fromContext.category || "Jasa",
+        categoryGroup: fromContext.category?.includes("Desain") ? "Desain" : fromContext.category?.includes("Foto") ? "Fotografi" : fromContext.category?.includes("Laptop") ? "Komputer" : fromContext.category?.includes("AC") ? "Teknisi" : "Jasa",
+        provider: {
+          id: fromContext.provider?.id,
+          name: fromContext.provider?.fullName || "Mitra Jasa Bantuin",
+          avatar: fromContext.provider?.avatarUrl,
+          location: fromContext.provider?.campusName || "Purwokerto",
+          rating: fromContext.provider?.ratingAvg || 4.9,
+          reviewsCount: fromContext.provider?.ratingCount || 10,
+          completedJobs: fromContext.provider?.completedHelpsCount || 12,
+          verified: fromContext.provider?.verificationStatus === "verified",
+        },
+        packages: [
+          { id: "pkg-std", name: "Paket Standar", price: fromContext.startingPrice, desc: fromContext.description }
+        ]
+      };
+    }
+    return getCatalogServiceById(id);
+  }, [id, dbService, services]);
 
   // ── Semua hooks harus dideklarasikan SEBELUM early return (Rules of Hooks) ──
   const tomorrowStr = new Date(Date.now() + 86400000).toISOString().split("T")[0];
@@ -320,17 +390,21 @@ export default function JasaCheckoutDetailPage() {
               
               <div className="px-5 sm:px-6 pb-5 sm:pb-6 pt-3 sm:pt-4 relative z-10 space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
-                  <div className="flex items-center gap-3.5 min-w-0">
+                  <Link
+                    href={`/profile/${service.provider?.id || service.providerId || service.provider?.name || "provider"}`}
+                    className="flex items-center gap-3.5 min-w-0 group/provider hover:opacity-95 transition cursor-pointer"
+                    title={`Lihat profil ${service.provider?.name}`}
+                  >
                     <div className={service.provider.coverBanner ? "-mt-8 sm:-mt-10 relative shrink-0" : "relative shrink-0"}>
                       <img
                         src={service.provider.avatar}
                         alt={service.provider.name}
-                        className="w-16 h-16 rounded-2xl object-cover border-3 border-white shadow-md bg-white"
+                        className="w-16 h-16 rounded-2xl object-cover border-3 border-white shadow-md bg-white group-hover/provider:border-[#1683FF] transition"
                       />
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h4 className="font-black text-sm sm:text-base text-slate-900 truncate">
+                        <h4 className="font-black text-sm sm:text-base text-slate-900 group-hover/provider:text-[#1683FF] transition truncate">
                           {service.provider.name}
                         </h4>
                         <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 flex items-center gap-1 shrink-0">
@@ -342,10 +416,10 @@ export default function JasaCheckoutDetailPage() {
                         {service.provider.brandTitle}
                       </div>
                     </div>
-                  </div>
+                  </Link>
 
                   <Link
-                    href={`/jasa/penyedia/${service.provider.id}`}
+                    href={`/profile/${service.provider?.id || service.providerId || service.provider?.name || "provider"}`}
                     className="px-4 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#1683FF] text-xs font-bold transition flex items-center gap-1.5 shrink-0 self-start sm:self-auto border border-blue-100 shadow-2xs"
                   >
                     <Store className="w-3.5 h-3.5" />
