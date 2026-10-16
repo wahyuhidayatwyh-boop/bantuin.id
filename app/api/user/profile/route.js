@@ -172,6 +172,11 @@ export async function PUT(req) {
       selfieUrl,
       accountRole,
       verificationStatus,
+      partnerBusinessName,
+      brandTitle,
+      storeName,
+      partnerAddress,
+      address,
       currentPassword,
       newPassword,
     } = body;
@@ -193,6 +198,14 @@ export async function PUT(req) {
     }
     if (typeof avatarUrl === "string" && avatarUrl.trim()) {
       updateData.avatarUrl = avatarUrl.trim();
+    }
+    const resolvedBusinessName = partnerBusinessName || brandTitle || storeName;
+    if (typeof resolvedBusinessName === "string") {
+      updateData.partnerBusinessName = resolvedBusinessName.trim();
+    }
+    const resolvedAddress = partnerAddress || address;
+    if (typeof resolvedAddress === "string") {
+      updateData.partnerAddress = resolvedAddress.trim();
     }
 
     // 2. Update info rekening pencairan

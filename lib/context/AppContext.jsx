@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import {
   INITIAL_USER,
   INITIAL_REQUESTS,
@@ -11,7 +11,7 @@ import {
   BANTUIN_POINTS,
 } from "@/lib/mock/mockData";
 import { initialVouchers, isVoucherLocationMatch } from "@/lib/mock/voucherData";
-import { detectDisintermediation } from "@/lib/security";
+import { detectDisintermediation, detectProhibitedContent } from "@/lib/security";
 import { 
   calculateDistanceInMeters, 
   formatDistanceText, 
@@ -20,7 +20,7 @@ import {
   isItemInKabupaten,
   GPS_FALLBACK_PRESETS
 } from "@/lib/services/gpsService";
-import { formatIDR } from "@/lib/utils";
+import { formatIDR, formatExternalUrl } from "@/lib/utils";
 import { authService } from "@/lib/services/authService";
 import LocationPermissionModal from "@/components/modals/LocationPermissionModal";
 import { X } from "lucide-react";
@@ -28,8 +28,8 @@ import { X } from "lucide-react";
 const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
-  // Current logged in user
-  const [currentUser, setCurrentUser] = useState(INITIAL_USER);
+  // Current logged in user (null by default for guests)
+  const [currentUser, setCurrentUser] = useState(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
@@ -70,23 +70,70 @@ export function AppProvider({ children }) {
     }
   };
 
-  // A visitor is a guest until a valid persisted session is found. This avoids
-  // treating the mock profile as an authenticated account.
+  const refreshNotifications = async () => {
+    try {
+      const token = await authService.getValidAccessToken();
+      if (!token) {
+        setNotifications([]);
+        return;
+      }
+      const notifRes = await fetch("/api/notifications", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (notifRes.ok) {
+        const notifJson = await notifRes.json();
+        const rawList = Array.isArray(notifJson.data?.notifications)
+          ? notifJson.data.notifications
+          : Array.isArray(notifJson.data)
+          ? notifJson.data
+          : [];
+        const formatted = rawList.map((n) => ({
+          id: n.id,
+          title: n.title,
+          message: n.message,
+          desc: n.message,
+          type: n.type || "general",
+          category: n.type || "general",
+          link: n.link || "/activity",
+          unread: !n.isRead,
+          isRead: Boolean(n.isRead),
+          time: new Date(n.createdAt).toLocaleDateString("id-ID", {
+            day: "numeric",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          createdAt: n.createdAt,
+        }));
+        setNotifications(formatted);
+      }
+    } catch {
+      // silent fallback
+    }
+  };
+
+  // A visitor is a guest until a valid persisted session is found.
   useEffect(() => {
     let isMounted = true;
     const syncAuthSession = async () => {
       const session = await authService.getSession();
       if (isMounted) {
-        const rawUser = session?.user || INITIAL_USER;
-        const baseUser = rawUser ? {
-          ...rawUser,
-          avatarUrl: rawUser.avatarUrl && rawUser.avatarUrl.includes("images.unsplash.com") ? null : (rawUser.avatarUrl || null),
-        } : null;
-        setCurrentUser(baseUser);
-        setIsAuthenticated(Boolean(session?.user));
+        if (session?.user) {
+          const rawUser = session.user;
+          const baseUser = {
+            ...rawUser,
+            avatarUrl: rawUser.avatarUrl && rawUser.avatarUrl.includes("images.unsplash.com") ? null : (rawUser.avatarUrl || null),
+          };
+          setCurrentUser(baseUser);
+          setIsAuthenticated(true);
+        } else {
+          setCurrentUser(null);
+          setIsAuthenticated(false);
+        }
         setIsAuthReady(true);
       }
       refreshUserActivities();
+      refreshNotifications();
 
       // Sinkronkan profil terbaru (termasuk avatarUrl resmi Supabase Storage dari DB)
       try {
@@ -104,11 +151,18 @@ export function AppProvider({ children }) {
                 : (freshProfile.avatarUrl || null);
               
               setCurrentUser((prev) => ({
-                ...prev,
+                ...(prev || {}),
                 ...freshProfile,
                 avatarUrl: cleanAvatarUrl,
               }));
               authService.updateProfile({ ...freshProfile, avatarUrl: cleanAvatarUrl }, false);
+            }
+          } else if (res.status === 401) {
+            // Sesi kedaluwarsa atau akun telah dihapus dari database
+            authService.logout();
+            if (isMounted) {
+              setCurrentUser(null);
+              setIsAuthenticated(false);
             }
           }
         }
@@ -129,6 +183,112 @@ export function AppProvider({ children }) {
               setOrderRooms(roomJson.data);
             }
           }
+        } else if (isMounted) {
+          setOrderRooms([]);
+        }
+      } catch (e) {
+        // silent fallback
+      }
+
+      // Sinkronkan data dompet resmi dari database
+      try {
+        const token = await authService.getValidAccessToken();
+        if (token) {
+          const wallRes = await fetch("/api/profile/wallet", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (wallRes.ok) {
+            const wallJson = await wallRes.json();
+            if (wallJson.success && wallJson.data && isMounted) {
+              setMitraAvailableBalance(Number(wallJson.data.availableBalance || 0));
+              setMitraPendingBalance(Number(wallJson.data.pendingEscrowBalance || 0));
+              setMitraTotalEarned(Number(wallJson.data.totalEarned || 0));
+            }
+          }
+        } else if (isMounted) {
+          setMitraAvailableBalance(0);
+          setMitraPendingBalance(0);
+          setMitraTotalEarned(0);
+        }
+      } catch (e) {
+        // silent fallback
+      }
+
+      // Sinkronkan notifikasi in-app resmi dari database
+      try {
+        const token = await authService.getValidAccessToken();
+        if (token) {
+          const notifRes = await fetch("/api/notifications", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (notifRes.ok) {
+            const notifJson = await notifRes.json();
+            const rawList = Array.isArray(notifJson.data?.notifications)
+              ? notifJson.data.notifications
+              : Array.isArray(notifJson.data)
+              ? notifJson.data
+              : [];
+            if (rawList.length > 0 && isMounted) {
+              const formatted = rawList.map((n) => ({
+                id: n.id,
+                title: n.title,
+                message: n.message,
+                type: n.type || "general",
+                link: n.link || "/activity",
+                unread: !n.isRead,
+                isRead: Boolean(n.isRead),
+                time: new Date(n.createdAt).toLocaleDateString("id-ID", {
+                  day: "numeric",
+                  month: "short",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                }),
+                createdAt: n.createdAt,
+              }));
+              setNotifications(formatted);
+            }
+          }
+        } else if (isMounted) {
+          setNotifications([]);
+        }
+      } catch (e) {
+        // silent fallback
+      }
+
+      // Sinkronkan data Bantuan (requests) resmi dari database
+      try {
+        const reqRes = await fetch("/api/requests");
+        if (reqRes.ok) {
+          const reqJson = await reqRes.json();
+          if (reqJson.success && Array.isArray(reqJson.data) && isMounted) {
+            setRequests(reqJson.data);
+          }
+        }
+      } catch (e) {
+        // silent fallback
+      }
+
+      // Sinkronkan data Sewa (rentals) resmi dari database
+      try {
+        const rentRes = await fetch("/api/rentals?limit=50");
+        if (rentRes.ok) {
+          const rentJson = await rentRes.json();
+          if (rentJson.success && Array.isArray(rentJson.data) && rentJson.data.length > 0 && isMounted) {
+            setRentals(rentJson.data);
+          }
+        }
+      } catch (e) {
+        // silent fallback
+      }
+
+      // Sinkronkan data Jasa (services) resmi dari database
+      try {
+        const srvRes = await fetch("/api/services?limit=50");
+        if (srvRes.ok) {
+          const srvJson = await srvRes.json();
+          if (srvJson.success && Array.isArray(srvJson.data) && srvJson.data.length > 0 && isMounted) {
+            setServices(srvJson.data);
+          }
         }
       } catch (e) {
         // silent fallback
@@ -137,10 +297,20 @@ export function AppProvider({ children }) {
     syncAuthSession();
     window.addEventListener("bantuin_auth_changed", syncAuthSession);
     window.addEventListener("bantuin_activity_updated", refreshUserActivities);
+    window.addEventListener("bantuin_notification_updated", refreshNotifications);
+
+    // Polling periodik (12 detik) agar lonceng notifikasi & status aktivitas selalu segar
+    const pollInterval = setInterval(() => {
+      refreshNotifications();
+      refreshUserActivities();
+    }, 12000);
+
     return () => {
       isMounted = false;
+      clearInterval(pollInterval);
       window.removeEventListener("bantuin_auth_changed", syncAuthSession);
       window.removeEventListener("bantuin_activity_updated", refreshUserActivities);
+      window.removeEventListener("bantuin_notification_updated", refreshNotifications);
     };
   }, []);
 
@@ -311,7 +481,7 @@ export function AppProvider({ children }) {
 
   const [rentals, setRentals] = useState(getInitialRentals);
 
-  // Hydrate rentals from localStorage on mount
+  // Hydrate rentals from localStorage on mount (hanya jika bukan mock dummy)
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -319,7 +489,12 @@ export function AppProvider({ children }) {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setRentals(parsed);
+          const hasDummy = parsed.some((r) => r.id === "rent-1" || r.id === "rent-2");
+          if (!hasDummy) {
+            setRentals(parsed);
+          } else {
+            localStorage.removeItem("bantuin_rentals_state");
+          }
         }
       }
     } catch (e) {
@@ -340,6 +515,34 @@ export function AppProvider({ children }) {
   }, [rentals]);
 
   const [services, setServices] = useState(INITIAL_SERVICES);
+
+  const refreshServices = useCallback(async () => {
+    try {
+      const res = await fetch("/api/services?limit=100");
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data?.services)) {
+          setServices(json.data.services);
+          return json.data.services;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not fetch database services:", e);
+    }
+    return [];
+  }, []);
+
+  useEffect(() => {
+    refreshServices();
+    if (typeof window !== "undefined") {
+      const handleServiceUpdate = () => refreshServices();
+      window.addEventListener("bantuin_service_updated", handleServiceUpdate);
+      return () => {
+        window.removeEventListener("bantuin_service_updated", handleServiceUpdate);
+      };
+    }
+  }, [refreshServices]);
+
   const [helpers, setHelpers] = useState(INITIAL_HELPERS);
   const [partners, setPartners] = useState(INITIAL_PARTNERS);
   const [orderRooms, setOrderRooms] = useState(() => {
@@ -349,8 +552,19 @@ export function AppProvider({ children }) {
         if (saved) {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed)) {
-            // Bersihkan data dummy mockup
-            const clean = parsed.filter((r) => !r.id?.startsWith("order-room-10") && !r.id?.includes("mock") && !r.partner?.name?.includes("Focus Lens") && !r.partner?.name?.includes("ProSound") && !r.partner?.name?.includes("Garuda"));
+            // Bersihkan data dummy mockup & buang pesan optimistik kadaluarsa (>60 detik)
+            const now = Date.now();
+            const clean = parsed
+              .filter((r) => !r.id?.startsWith("order-room-10") && !r.id?.includes("mock") && !r.partner?.name?.includes("Focus Lens") && !r.partner?.name?.includes("ProSound") && !r.partner?.name?.includes("Garuda"))
+              .map((room) => ({
+                ...room,
+                messages: (room.messages || []).filter((m) => {
+                  const isTemp = m?.isOptimistic || (typeof m?.id === "string" && (m.id.startsWith("msg-") || m.id.startsWith("cmsg_")));
+                  if (!isTemp) return true;
+                  const msgTime = m?.createdAt ? new Date(m.createdAt).getTime() : 0;
+                  return now - msgTime < 60000;
+                }),
+              }));
             return clean;
           }
         }
@@ -377,9 +591,9 @@ export function AppProvider({ children }) {
   // -------------------------------------------------------------
   // LEDGER & HAK PEMBAYARAN MITRA (NON E-MONEY)
   // -------------------------------------------------------------
-  const [mitraAvailableBalance, setMitraAvailableBalance] = useState(3850000); // Saldo dapat dicairkan (Hak status AVAILABLE)
-  const [mitraPendingBalance, setMitraPendingBalance] = useState(285000);     // Dana tertahan (Hak status PENDING)
-  const [mitraTotalEarned, setMitraTotalEarned] = useState(6450000);        // Total akumulasi pendapatan bersih
+  const [mitraAvailableBalance, setMitraAvailableBalance] = useState(0); // Saldo dapat dicairkan (Hak status AVAILABLE)
+  const [mitraPendingBalance, setMitraPendingBalance] = useState(0);     // Dana tertahan (Hak status PENDING)
+  const [mitraTotalEarned, setMitraTotalEarned] = useState(0);        // Total akumulasi pendapatan bersih
 
   // Backward compatibility alias
   const walletBalance = mitraAvailableBalance;
@@ -387,189 +601,50 @@ export function AppProvider({ children }) {
   const setWalletBalance = setMitraAvailableBalance;
 
   // Tracking Deposit Jaminan Sewa Customer (Terpisah mutlak dari pendapatan platform, 0% komisi)
-  const [customerDeposits, setCustomerDeposits] = useState([
-    {
-      id: "DEP-2026-101",
-      rentalOrderId: "order-room-rental-kamera",
-      rentalTitle: "Sony Alpha A7 III + Lensa 24-70mm GM",
-      depositAmount: 500000,
-      refundAmount: 500000,
-      deductionAmount: 0,
-      deductionReason: "",
-      status: "WAITING_RETURN", // 'WAITING_RETURN' | 'INSPECTION' | 'READY_FOR_REFUND' | 'REFUND_PENDING' | 'REFUNDED' | 'DISPUTE'
-      paymentMethod: "QRIS",
-      customerBank: "BCA",
-      customerAccountNumber: "8820192841",
-      customerAccountHolder: "Rian Prasetya",
-      createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-      refundedAt: null,
-    },
-    {
-      id: "DEP-2026-098",
-      rentalOrderId: "order-room-098",
-      rentalTitle: "DJI Ronin SC Gimbal Stabilizer",
-      depositAmount: 200000,
-      refundAmount: 200000,
-      deductionAmount: 0,
-      deductionReason: "",
-      status: "REFUNDED",
-      paymentMethod: "BCA Virtual Account",
-      customerBank: "BCA",
-      customerAccountNumber: "8820192841",
-      customerAccountHolder: "Rian Prasetya",
-      createdAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString(),
-      refundedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
-    }
-  ]);
+  const [customerDeposits, setCustomerDeposits] = useState([]);
 
-  // Riwayat Pengajuan Penarikan Dana (Withdrawal) Mitra - Transfer Manual Admin (MVP)
-  const [withdrawals, setWithdrawals] = useState([
-    {
-      id: "WD-2026-902",
-      mitraId: "mitra-bayu",
-      mitraName: "Bayu Pratama",
-      amount: 92000,
-      adminFee: 2500,
-      feePaidBy: "BANTUIN_OPERATIONAL", // Ditanggung platform Bantuin.id!
-      netAmount: 92000, // Mitra terima 100% penuh tanpa potongan
-      bankName: "Mandiri",
-      accountNumber: "157000982312",
-      accountHolder: "Bayu Pratama",
-      status: "PENDING", // PENDING -> SUCCESS (setelah admin transfer manual)
-      requestedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-      processedAt: null,
-      notes: "Menunggu transfer manual oleh admin via m-Banking",
-    },
-    {
-      id: "WD-2026-901",
-      mitraId: "user-current-01",
-      mitraName: "Rian Prasetya",
-      amount: 500000,
-      adminFee: 2500,
-      feePaidBy: "BANTUIN_OPERATIONAL",
-      netAmount: 500000,
-      bankName: "BCA",
-      accountNumber: "8820192841",
-      accountHolder: "Rian Prasetya",
-      status: "SUCCESS",
-      requestedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-      processedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000 + 45000).toISOString(),
-      notes: "Transfer manual admin berhasil via BCA",
-    }
-  ]);
+  // Riwayat Pengajuan Penarikan Dana (Withdrawal) Mitra
+  const [withdrawals, setWithdrawals] = useState([]);
 
   // General Ledger Entitlement & Financial Entries
-  const [ledgerEntries, setLedgerEntries] = useState([
-    {
-      id: "LEDGER-001",
-      orderId: "order-room-101",
-      type: "CUSTOMER_RENTAL_PAYMENT",
-      grossAmount: 352000,
-      gatewayFee: 2000,
-      rentalFee: 150000,
-      depositAmount: 200000,
-      platformFee: 12000,
-      mitraEntitlement: 138000,
-      description: "Pembayaran customer via QRIS untuk Rental Sony Alpha A7 III + Deposit",
-      timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "LEDGER-002",
-      orderId: "order-room-101",
-      type: "CUSTOMER_DEPOSIT",
-      grossAmount: 200000,
-      gatewayFee: 0,
-      rentalFee: 0,
-      depositAmount: 200000,
-      platformFee: 0,
-      mitraEntitlement: 0,
-      description: "Deposit jaminan perlindungan kamera (titipan refundable 0% komisi)",
-      timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "LEDGER-003",
-      orderId: "order-room-101",
-      type: "PLATFORM_COMMISSION",
-      grossAmount: 0,
-      gatewayFee: 0,
-      rentalFee: 150000,
-      depositAmount: 0,
-      platformFee: 12000,
-      mitraEntitlement: 0,
-      description: "Komisi platform Bantuin.id 8% dari sewa Rp150.000",
-      timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "LEDGER-004",
-      orderId: "order-room-101",
-      type: "MITRA_ENTITLEMENT",
-      grossAmount: 0,
-      gatewayFee: 0,
-      rentalFee: 150000,
-      depositAmount: 0,
-      platformFee: 0,
-      mitraEntitlement: 138000,
-      description: "Hak pemilik rental (status PENDING saat barang sedang disewa)",
-      timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "LEDGER-005",
-      orderId: "WD-2026-901",
-      type: "MITRA_WITHDRAWAL",
-      grossAmount: 0,
-      gatewayFee: 0,
-      rentalFee: 0,
-      depositAmount: 0,
-      platformFee: 0,
-      mitraEntitlement: -500000,
-      description: "Pencairan transfer manual admin ke BCA Rian Prasetya (Fee admin Rp2.500 ditanggung platform)",
-      timestamp: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-    }
-  ]);
+  const [ledgerEntries, setLedgerEntries] = useState([]);
 
   // Provider Hub Settings
-  const [providerSettings, setProviderSettings] = useState({
-    isAcceptingOrders: true,
-    autoAcceptQuotes: false,
-    minRate: 35000,
-    maxActiveOrders: 5,
-    slaResponseMinutes: 10,
-    revisionLimit: 2,
-    serviceRadiusKm: 15,
-    skills: [
-      "Desain Grafis & Logo",
-      "Fotografi & Liputan",
-      "Web & IT Development",
-      "Penerjemah & Copywriting",
-      "Print & Fotokopi Kilat"
-    ],
+  const [providerSettings, setProviderSettings] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("bantuin_provider_settings_state");
+        if (saved) return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return {
+      isAcceptingOrders: true,
+      autoAcceptQuotes: false,
+      minRate: 35000,
+      maxActiveOrders: 5,
+      slaResponseMinutes: 10,
+      revisionLimit: 2,
+      serviceRadiusKm: 15,
+      skills: [
+        "Desain Grafis & Logo",
+        "Fotografi & Liputan",
+        "Web & IT Development",
+        "Penerjemah & Copywriting",
+        "Print & Fotokopi Kilat"
+      ],
+    };
   });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem("bantuin_provider_settings_state", JSON.stringify(providerSettings));
+    } catch (e) {}
+  }, [providerSettings]);
   
   // Rental Bookings
-  const INITIAL_BOOKINGS = [
-    {
-      id: "booking-1",
-      rentalId: "rent-1",
-      rentalTitle: "Sony Alpha A6400 Kit 16-50mm + 2 Baterai",
-      photoUrl: "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=800&q=80",
-      renterId: "user-current-01",
-      renterName: "Rian Prasetya",
-      ownerName: "Depok Cam Hub (Mitra Resmi)",
-      startDate: "2026-09-05",
-      endDate: "2026-09-06",
-      totalDays: 2,
-      rentalFee: 150000,
-      depositFee: 150000,
-      totalAmount: 300000,
-      status: "confirmed_by_owner", // 'temp_locked', 'confirmed_by_owner', 'handed_over', 'returned', 'completed'
-      initialPhotos: ["https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=800&q=80"],
-      initialNotes: "Body bersih, lensa tanpa jamur, baterai full 2 unit.",
-      returnPhotos: [],
-      returnNotes: "",
-    },
-  ];
+  const [rentalBookings, setRentalBookings] = useState([]);
 
-  const [rentalBookings, setRentalBookings] = useState(INITIAL_BOOKINGS);
 
   // Hydrate rentalBookings from localStorage on mount
   useEffect(() => {
@@ -599,36 +674,9 @@ export function AppProvider({ children }) {
   }, [rentalBookings]);
 
   // Admin and Trust & Safety
-  const [auditLogs, setAuditLogs] = useState([
-    {
-      id: "log-1",
-      actor: "system@bantuin.id",
-      action: "ESCROW_LOCK",
-      target: "ORDER #101",
-      details: "Dana Rp15.000 berhasil ditahan di Rekening Bersama Bantuin",
-      timestamp: new Date(Date.now() - 40 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "log-2",
-      actor: "admin@bantuin.id",
-      action: "KYC_VERIFIED",
-      target: "USER Rian Prasetya",
-      details: "Dokumen KTM UI terverifikasi valid",
-      timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    },
-  ]);
+  const [auditLogs, setAuditLogs] = useState([]);
 
-  const [reports, setReports] = useState([
-    {
-      id: "rep-1",
-      reporter: "Cindy Clarissa",
-      target: "Akun Mencurigakan #992",
-      category: "disintermediasi",
-      description: "Pengguna mengirim nomor WA sebelum order room terbentuk",
-      status: "pending",
-      createdAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
-    },
-  ]);
+  const [reports, setReports] = useState([]);
 
   const deleteReport = (reportId) => {
     setReports((prev) => prev.filter((r) => r.id !== reportId));
@@ -650,52 +698,11 @@ export function AppProvider({ children }) {
   const [toasts, setToasts] = useState([]);
 
   // Central Interactive System & Activity Notifications
-  const INITIAL_NOTIFICATIONS = [
-    {
-      id: "notif-1",
-      title: "Unit Sewa Kamera Siap Diambil",
-      desc: "Focus Lens Studio telah menyiapkan Sony Alpha A7 III beserta 2 baterai.",
-      time: "2m lalu",
-      unread: true,
-      category: "sewa",
-      link: "/chat?room=order-room-rental-kamera",
-      createdAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "notif-2",
-      title: "Helper Menuju Lokasi (Bantuan Dokumen)",
-      desc: "Dimas Arya telah mengambil berkas dan sedang menuju titik temu.",
-      time: "15m lalu",
-      unread: true,
-      category: "bantuan",
-      link: "/chat?room=order-room-101",
-      createdAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "notif-3",
-      title: "Desain Banner Siap Direview",
-      desc: "Sarah Kartika telah mengirimkan file pratinjau resolusi tinggi untuk event kamu.",
-      time: "1j lalu",
-      unread: false,
-      category: "jasa",
-      link: "/chat?room=order-room-102",
-      createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "notif-4",
-      title: "Dana Aman di Rekening Escrow Bantuin",
-      desc: "Pembayaran sewa mobil Toyota Avanza Rp650.000 (termasuk deposit) aman terkunci.",
-      time: "3j lalu",
-      unread: false,
-      category: "sewa",
-      link: "/activity?tab=menyewa",
-      createdAt: new Date(Date.now() - 180 * 60 * 1000).toISOString(),
-    },
-  ];
+  const INITIAL_NOTIFICATIONS = [];
 
   const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
 
-  // Hydrate notifications from localStorage on mount
+  // Hydrate notifications from localStorage on mount (hanya notifikasi asli)
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -703,7 +710,12 @@ export function AppProvider({ children }) {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setNotifications(parsed);
+          const clean = parsed.filter((n) => !n.id?.includes("init") && !n.id?.includes("mock") && !n.id?.startsWith("notif-1"));
+          if (clean.length > 0) {
+            setNotifications(clean);
+          } else {
+            localStorage.removeItem("bantuin_notifications_list");
+          }
         }
       }
     } catch (e) {
@@ -718,14 +730,32 @@ export function AppProvider({ children }) {
     } catch (e) {}
   }, [notifications]);
 
-  const markNotificationAsRead = (id) => {
+  const markNotificationAsRead = async (id) => {
     setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, unread: false } : n))
+      prev.map((n) => (n.id === id ? { ...n, unread: false, isRead: true } : n))
     );
+    try {
+      const token = await authService.getValidAccessToken();
+      if (token) {
+        await fetch(`/api/notifications/${id}`, {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+    } catch (e) {}
   };
 
-  const markAllNotificationsAsRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, unread: false })));
+  const markAllNotificationsAsRead = async () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, unread: false, isRead: true })));
+    try {
+      const token = await authService.getValidAccessToken();
+      if (token) {
+        await fetch("/api/notifications/read-all", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+    } catch (e) {}
   };
 
   const addNotification = (notif) => {
@@ -739,16 +769,71 @@ export function AppProvider({ children }) {
     setNotifications((prev) => [newNotif, ...prev]);
   };
 
+  const deleteNotification = async (id) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    try {
+      const token = await authService.getValidAccessToken();
+      if (token) {
+        await fetch(`/api/notifications?id=${encodeURIComponent(id)}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+    } catch (e) {
+      console.warn("deleteNotification API error:", e);
+    }
+  };
+
+  const clearAllNotifications = async () => {
+    setNotifications([]);
+    try {
+      const token = await authService.getValidAccessToken();
+      if (token) {
+        await fetch("/api/notifications?all=true", {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+    } catch (e) {
+      console.warn("clearAllNotifications API error:", e);
+    }
+  };
+
   const markChatRoomAsRead = (roomId) => {
     setOrderRooms((prev) =>
-      prev.map((room) =>
-        room.id === roomId ? { ...room, unreadCount: 0 } : room
-      )
+      prev.map((room) => {
+        if (room.id === roomId || room.orderRoomId === roomId) {
+          const updatedMessages = (room.messages || []).map((m) => ({ ...m, read: true, isRead: true }));
+          return { ...room, unreadCount: 0, messages: updatedMessages };
+        }
+        return room;
+      })
     );
   };
 
-  const addToast = (title, message, type = "success") => {
-    const id = Date.now() + Math.random().toString();
+  const markAllChatRoomsAsRead = () => {
+    setOrderRooms((prev) =>
+      prev.map((room) => ({
+        ...room,
+        unreadCount: 0,
+        messages: (room.messages || []).map((m) => ({ ...m, read: true, isRead: true })),
+      }))
+    );
+  };
+
+  const toastHistoryRef = useRef(new Map());
+
+  const addToast = useCallback((title, message, type = "success") => {
+    const key = `${type}:${title}:${message || ""}`;
+    const now = Date.now();
+    const lastSeen = toastHistoryRef.current.get(key) || 0;
+    // Cegah spam toast yang sama dalam kurun waktu 2500ms (cegah loop/flicker)
+    if (now - lastSeen < 2500) {
+      return;
+    }
+    toastHistoryRef.current.set(key, now);
+
+    const id = `${now}-${Math.random().toString(36).slice(2, 7)}`;
     setToasts((prev) => {
       // Pertahankan maksimal 2 toast aktif agar tidak bertumpuk dan menutupi tampilan
       const trimmed = prev.length >= 2 ? prev.slice(-1) : prev;
@@ -757,11 +842,11 @@ export function AppProvider({ children }) {
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 3500);
-  };
+  }, []);
 
-  const removeToast = (id) => {
+  const removeToast = useCallback((id) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
-  };
+  }, []);
 
   // -------------------------------------------------------------
   // Actions
@@ -769,6 +854,7 @@ export function AppProvider({ children }) {
 
   // Realtime GPS Location Detection
   const detectUserLocation = async (openModalOnDenied = true) => {
+    if (isDetectingLocation) return;
     setIsDetectingLocation(true);
     try {
       const loc = await detectRealtimeLocation();
@@ -996,8 +1082,9 @@ export function AppProvider({ children }) {
       proposedPrice: Number(proposedPrice) || 25000,
       estimatedDuration: isObj ? offerData.estimatedDuration || "1-2 Jam" : "1-2 Jam",
       cvName: isObj ? offerData.cvName || null : null,
+      cvUrl: isObj ? (offerData.cvUrl ? formatExternalUrl(offerData.cvUrl) : null) : null,
       portfolioName: isObj ? offerData.portfolioName || null : null,
-      portfolioUrl: isObj ? offerData.portfolioUrl || null : null,
+      portfolioUrl: isObj ? (offerData.portfolioUrl ? formatExternalUrl(offerData.portfolioUrl) : null) : null,
       submittedAt: "Baru saja",
     };
 
@@ -1149,10 +1236,15 @@ export function AppProvider({ children }) {
 
   // 4. Update Order Room Status
   const updateOrderStatus = async (orderRoomId, newStatus) => {
+    const isPaid = newStatus === "paid_escrow";
     setOrderRooms((prev) =>
       prev.map((room) => {
         if (room.id === orderRoomId) {
-          return { ...room, orderStatus: newStatus };
+          return {
+            ...room,
+            orderStatus: newStatus,
+            ...(isPaid ? { paymentStatus: "PAID", paidAt: new Date().toISOString() } : {}),
+          };
         }
         return room;
       })
@@ -1169,11 +1261,14 @@ export function AppProvider({ children }) {
         body: JSON.stringify({
           orderRoomId,
           status: newStatus,
+          ...(isPaid ? { paymentStatus: "PAID" } : {}),
         }),
       });
 
       if (typeof window !== "undefined") {
         window.dispatchEvent(new Event("bantuin_activity_updated"));
+        window.dispatchEvent(new Event("bantuin_notification_updated"));
+        window.dispatchEvent(new Event("bantuin_chat_update"));
       }
     } catch (err) {
       console.warn("Could not sync room status to database:", err);
@@ -1240,6 +1335,7 @@ export function AppProvider({ children }) {
 
       if (typeof window !== "undefined") {
         window.dispatchEvent(new Event("bantuin_activity_updated"));
+        window.dispatchEvent(new Event("bantuin_notification_updated"));
       }
     } catch (err) {
       console.warn("Could not sync proof_submitted status:", err);
@@ -1310,11 +1406,14 @@ export function AppProvider({ children }) {
         body: JSON.stringify({
           orderRoomId,
           status: "completed",
+          rating: numericRating,
+          feedback: reviewFeedback,
         }),
       });
 
       if (typeof window !== "undefined") {
         window.dispatchEvent(new Event("bantuin_activity_updated"));
+        window.dispatchEvent(new Event("bantuin_notification_updated"));
       }
     } catch (err) {
       console.warn("Could not sync completed status:", err);
@@ -1668,9 +1767,24 @@ export function AppProvider({ children }) {
   // 7. Send Chat Message with Anti-Disintermediation check & PostgreSQL persistence
   const sendChatMessage = async (orderRoomId, messageText, extraData = {}) => {
     const check = detectDisintermediation(messageText);
+    const contentCheck = detectProhibitedContent(messageText);
+
+    // Proteksi: Jika memuat nomor kontak atau konten terlarang, blokir dan jangan tampilkan di obrolan
+    if (check.flagged || contentCheck.flagged) {
+      addToast(
+        "Pesan Diblokir",
+        check.flagged ? check.reason : contentCheck.reason,
+        "error"
+      );
+      return;
+    }
     
+    // Generate stable unique clientMessageId untuk idempotensi dan deduplikasi instan
+    const clientMessageId = extraData?.clientMessageId || `cmsg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
     const newMsg = {
-      id: `msg-${Date.now()}`,
+      id: clientMessageId,
+      clientMessageId,
       senderId: currentUser?.id || extraData?.senderId || "user-req",
       senderName: currentUser?.fullName || extraData?.senderName || "Saya",
       senderAvatar: currentUser?.avatarUrl || extraData?.senderAvatar || null,
@@ -1679,37 +1793,50 @@ export function AppProvider({ children }) {
       warningReason: check.reason,
       timestamp: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }).replace(".", ":"),
       createdAt: new Date().toISOString(),
+      isOptimistic: true,
       ...extraData,
     };
 
+    const nowIso = new Date().toISOString();
     setOrderRooms((prev) =>
       prev.map((room) => {
-        if (room.id === orderRoomId) {
+        if (room.id === orderRoomId || room.orderRoomId === orderRoomId) {
+          const msgs = room.messages || [];
+          if (msgs.some((m) => m.clientMessageId === clientMessageId || m.id === clientMessageId)) {
+            return room;
+          }
           return {
             ...room,
-            messages: [...(room.messages || []), newMsg],
+            updatedAt: nowIso,
+            messages: [...msgs, newMsg],
           };
         }
         return room;
       })
     );
 
-    // Build attachmentUrls from proofPhotos or photos in extraData
+    // Build attachmentUrls from proofPhotos, photos, or attachment in extraData
     const attachmentUrls = extraData?.attachmentUrls?.length
       ? extraData.attachmentUrls
-      : extraData?.proofPhotos?.length
-        ? extraData.proofPhotos
-        : extraData?.photos?.length
-          ? extraData.photos
-          : [];
+      : extraData?.photos?.length
+        ? extraData.photos
+        : extraData?.proofPhotos?.length
+          ? extraData.proofPhotos
+          : extraData?.attachment?.url
+            ? [extraData.attachment.url]
+            : [];
 
     // Encode metadata flags into message for retrieval
     const metaFields = {};
+    if (clientMessageId) metaFields.clientMessageId = clientMessageId;
     if (extraData?.isTaskProof) metaFields.isTaskProof = true;
     if (extraData?.isHandoverProof) metaFields.isHandoverProof = true;
     if (extraData?.isTaskCompletion) metaFields.isTaskCompletion = true;
     if (extraData?.notes) metaFields.notes = extraData.notes;
     if (extraData?.proofPhotos) metaFields.proofPhotos = extraData.proofPhotos;
+    if (extraData?.photos) metaFields.photos = extraData.photos;
+    if (extraData?.attachment) metaFields.attachment = extraData.attachment;
+    if (extraData?.imageUrl) metaFields.photos = [extraData.imageUrl];
 
     const metaSuffix = Object.keys(metaFields).length > 0
       ? `||META||${JSON.stringify(metaFields)}`
@@ -1721,7 +1848,7 @@ export function AppProvider({ children }) {
       const headers = { "Content-Type": "application/json" };
       if (token) headers.Authorization = `Bearer ${token}`;
 
-      await fetch("/api/chat/messages", {
+      const res = await fetch("/api/chat/messages", {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -1729,8 +1856,37 @@ export function AppProvider({ children }) {
           message: messageText + metaSuffix,
           senderId: currentUser?.id || extraData?.senderId,
           attachmentUrls,
+          clientMessageId,
         }),
       });
+
+      if (res.ok) {
+        const resJson = await res.json();
+        if (resJson?.success && resJson?.data) {
+          const serverMsg = resJson.data;
+          // Rekonsiliasi: ganti ID optimistik sementara dengan ID UUID permanen dari PostgreSQL
+          setOrderRooms((prev) =>
+            prev.map((room) => {
+              if (room.id === orderRoomId || room.orderRoomId === orderRoomId) {
+                const updatedMessages = (room.messages || []).map((m) => {
+                  if (m.clientMessageId === clientMessageId || m.id === clientMessageId) {
+                    return {
+                      ...m,
+                      ...serverMsg,
+                      id: serverMsg.id, // UUID resmi dari database
+                      clientMessageId,
+                      isOptimistic: false,
+                    };
+                  }
+                  return m;
+                });
+                return { ...room, messages: updatedMessages };
+              }
+              return room;
+            })
+          );
+        }
+      }
     } catch (err) {
       console.warn("Could not persist chat message to database:", err);
     }
@@ -1767,10 +1923,10 @@ export function AppProvider({ children }) {
     }
   };
 
-  // 7c. Delete Entire Chat Room / Conversation
+  // 7c. Delete Entire Chat Room / Conversation (Hapus Khusus Satu Pihak)
   const deleteChatRoom = async (orderRoomId) => {
-    setOrderRooms((prev) => prev.filter((room) => room.id !== orderRoomId));
-    addToast("Obrolan Dihapus", "Seluruh percakapan telah berhasil dihapus.");
+    setOrderRooms((prev) => prev.filter((room) => room.id !== orderRoomId && room.orderRoomId !== orderRoomId));
+    addToast("Obrolan Dihapus", "Obrolan berhasil dihapus dari daftar Anda.");
 
     try {
       const token = await authService.getValidAccessToken();
@@ -1788,6 +1944,15 @@ export function AppProvider({ children }) {
   const editChatMessage = async (orderRoomId, messageId, newText) => {
     if (!newText || !newText.trim()) return;
     const check = detectDisintermediation(newText);
+    const contentCheck = detectProhibitedContent(newText);
+    if (check.flagged || contentCheck.flagged) {
+      addToast(
+        "Edit Ditolak",
+        check.flagged ? check.reason : contentCheck.reason,
+        "error"
+      );
+      return;
+    }
     setOrderRooms((prev) =>
       prev.map((room) => {
         if (room.id === orderRoomId) {
@@ -2134,6 +2299,30 @@ export function AppProvider({ children }) {
         return r;
       })
     );
+
+    (async () => {
+      try {
+        const token = await authService.getValidAccessToken();
+        const headers = { "Content-Type": "application/json" };
+        if (token) headers.Authorization = `Bearer ${token}`;
+        await fetch("/api/chat/rooms", {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({
+            orderRoomId: roomId,
+            status: "item_handed_over",
+          }),
+        });
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("bantuin_activity_updated"));
+          window.dispatchEvent(new Event("bantuin_chat_update"));
+          window.dispatchEvent(new Event("bantuin_notification_updated"));
+        }
+      } catch (err) {
+        console.warn("Could not sync rental handover to DB:", err);
+      }
+    })();
+
     addToast("Serah Terima Dikonfirmasi!", "Foto bukti fisik tersimpan di obrolan & masa sewa aktif.");
   };
 
@@ -2204,6 +2393,29 @@ export function AppProvider({ children }) {
       )
     );
 
+    (async () => {
+      try {
+        const token = await authService.getValidAccessToken();
+        const headers = { "Content-Type": "application/json" };
+        if (token) headers.Authorization = `Bearer ${token}`;
+        await fetch("/api/chat/rooms", {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({
+            orderRoomId: roomId,
+            status: "returned",
+          }),
+        });
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("bantuin_activity_updated"));
+          window.dispatchEvent(new Event("bantuin_chat_update"));
+          window.dispatchEvent(new Event("bantuin_notification_updated"));
+        }
+      } catch (err) {
+        console.warn("Could not sync rental return to DB:", err);
+      }
+    })();
+
     addToast("Pemeriksaan Selesai!", `Hak sewa pemilik kini dapat dicairkan. Deposit ${formatIDR(refundAmount)} siap direfund oleh admin.`);
   };
 
@@ -2259,8 +2471,8 @@ export function AppProvider({ children }) {
 
           const newReviewObj = {
             id: `rev-${Date.now()}`,
-            userName: currentUser?.fullName || "Rian Prasetya",
-            avatar: currentUser?.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80",
+            userName: currentUser?.fullName || "Penyewa",
+            avatar: currentUser?.avatarUrl || null,
             rating: numRating,
             date: "Baru saja",
             item: item.title,
@@ -2298,6 +2510,26 @@ export function AppProvider({ children }) {
         return b;
       })
     );
+
+    // Persist review to backend database
+    try {
+      authService.getValidAccessToken().then((token) => {
+        if (!token) return;
+        fetch("/api/chat/rooms", {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            orderRoomId: roomId,
+            status: "completed",
+            rating: numRating,
+            feedback: finalComment,
+          }),
+        }).catch(() => {});
+      });
+    } catch (e) {}
 
     addToast(
       "Penilaian Berhasil!",
@@ -2349,11 +2581,11 @@ export function AppProvider({ children }) {
       category: "Sewa Alat & Kendaraan",
       mode: "offline",
       requester: {
-        id: currentUser.id || "user-current-01",
-        name: currentUser.fullName || "Rian Prasetya",
-        avatar: currentUser.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80",
-        phone: currentUser.phone || "081298765432",
-        rating: 4.95,
+        id: currentUser?.id || "user-guest",
+        name: currentUser?.fullName || "Pengguna",
+        avatar: currentUser?.avatarUrl || null,
+        phone: currentUser?.phoneNumber || currentUser?.phone || "",
+        rating: currentUser?.ratingAvg || 5.0,
       },
       helper: {
         id: storeId || "mitra-rental",
@@ -2436,11 +2668,16 @@ export function AppProvider({ children }) {
     category,
     initialQuestion
   }) => {
-    // Cari apakah sudah ada room konsultasi dengan mitra ini
+    const myId = currentUser?.id || "user-guest";
+    const targetProviderId = providerId || "mitra-jasa";
+
+    // Cari apakah sudah ada room konsultasi dengan mitra ini khusus untuk akun peminta ini
     const existing = orderRooms.find(
       (r) =>
         (r.orderType === "service" || r.orderType === "jasa") &&
-        (r.helper?.id === providerId || r.requestId === serviceId)
+        (r.helper?.id === targetProviderId || r.helperId === targetProviderId) &&
+        (r.requester?.id === myId || r.requesterId === myId) &&
+        (serviceId ? (r.requestId === serviceId || r.serviceDetails?.serviceId === serviceId) : true)
     );
     if (existing) {
       if (initialQuestion) {
@@ -2449,7 +2686,7 @@ export function AppProvider({ children }) {
       return existing;
     }
 
-    const roomId = `order-room-jasa-${providerId || Date.now()}`;
+    const roomId = `inquiry-jasa-${serviceId || "srv"}-${myId}-${targetProviderId}`;
     const newRoom = {
       id: roomId,
       categoryType: "jasa",
@@ -2459,17 +2696,19 @@ export function AppProvider({ children }) {
       requestTitle: serviceTitle ? `Konsultasi: ${serviceTitle}` : `Konsultasi dengan ${providerName || "Mitra"}`,
       category: category || "Layanan Jasa",
       mode: "online",
+      requesterId: myId,
+      helperId: targetProviderId,
       requester: {
-        id: currentUser?.id || "user-current-01",
-        name: currentUser?.fullName || "Rian Prasetya",
-        avatar: currentUser?.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80",
-        phone: currentUser?.phone || "081298765432",
-        rating: 4.95,
+        id: myId,
+        name: currentUser?.fullName || "Pengguna",
+        avatar: currentUser?.avatarUrl || null,
+        phone: currentUser?.phoneNumber || currentUser?.phone || "",
+        rating: currentUser?.ratingAvg || 5.0,
       },
       helper: {
-        id: providerId || "mitra-jasa",
+        id: targetProviderId,
         name: providerName || "Mitra Penyedia Jasa",
-        avatar: providerAvatar || serviceImage || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80",
+        avatar: providerAvatar || serviceImage || null,
         phone: providerPhone || "081234567890",
         rating: providerRating || 4.9,
         address: providerAddress || "Purwokerto",
@@ -2490,8 +2729,8 @@ export function AppProvider({ children }) {
         },
         {
           id: `msg-jasa-inq-2`,
-          senderId: currentUser?.id || "user-current-01",
-          senderName: currentUser?.fullName || "Rian Prasetya",
+          senderId: currentUser?.id || "user-guest",
+          senderName: currentUser?.fullName || "Pengguna",
           message: initialQuestion || `Halo kak ${providerName || "mitra"}, saya tertarik dengan layanan "${serviceTitle || "jasa"}". Boleh konsultasi terlebih dahulu mengenai estimasi dan teknis pengerjaannya?`,
           timestamp: "Sekarang",
           isMe: true,
@@ -2501,7 +2740,7 @@ export function AppProvider({ children }) {
           senderId: providerId || "mitra-jasa",
           senderName: providerName || "Mitra Jasa",
           senderAvatar: providerAvatar || serviceImage,
-          message: `Halo Kak Rian! Terima kasih sudah menghubungi kami di Bantuin. Tentu sangat bisa! Silakan sampaikan detail kebutuhan atau referensi yang Kakak inginkan ya. Setelah sepakat, Kakak bisa langsung klik "Pesan Layanan" untuk konfirmasi jadwal.`,
+          message: `Halo ${currentUser?.fullName ? `Kak ${currentUser.fullName.split(" ")[0]}` : "Kak"}! Terima kasih sudah menghubungi kami di Bantuin. Tentu sangat bisa! Silakan sampaikan detail kebutuhan atau referensi yang Kakak inginkan ya. Setelah sepakat, Kakak bisa langsung klik "Pesan Layanan" untuk konfirmasi jadwal.`,
           timestamp: "Sekarang",
         }
       ]
@@ -2600,11 +2839,11 @@ export function AppProvider({ children }) {
         createdAt: new Date().toISOString(),
       },
       requester: {
-        id: currentUser?.id || "user-current-01",
-        name: currentUser?.fullName || "Rian Prasetya",
-        avatar: currentUser?.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80",
-        phone: currentUser?.phone || "081298765432",
-        rating: 4.95,
+        id: currentUser?.id || "user-guest",
+        name: currentUser?.fullName || "Pengguna",
+        avatar: currentUser?.avatarUrl || null,
+        phone: currentUser?.phoneNumber || currentUser?.phone || "",
+        rating: currentUser?.ratingAvg || 5.0,
       },
       helper: {
         id: providerId || "mitra-jasa",
@@ -2648,28 +2887,39 @@ export function AppProvider({ children }) {
 
   // 8g. Start Task Inquiry (Chat dengan Pelamar Tugas sebelum bayar escrow atau setelah diterima)
   const startTaskInquiry = ({ request, offer }) => {
-    const helperId = offer?.helperId || offer?.id || "user-hlp-1";
-    const isHelperAccepted =
-      (request?.selectedHelperId && (request.selectedHelperId === helperId || request.selectedHelper?.id === helperId)) ||
-      request?.status === "helper_selected" ||
-      request?.status === "in_progress" ||
-      offer?.status === "accepted";
+    const requesterId = request?.requesterId || request?.requester?.id;
+    const isCallerRequester = currentUser?.id && requesterId && currentUser.id === requesterId;
+    const helperId = isCallerRequester
+      ? (offer?.helperId || offer?.helper?.id || offer?.id || "user-hlp-1")
+      : (currentUser?.id || offer?.helperId || offer?.helper?.id || offer?.id || "user-hlp-1");
+
+    const isPaid = Boolean(
+      request?.paymentStatus === "PAID" ||
+      request?.status === "in_progress"
+    );
 
     const baseAmount = Number(offer?.proposedPrice) || Number(request?.rewardAmount) || 35000;
     const cleanHelperAvatar = offer?.helperAvatar && !offer.helperAvatar.includes("images.unsplash.com") ? offer.helperAvatar : null;
     const cleanRequesterAvatar = request?.requester?.avatar || request?.requester?.avatarUrl || currentUser?.avatarUrl || null;
 
-    const existing = orderRooms.find(
-      (r) => r.requestId === request?.id && (r.helper?.id === helperId || r.id === `inquiry-${request?.id}-${helperId}`)
-    );
+    // Cari apakah sudah ada room obrolan untuk permintaan bantuan ini KHUSUS pasangan requester & helper ini
+    const existing = orderRooms.find((r) => {
+      const matchReq = r.requestId === request?.id || r.id === request?.id || (request?.id && typeof r.id === "string" && r.id.includes(request.id));
+      const rHelper = r.helperId || r.helper?.id;
+      const rRequester = r.requesterId || r.requester?.id;
+      const matchHelper = Boolean(rHelper && helperId && rHelper === helperId);
+      const matchRequester = !requesterId || Boolean(rRequester && rRequester === requesterId);
+      return matchReq && matchHelper && matchRequester;
+    });
 
     if (existing) {
-      if (isHelperAccepted && (existing.stage === "inquiry" || existing.orderStatus === "inquiry")) {
+      if (isPaid && (existing.stage === "inquiry" || existing.orderStatus === "inquiry")) {
         const hasAcceptedMsg = (existing.messages || []).some((m) => m.message?.includes("resmi diterima") || m.message?.includes("resmi dipilih"));
         const upgraded = {
           ...existing,
           stage: "active",
-          orderStatus: "room_created",
+          orderStatus: "paid_escrow",
+          paymentStatus: "PAID",
           lockedAmount: baseAmount,
           messages: [
             ...(existing.messages || []),
@@ -2706,18 +2956,21 @@ export function AppProvider({ children }) {
       id: roomId,
       categoryType: "bantuan",
       orderType: "task",
-      stage: isHelperAccepted ? "active" : "inquiry",
-      orderStatus: isHelperAccepted ? "room_created" : "inquiry",
+      stage: isPaid ? "active" : "inquiry",
+      orderStatus: isPaid ? "paid_escrow" : "inquiry",
+      paymentStatus: isPaid ? "PAID" : "UNPAID",
       requestId: request?.id || `req-${Date.now()}`,
       requestTitle: request?.title || "Permintaan Bantuan",
       category: request?.category || "Bantuan Komunitas",
       mode: request?.mode || "offline",
+      requesterId: requesterId || currentUser?.id || "user-guest",
+      helperId: helperId,
       requester: {
-        id: request?.requester?.id || currentUser?.id,
-        name: request?.requester?.name || request?.requester?.fullName || currentUser?.fullName,
+        id: requesterId || currentUser?.id || "user-guest",
+        name: request?.requester?.name || request?.requester?.fullName || currentUser?.fullName || "Pemohon",
         avatar: cleanRequesterAvatar,
-        phone: request?.requester?.phoneNumber || "081298765432",
-        rating: 4.95,
+        phone: request?.requester?.phoneNumber || request?.requester?.phone || currentUser?.phoneNumber || currentUser?.phone || "",
+        rating: request?.requester?.rating || 5.0,
       },
       helper: {
         id: helperId,
@@ -2728,7 +2981,7 @@ export function AppProvider({ children }) {
       },
       lockedAmount: baseAmount,
       messages: [
-        ...(isHelperAccepted
+        ...(isPaid
           ? [
               {
                 id: `msg-sys-${Date.now()}`,
@@ -2846,6 +3099,30 @@ export function AppProvider({ children }) {
         return b;
       })
     );
+
+    (async () => {
+      try {
+        const token = await authService.getValidAccessToken();
+        const headers = { "Content-Type": "application/json" };
+        if (token) headers.Authorization = `Bearer ${token}`;
+        await fetch("/api/chat/rooms", {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({
+            orderRoomId: roomId,
+            status: "paid_escrow",
+            paymentStatus: "PAID",
+          }),
+        });
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("bantuin_activity_updated"));
+          window.dispatchEvent(new Event("bantuin_chat_update"));
+          window.dispatchEvent(new Event("bantuin_notification_updated"));
+        }
+      } catch (err) {
+        console.warn("Could not sync rental escrow to DB:", err);
+      }
+    })();
 
     addToast("Pembayaran Escrow Berhasil!", "Dana terkunci aman di Rekening Bersama Bantuin. Silakan koordinasi serah terima alat.");
   };
@@ -2975,10 +3252,11 @@ export function AppProvider({ children }) {
     addToast("Sengketa Selesai", "Keputusan admin telah tersimpan di immutable audit log.");
   };
 
-  // 11. User Submit Report (Notice & Takedown - Permenkominfo No. 5/2020)
-  const submitReport = ({ targetUserId, targetRoomId, targetRequestId, category, description, evidenceUrls = [] }) => {
+  // 11. User Submit Report (Notice & Takedown - Permenkominfo No. 5/2020) with Real DB Persistence
+  const submitReport = async ({ targetUserId, targetRoomId, targetRequestId, category, description, evidenceUrls = [] }) => {
+    const tempId = `rep-${Date.now()}`;
     const newReport = {
-      id: `rep-${Date.now()}`,
+      id: tempId,
       reporterId: currentUser?.id || "user-current",
       reporterName: currentUser?.fullName || "Pengguna",
       targetUserId: targetUserId || null,
@@ -2987,7 +3265,7 @@ export function AppProvider({ children }) {
       category: category || "Lainnya",
       description: description || "",
       evidenceUrls,
-      status: "OPEN", // 'OPEN' | 'UNDER_REVIEW' | 'RESOLVED' | 'DISMISSED'
+      status: "pending",
       createdAt: new Date().toISOString(),
     };
 
@@ -3004,6 +3282,43 @@ export function AppProvider({ children }) {
       },
       ...(prev || []),
     ]);
+
+    // Persist ke database asli PostgreSQL via POST /api/reports
+    try {
+      const token = await authService.getValidAccessToken();
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      const res = await fetch("/api/reports", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          targetUserId,
+          targetRoomId,
+          targetRequestId,
+          category,
+          description,
+          evidenceUrls,
+        }),
+      });
+
+      const resJson = await res.json().catch(() => ({}));
+      if (res.ok && resJson.success && resJson.data) {
+        const savedReport = resJson.data;
+        // Rekonsiliasi id lokal dengan ID UUID permanen dari PostgreSQL
+        setReports((prev) =>
+          prev.map((r) => (r.id === tempId ? { ...r, ...savedReport, id: savedReport.id } : r))
+        );
+
+        // Broadcast sinyal pembaruan instan ke Admin Panel
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("bantuin_admin_update", { detail: { type: "report", reportId: savedReport.id } }));
+          window.dispatchEvent(new Event("bantuin_chat_update"));
+        }
+      }
+    } catch (err) {
+      console.warn("Could not persist report to database:", err);
+    }
 
     addToast("Laporan Diterima", "Laporan Anda telah diteruskan ke tim moderasi untuk verifikasi.", "success");
     return newReport;
@@ -3037,6 +3352,7 @@ export function AppProvider({ children }) {
         setRentals,
         services,
         setServices,
+        refreshServices,
         helpers,
         partners,
         setPartners,
@@ -3053,8 +3369,12 @@ export function AppProvider({ children }) {
         notifications,
         markNotificationAsRead,
         markAllNotificationsAsRead,
+        deleteNotification,
+        clearAllNotifications,
+        refreshNotifications,
         addNotification,
         markChatRoomAsRead,
+        markAllChatRoomsAsRead,
         walletBalance,
         setWalletBalance,
         pendingEscrowBalance,
@@ -3091,6 +3411,7 @@ export function AppProvider({ children }) {
         sendChatMessage,
         deleteChatMessage,
         editChatMessage,
+        deleteChatRoom,
         bookRental,
         createRentalOrder,
         startRentalInquiry,

@@ -8,6 +8,7 @@ import logoImg from "@/components/image/logo.png";
 import { useApp } from "@/lib/context/AppContext";
 import UnreadBadge from "@/components/ui/UnreadBadge";
 import RoleGuard from "@/components/auth/RoleGuard";
+import VerificationBanner from "@/components/auth/VerificationBanner";
 import JasaDashboardSkeleton from "@/components/skeletons/JasaDashboardSkeleton";
 import { formatIDR, formatDateIndo } from "@/lib/utils";
 import { 
@@ -71,11 +72,13 @@ import { promotionService } from "@/lib/services/promotionService";
 import { paymentService, PAYMENT_METHODS } from "@/lib/services/paymentService";
 import { reportService } from "@/lib/services/reportService";
 import { imageService } from "@/lib/services/imageService";
+import { authService } from "@/lib/services/authService";
 
 function JasaDashboardContent() {
   const router = useRouter();
   const { 
     currentUser, 
+    setCurrentUser,
     mitraAvailableBalance, 
     mitraPendingBalance, 
     mitraTotalEarned,
@@ -83,28 +86,233 @@ function JasaDashboardContent() {
     withdrawFunds,
     providerSettings,
     updateProviderSettings,
+    orderRooms,
+    reports,
+    submitReport,
     addToast
   } = useApp();
 
-  // Active provider initialized from primary verified mock provider
-  const [provider, setProvider] = useState(() => {
-    return getProviderById("fajar-ramadhan-desain") || getAllProviders()[0];
+  // Helper to build provider identity from logged in user and persistent store
+  const buildProviderFromUser = (user) => {
+    if (!user) {
+      return {
+        id: "",
+        name: "Penyedia Jasa",
+        brandTitle: "Penyedia Jasa Lepas",
+        email: "",
+        phone: "",
+        avatar: "/icons/icon-192x192.png",
+        coverBanner: "",
+        campus: "",
+        location: "",
+        address: "",
+        verificationStatus: "unverified",
+        verificationNotes: "",
+        rating: 0,
+        completedTasks: 0,
+        reviewsCount: 0,
+        reliabilityScore: 100,
+        skills: [],
+        bio: "",
+        catalog: [],
+        packages: [],
+        portfolioPhotos: [],
+        reviews: [],
+      };
+    }
+
+    const savedLocal = getProviderById(user.id);
+    let savedPackages = [];
+    let savedPortfolio = [];
+    if (typeof window !== "undefined") {
+      try {
+        const rawPkg = localStorage.getItem(`bantuin_provider_packages_${user.id}`);
+        if (rawPkg) savedPackages = JSON.parse(rawPkg);
+      } catch (e) {}
+      try {
+        const rawPort = localStorage.getItem(`bantuin_provider_portfolio_${user.id}`);
+        if (rawPort) savedPortfolio = JSON.parse(rawPort);
+      } catch (e) {}
+    }
+
+    const resolvedPackages = (Array.isArray(user.packages) && user.packages.length > 0)
+      ? user.packages
+      : (Array.isArray(savedLocal?.packages) && savedLocal.packages.length > 0)
+      ? savedLocal.packages
+      : savedPackages;
+
+    const resolvedPortfolio = (Array.isArray(user.portfolioPhotos) && user.portfolioPhotos.length > 0)
+      ? user.portfolioPhotos
+      : (Array.isArray(savedLocal?.portfolioPhotos) && savedLocal.portfolioPhotos.length > 0)
+      ? savedLocal.portfolioPhotos
+      : savedPortfolio;
+
+    return {
+      id: user.id,
+      name: user.fullName || savedLocal?.name || "Penyedia Jasa",
+      brandTitle: user.partnerBusinessName || savedLocal?.brandTitle || user.storeCategory || (Array.isArray(user.skills) && user.skills[0]) || "Penyedia Jasa Lepas",
+      email: user.email || savedLocal?.email || "",
+      phone: user.phoneNumber || user.phone || savedLocal?.phone || "",
+      avatar: user.avatarUrl || savedLocal?.avatar || "/icons/icon-192x192.png",
+      coverBanner: user.bannerUrl || savedLocal?.coverBanner || "",
+      campus: user.campusName || savedLocal?.campus || "",
+      location: user.campusName || user.partnerAddress || savedLocal?.location || "",
+      address: user.partnerAddress || savedLocal?.address || "",
+      verificationStatus: user.verificationStatus || savedLocal?.verificationStatus || "unverified",
+      verificationNotes: user.verificationNotes || savedLocal?.verificationNotes || "",
+      rating: Number(user.ratingAvg) || savedLocal?.rating || 0,
+      completedTasks: user.completedHelpsCount || savedLocal?.completedTasks || 0,
+      reviewsCount: user.ratingCount || savedLocal?.reviewsCount || 0,
+      reliabilityScore: user.reliabilityScore || savedLocal?.reliabilityScore || 100,
+      skills: Array.isArray(user.skills) && user.skills.length > 0 ? user.skills : (savedLocal?.skills || []),
+      bio: user.bio || savedLocal?.bio || "",
+      catalog: user.catalog || savedLocal?.catalog || [],
+      packages: Array.isArray(resolvedPackages) ? resolvedPackages : [],
+      portfolioPhotos: Array.isArray(resolvedPortfolio) ? resolvedPortfolio : [],
+      reviews: user.reviews || savedLocal?.reviews || [],
+    };
+  };
+
+  // Active provider initialized from authenticated user
+  const [provider, setProvider] = useState(() => buildProviderFromUser(currentUser));
+
+  // Wallet & Earnings State from PostgreSQL API
+  const [walletData, setWalletData] = useState({
+    availableBalance: 0,
+    pendingBalance: 0,
+    totalEarned: 0,
+    withdrawals: [],
   });
 
-  // Sync with storage on mount or custom event
+  const loadWalletData = async () => {
+    try {
+      const token = await authService.getValidAccessToken();
+      if (!token) return;
+      const res = await fetch("/api/profile/wallet", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (res.ok && json.success && json.data) {
+        setWalletData(json.data);
+      }
+    } catch (err) {
+      console.warn("Could not load wallet data:", err);
+    }
+  };
+
+  const effectiveAvailableBalance =
+    walletData.availableBalance !== undefined && walletData.availableBalance !== null && walletData.availableBalance > 0
+      ? walletData.availableBalance
+      : (mitraAvailableBalance || 0);
+
+  const effectivePendingBalance =
+    walletData.pendingBalance !== undefined && walletData.pendingBalance !== null && walletData.pendingBalance > 0
+      ? walletData.pendingBalance
+      : (mitraPendingBalance || 0);
+
+  const effectiveTotalEarned =
+    walletData.totalEarned !== undefined && walletData.totalEarned !== null && walletData.totalEarned > 0
+      ? walletData.totalEarned
+      : (mitraTotalEarned || (effectiveAvailableBalance + effectivePendingBalance));
+
+  const displayWithdrawals =
+    Array.isArray(walletData.withdrawals) && walletData.withdrawals.length > 0
+      ? walletData.withdrawals
+      : (withdrawals || []);
+
+  const myChatRooms = (orderRooms || []).filter(
+    (r) =>
+      r.helperId === currentUser?.id ||
+      r.helper?.id === currentUser?.id ||
+      r.partnerId === currentUser?.id ||
+      r.providerId === currentUser?.id ||
+      r.clientId === currentUser?.id
+  );
+
+  // Sync with currentUser changes and database services
   useEffect(() => {
-    const handleStorageUpdate = () => {
-      const updated = getProviderById("fajar-ramadhan-desain");
-      if (updated) setProvider(updated);
+    if (!currentUser) return;
+
+    let isMounted = true;
+    const fetchProviderData = async () => {
+      try {
+        const baseProvider = buildProviderFromUser(currentUser);
+        if (!currentUser.id) {
+          setProvider(baseProvider);
+          return;
+        }
+
+        const res = await fetch(`/api/services/provider/${currentUser.id}`);
+        if (res.ok) {
+          const resJson = await res.json();
+          if (resJson.success && resJson.data && isMounted) {
+            const dbServices = (resJson.data.services || []).map((s) => ({
+              id: s.id,
+              title: s.title,
+              category: s.category,
+              price: Number(s.startingPrice),
+              unit: "/ proyek",
+              image: s.portfolioUrls?.[0] || "https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=800&auto=format&fit=crop&q=80",
+              desc: s.description,
+              locationType: "hybrid",
+              address: currentUser.partnerAddress || currentUser.campusName || "",
+            }));
+
+            setProvider((prev) => ({
+              ...baseProvider,
+              packages: prev.packages?.length > 0 ? prev.packages : baseProvider.packages,
+              portfolioPhotos: prev.portfolioPhotos?.length > 0 ? prev.portfolioPhotos : baseProvider.portfolioPhotos,
+              catalog: dbServices,
+              completedTasks: resJson.data.stats?.completedOrders || 0,
+              reviewsCount: resJson.data.stats?.totalReviews || 0,
+              rating: Number(resJson.data.provider?.ratingAvg) || 0,
+              reviews: resJson.data.reviews || [],
+            }));
+            return;
+          }
+        }
+        if (isMounted) {
+          setProvider((prev) => ({
+            ...baseProvider,
+            packages: prev.packages?.length > 0 ? prev.packages : baseProvider.packages,
+            portfolioPhotos: prev.portfolioPhotos?.length > 0 ? prev.portfolioPhotos : baseProvider.portfolioPhotos,
+          }));
+        }
+      } catch (err) {
+        console.error("Gagal sinkronisasi data penyedia jasa:", err);
+      }
     };
-    window.addEventListener("bantuin_provider_updated", handleStorageUpdate);
-    return () => window.removeEventListener("bantuin_provider_updated", handleStorageUpdate);
-  }, []);
+
+    fetchProviderData();
+    loadWalletData();
+
+    const handleServicesChanged = () => {
+      fetchProviderData();
+      loadWalletData();
+    };
+    window.addEventListener("bantuin_service_updated", handleServicesChanged);
+    window.addEventListener("bantuin_provider_updated", handleServicesChanged);
+    window.addEventListener("bantuin_activity_updated", handleServicesChanged);
+    return () => {
+      isMounted = false;
+      window.removeEventListener("bantuin_service_updated", handleServicesChanged);
+      window.removeEventListener("bantuin_provider_updated", handleServicesChanged);
+      window.removeEventListener("bantuin_activity_updated", handleServicesChanged);
+    };
+  }, [currentUser]);
 
   // Save changes to provider state and localStorage
   const handleUpdateProvider = (updatedProvider, successMessage = "Data penyedia jasa berhasil diperbarui.") => {
     setProvider(updatedProvider);
     saveProviderData(updatedProvider);
+    if (typeof window !== "undefined" && updatedProvider.id) {
+      if (updatedProvider.packages) {
+        localStorage.setItem(`bantuin_provider_packages_${updatedProvider.id}`, JSON.stringify(updatedProvider.packages));
+      }
+      if (updatedProvider.portfolioPhotos) {
+        localStorage.setItem(`bantuin_provider_portfolio_${updatedProvider.id}`, JSON.stringify(updatedProvider.portfolioPhotos));
+      }
+    }
     if (addToast) {
       addToast("Perubahan Disimpan", successMessage);
     }
@@ -115,23 +323,50 @@ function JasaDashboardContent() {
   // Menu IDs: overview, catalog, packages, portfolio, orders, wallet, profile, reviews, settings
 
   // -------------------------------------------------------------
-  // LOCAL PHOTO UPLOAD HANDLERS (FOTO DARI LOKAL)
+  // REAL PHOTO UPLOAD HANDLERS (TERHUBUNG KE STORAGE & DATABASE)
   // -------------------------------------------------------------
-  const handleAvatarUpload = (e) => {
+  const handleAvatarUpload = async (e) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const localUrl = URL.createObjectURL(file);
-      const updated = { ...provider, avatar: localUrl };
-      handleUpdateProvider(updated, "Foto profil berhasil diperbarui dari file lokal.");
+    if (!file) return;
+    try {
+      const res = await imageService.uploadImage(file, "avatar");
+      if (res.success && res.url) {
+        const updated = { ...provider, avatar: res.url };
+        handleUpdateProvider(updated, "Foto profil berhasil diperbarui.");
+        const token = await authService.getValidAccessToken();
+        if (token) {
+          await fetch("/api/user/profile", {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ avatarUrl: res.url }),
+          });
+        }
+        if (typeof setCurrentUser === "function") {
+          setCurrentUser((prev) => ({ ...(prev || {}), avatarUrl: res.url }));
+        }
+      }
+    } catch (err) {
+      addToast?.("Gagal Upload Foto", err.message || "Gagal mengunggah foto profil.", "error");
     }
   };
 
-  const handleBannerUpload = (e) => {
+  const handleBannerUpload = async (e) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const localUrl = URL.createObjectURL(file);
-      const updated = { ...provider, coverBanner: localUrl };
-      handleUpdateProvider(updated, "Foto banner sampul berhasil diperbarui dari file lokal.");
+    if (!file) return;
+    try {
+      const res = await imageService.uploadImage(file, "banner");
+      if (res.success && res.url) {
+        const updated = { ...provider, coverBanner: res.url };
+        handleUpdateProvider(updated, "Foto banner sampul berhasil diperbarui.");
+        if (typeof setCurrentUser === "function") {
+          setCurrentUser((prev) => ({ ...(prev || {}), bannerUrl: res.url }));
+        }
+      }
+    } catch (err) {
+      addToast?.("Gagal Upload Banner", err.message || "Gagal mengunggah banner.", "error");
     }
   };
 
@@ -215,85 +450,93 @@ function JasaDashboardContent() {
     amount: "200000",
     bankName: "BCA",
     accountNumber: "8820192841",
-    accountHolder: provider?.name || currentUser?.fullName || "Fajar Ramadhan",
+    accountHolder: provider?.name || currentUser?.fullName || "",
   });
 
   // 5. Settings Form State
   const [settingsForm, setSettingsForm] = useState(providerSettings);
 
-  // 6. Profile Edit State
+  // 6. Profile Edit State (Terkoneksi langsung ke profil user login)
   const [profileForm, setProfileForm] = useState({
-    name: provider.name,
-    brandTitle: provider.brandTitle,
-    bio: provider.bio,
-    location: provider.location,
-    address: provider.address,
+    name: provider.name || "",
+    brandTitle: provider.brandTitle || "",
+    bio: provider.bio || "",
+    location: provider.location || "",
+    address: provider.address || "",
     skillsStr: provider.skills?.join(", ") || "",
   });
 
-  // 7. Orders with Canonical Flow (Section L)
-  const [providerOrders, setProviderOrders] = useState([
-    {
-      id: "ord-js-101",
-      orderNumber: "BTN-ORD-99120",
-      customerName: "Dimas Anggara",
-      customerPhone: "081234567890",
-      serviceTitle: "Desain Logo & Identitas Brand",
-      packageName: "Paket Brand Lengkap",
-      amount: 175000,
-      paymentStatus: "paid",
-      status: "Sedang Dikerjakan",
-      deadline: "Besok, 18:00 WIB",
-      brief: "Membutuhkan 2 konsep logo modern minimalis untuk kedai kopi artisan di Banyumas. Warna utama earthy brown dan soft cream.",
-      createdAt: "2026-03-22T08:30:00Z",
-      timeline: [
-        { status: "Menunggu Pembayaran", time: "2026-03-22 08:30", note: "Pesanan dibuat oleh klien" },
-        { status: "Pesanan Dibayar", time: "2026-03-22 08:45", note: "Pembayaran terkonfirmasi via Payment Gateway Resmi" },
-        { status: "Menunggu Dikerjakan", time: "2026-03-22 09:00", note: "Brief telah diverifikasi penyedia jasa" },
-        { status: "Sedang Dikerjakan", time: "2026-03-22 10:15", note: "Penyedia jasa mulai eksplorasi sketsa logo" },
-      ],
-    },
-    {
-      id: "ord-js-102",
-      orderNumber: "BTN-ORD-99121",
-      customerName: "Siti Nurhaliza",
-      customerPhone: "082198765432",
-      serviceTitle: "Desain Kemasan & Label Produk UMKM",
-      packageName: "Paket Cetak Siap Pakai",
-      amount: 120000,
-      paymentStatus: "paid",
-      status: "Menunggu Konfirmasi",
-      deadline: "Hari Ini, 21:00 WIB",
-      brief: "Desain label pouch keripik pisang ukuran 15x20cm lengkap dengan komposisi, barcode mockup, dan legalitas Dinkes.",
-      createdAt: "2026-03-21T14:00:00Z",
-      timeline: [
-        { status: "Menunggu Pembayaran", time: "2026-03-21 14:00", note: "Pesanan dibuat oleh klien" },
-        { status: "Pesanan Dibayar", time: "2026-03-21 14:10", note: "Pembayaran terkonfirmasi via Payment Gateway Resmi" },
-        { status: "Sedang Dikerjakan", time: "2026-03-21 15:00", note: "Pengerjaan desain kemasan" },
-        { status: "Menunggu Konfirmasi", time: "2026-03-22 16:30", note: "Draft final telah diunggah ke ruang order" },
-      ],
-    },
-    {
-      id: "ord-js-103",
-      orderNumber: "BTN-ORD-99118",
-      customerName: "Rian Prasetya",
-      customerPhone: "085712349988",
-      serviceTitle: "UI/UX Mobile App Landing Page",
-      packageName: "Paket Figma Prototyping",
-      amount: 450000,
-      paymentStatus: "paid",
-      status: "Selesai",
-      deadline: "20 Maret 2026",
-      brief: "High fidelity design 5 screen aplikasi pencatatan keuangan UMKM berbasis mobile.",
-      createdAt: "2026-03-18T10:00:00Z",
-      timeline: [
-        { status: "Dibayar", time: "2026-03-18 10:15", note: "Dana terverifikasi aman" },
-        { status: "Sedang Dikerjakan", time: "2026-03-18 11:00", note: "Pengerjaan Figma dimulai" },
-        { status: "Menunggu Konfirmasi", time: "2026-03-20 12:00", note: "File .fig diserahkan" },
-        { status: "Selesai", time: "2026-03-20 15:30", note: "Klien mengonfirmasi pesanan selesai. Dana Rp 450.000 masuk saldo mitra." },
-      ],
-    },
-  ]);
+  useEffect(() => {
+    if (currentUser) {
+      setProfileForm({
+        name: currentUser.fullName || "",
+        brandTitle: currentUser.partnerBusinessName || currentUser.storeCategory || (Array.isArray(currentUser.skills) && currentUser.skills[0]) || "",
+        bio: currentUser.bio || "",
+        location: currentUser.campusName || "",
+        address: currentUser.partnerAddress || "",
+        skillsStr: Array.isArray(currentUser.skills) ? currentUser.skills.join(", ") : "",
+      });
+    }
+  }, [currentUser]);
+
+  // 7. Orders with Canonical Flow (Terkoneksi langsung ke database riil)
+  const [providerOrders, setProviderOrders] = useState([]);
+  const [isLoadingOrders, setIsLoadingOrders] = useState(false);
+
+  const loadOrders = async () => {
+    try {
+      const token = await authService.getValidAccessToken();
+      if (!token) return;
+      setIsLoadingOrders(true);
+      const res = await fetch("/api/user/activities", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (res.ok && json.success && Array.isArray(json.data)) {
+        const helperActivities = json.data.filter((a) => a.isHelper || a.userRole === "helper");
+        const mappedOrders = helperActivities.map((a) => ({
+          id: a.orderRoomId || a.id,
+          orderNumber: `ORD-${(a.orderRoomId || a.id).slice(0, 8).toUpperCase()}`,
+          customerName: a.partner?.name || "Klien Bantuin",
+          customerAvatar: a.partner?.avatar || null,
+          serviceTitle: a.title || "Layanan Pengerjaan",
+          packageName: a.categoryPill || a.categoryType || "Layanan Jasa",
+          deadline: a.createdAt ? formatDateIndo(a.createdAt) : "Segera",
+          amount: a.lockedAmount || 0,
+          status:
+            a.orderStatus === "completed"
+              ? "Selesai"
+              : a.orderStatus === "proof_submitted"
+              ? "Menunggu Konfirmasi"
+              : a.orderStatus === "cancelled"
+              ? "Dibatalkan"
+              : a.orderStatus === "disputed"
+              ? "Sengketa"
+              : "Sedang Dikerjakan",
+          timeline: [
+            {
+              status: "Pesanan Dibuat",
+              time: a.createdAt ? new Date(a.createdAt).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "-",
+              note: "Klien memesan jasa dan mengamankan pembayaran di Rekening Bersama.",
+            },
+            ...(a.orderStatus === "proof_submitted"
+              ? [{ status: "Menunggu Konfirmasi", time: "Baru saja", note: "Hasil kerja diserahkan. Menunggu konfirmasi klien." }]
+              : []),
+            ...(a.orderStatus === "completed"
+              ? [{ status: "Selesai", time: "Selesai", note: "Pekerjaan diterima klien dan dana dicairkan ke saldo." }]
+              : []),
+          ],
+          createdAt: a.createdAt,
+          chatRoomId: a.chatRoomId || a.orderRoomId || a.id,
+        }));
+        setProviderOrders(mappedOrders);
+      }
+    } catch (err) {
+      console.warn("Could not load provider orders:", err);
+    } finally {
+      setIsLoadingOrders(false);
+    }
+  };
 
   const [selectedOrderForDetail, setSelectedOrderForDetail] = useState(null);
   const [orderFilter, setOrderFilter] = useState("all");
@@ -302,37 +545,57 @@ function JasaDashboardContent() {
   const [isCustomCategoryMode, setIsCustomCategoryMode] = useState(false);
   const [customCategoryName, setCustomCategoryName] = useState("");
 
-  // Notifications State
-  const [providerNotifications, setProviderNotifications] = useState([
-    {
-      id: "pnotif-1",
-      title: "Pesanan Baru Masuk",
-      message: "Dimas Anggara memesan Desain Logo & Identitas Brand. Segera periksa brief klien.",
-      time: "2 jam yang lalu",
-      isRead: false,
-    },
-    {
-      id: "pnotif-2",
-      title: "Dana Telah Masuk Saldo",
-      message: "Pesanan BTN-ORD-99118 telah selesai. Dana Rp 450.000 telah masuk ke saldo dompet Anda.",
-      time: "1 hari yang lalu",
-      isRead: true,
-    },
-    {
-      id: "pnotif-3",
-      title: "Ulasan Bintang 5",
-      message: "Rian Prasetya memberikan ulasan bintang 5 atas pekerjaan UI/UX Anda.",
-      time: "2 hari yang lalu",
-      isRead: true,
-    },
-  ]);
+  // Notifications State (Terkoneksi ke database riil)
+  const [providerNotifications, setProviderNotifications] = useState([]);
 
-  // ── Promosi Jasa State (Section 7 & 9) ──────────────────────────────────
+  const loadNotifications = async () => {
+    try {
+      const token = await authService.getValidAccessToken();
+      if (!token) return;
+      const res = await fetch("/api/notifications", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        const list = json.data?.notifications || json.data || [];
+        setProviderNotifications(
+          list.map((n) => ({
+            id: n.id,
+            title: n.title,
+            message: n.message,
+            time: n.createdAt ? formatDateIndo(n.createdAt) : "Baru saja",
+            isRead: Boolean(n.isRead),
+          }))
+        );
+      }
+    } catch (err) {
+      console.warn("Could not load notifications:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (currentUser?.id) {
+      loadOrders();
+      loadNotifications();
+    }
+    const handleActivityUpdate = () => {
+      loadOrders();
+      loadNotifications();
+    };
+    window.addEventListener("bantuin_activity_updated", handleActivityUpdate);
+    window.addEventListener("bantuin_notification_updated", handleActivityUpdate);
+    return () => {
+      window.removeEventListener("bantuin_activity_updated", handleActivityUpdate);
+      window.removeEventListener("bantuin_notification_updated", handleActivityUpdate);
+    };
+  }, [currentUser?.id]);
+
+  // ── Promosi Jasa State ──────────────────────────────────
   const [providerPromotions, setProviderPromotions] = useState(() => {
-    return promotionService.getPromotionsSync({ ownerId: provider?.id || "fajar-ramadhan-desain" });
+    return promotionService.getPromotionsSync({ ownerId: provider?.id || "" });
   });
   const [isPromoModalOpen, setIsPromoModalOpen] = useState(false);
-  const [promoModalStep, setPromoModalStep] = useState("form"); // "form" | "waiting_payment" | "success" | "failed" | "expired" | "cancelled"
+  const [promoModalStep, setPromoModalStep] = useState("form");
   const [promoTargetServiceId, setPromoTargetServiceId] = useState("");
   const [selectedPromoPkgId, setSelectedPromoPkgId] = useState("pkg-jasa-7d");
   const [selectedPromoChannel, setSelectedPromoChannel] = useState("qris");
@@ -340,9 +603,7 @@ function JasaDashboardContent() {
   const [activePromotion, setActivePromotion] = useState(null);
   const [isCreatingPayment, setIsCreatingPayment] = useState(false);
   const [isCheckingPayment, setIsCheckingPayment] = useState(false);
-  // Dashboard jasa hanya boleh menampilkan paket promosi jasa. Paket dari
-  // penyimpanan admin memakai properti `benefits`, sementara UI lama membaca
-  // `features` sehingga tab Promosi Saya dapat melempar error saat dirender.
+  
   const promoPackages = promotionService.getPackagesByTypeSync("jasa").map((pkg) => ({
     ...pkg,
     features: pkg.features || pkg.benefits || [],
@@ -351,7 +612,7 @@ function JasaDashboardContent() {
   // Listener untuk sinkronisasi otomatis promosi dan pembayaran
   useEffect(() => {
     const handlePromosUpdate = () => {
-      const updated = promotionService.getPromotionsSync({ ownerId: provider?.id || "fajar-ramadhan-desain" });
+      const updated = promotionService.getPromotionsSync({ ownerId: provider?.id || "" });
       setProviderPromotions(updated);
     };
     window.addEventListener("bantuin_promotions_updated", handlePromosUpdate);
@@ -362,31 +623,22 @@ function JasaDashboardContent() {
     };
   }, [provider?.id]);
 
-  // ── Laporan & Sengketa State (Section 7 & 28) ───────────────────────────
+  // ── Laporan & Sengketa State (Sinkron ke AppContext & Backend) ───────────
   const [providerReports, setProviderReports] = useState(() => {
-    return [
-      {
-        id: "rep-prov-01",
-        targetName: "Dimas Anggara (Klien)",
-        orderId: "ord-8819",
-        reason: "Permintaan revisi di luar batas kesepakatan paket",
-        description: "Klien meminta penambahan 5 halaman desain UI baru yang tidak termasuk dalam paket kesepakatan awal.",
-        status: "investigating",
-        createdAt: new Date(Date.now() - 24 * 3600000).toISOString(),
-      },
-    ];
+    const list = reportService.getReportsSync();
+    return list.filter((r) => r.reporterId === provider?.id || r.targetId === provider?.id);
   });
   const [isDisputeModalOpen, setIsDisputeModalOpen] = useState(false);
   const [disputeForm, setDisputeForm] = useState({
     targetName: "",
     orderId: "",
-    reason: "",
+    reason: "Klien Membatalkan Sepihak di Tengah Proyek",
     description: "",
   });
 
   const activePromotionsCount = providerPromotions.filter((p) => p.status === "active").length;
 
-  // Sidebar navigation links (13 Menus sesuai Section 7)
+  // Sidebar navigation links
   const sidebarLinks = [
     { id: "overview", label: "Ringkasan Jasa", icon: LayoutDashboard },
     { id: "catalog", label: "Katalog Layanan", icon: Layers, count: provider.catalog?.length || 0 },
@@ -398,13 +650,13 @@ function JasaDashboardContent() {
     { id: "reviews", label: "Ulasan Pelanggan", icon: Star, count: provider.reviews?.length || 0 },
     { id: "settings", label: "Tarif & Ketersediaan", icon: Settings },
     { id: "promotions", label: "Promosi Saya", icon: Rocket, count: activePromotionsCount > 0 ? "Aktif" : 0 },
-    { id: "chat", label: "Chat Customer", icon: MessageSquare, count: 2 },
+    { id: "chat", label: "Chat Customer", icon: MessageSquare, count: (orderRooms || []).filter((r) => r.helperId === currentUser?.id || r.helper?.id === currentUser?.id).length },
     { id: "notifications", label: "Notifikasi", icon: Bell, count: providerNotifications.filter((n) => !n.isRead).length },
     { id: "disputes", label: "Laporan & Sengketa", icon: AlertTriangle, count: providerReports.filter((r) => r.status === "investigating" || r.status === "open").length },
   ];
 
   // -------------------------------------------------------------
-  // HANDLERS: KATALOG JASA (DEDICATED FULL PAGE - SECTION 85)
+  // HANDLERS: KATALOG JASA (TERHUBUNG KE DATABASE POSTGRESQL)
   // -------------------------------------------------------------
   const handleOpenAddCatalog = () => {
     router.push("/jasa/dashboard/katalog/tambah");
@@ -414,7 +666,7 @@ function JasaDashboardContent() {
     router.push(`/jasa/dashboard/katalog/${item.id}/edit`);
   };
 
-  const handleSaveCatalog = (e) => {
+  const handleSaveCatalog = async (e) => {
     e.preventDefault();
     if (!catalogForm.title || !catalogForm.price) {
       addToast?.("Form Belum Lengkap", "Silakan isi judul dan tarif layanan.", "error");
@@ -430,9 +682,54 @@ function JasaDashboardContent() {
       ? (customCategoryName.trim() || "Layanan Kustom")
       : catalogForm.category;
 
+    let savedId = editingCatalogItem?.id;
+
+    try {
+      const token = await authService.getValidAccessToken();
+      if (editingCatalogItem && typeof editingCatalogItem.id === "string" && editingCatalogItem.id.length > 20) {
+        // PATCH ke database
+        await fetch(`/api/services/${editingCatalogItem.id}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            title: catalogForm.title.trim(),
+            category: resolvedCategory,
+            description: catalogForm.desc || "",
+            startingPrice: Number(catalogForm.price),
+            portfolioUrls: catalogForm.image ? [catalogForm.image] : [],
+          }),
+        });
+      } else if (!editingCatalogItem) {
+        // POST ke database
+        const res = await fetch("/api/services", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            title: catalogForm.title.trim(),
+            category: resolvedCategory,
+            description: catalogForm.desc || "",
+            startingPrice: Number(catalogForm.price),
+            portfolioUrls: catalogForm.image ? [catalogForm.image] : [],
+          }),
+        });
+        const resJson = await res.json().catch(() => ({}));
+        if (resJson?.data?.id) {
+          savedId = resJson.data.id;
+        }
+      }
+    } catch (err) {
+      console.warn("Gagal simpan ke DB API:", err);
+    }
+
     let updatedCatalog;
     if (editingCatalogItem) {
-      updatedCatalog = provider.catalog.map((c) =>
+      updatedCatalog = (provider.catalog || []).map((c) =>
         c.id === editingCatalogItem.id
           ? {
               ...c,
@@ -451,7 +748,7 @@ function JasaDashboardContent() {
       );
     } else {
       const newItem = {
-        id: `cat-${Date.now()}`,
+        id: savedId || `cat-${Date.now()}`,
         title: catalogForm.title,
         category: resolvedCategory,
         price: Number(catalogForm.price),
@@ -471,133 +768,276 @@ function JasaDashboardContent() {
       editingCatalogItem ? "Layanan katalog berhasil diperbarui." : "Layanan baru berhasil ditambahkan ke katalog."
     );
     setIsCatalogModalOpen(false);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("bantuin_service_updated"));
+    }
   };
 
-  const handleDeleteCatalog = (id) => {
-    const updated = provider.catalog.filter((c) => c.id !== id);
+  const handleDeleteCatalog = async (id) => {
+    try {
+      const token = await authService.getValidAccessToken();
+      if (token && id && typeof id === "string" && id.length > 20) {
+        await fetch(`/api/services/${id}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+    } catch (err) {
+      console.warn("Gagal hapus layanan dari API:", err);
+    }
+    const updated = (provider.catalog || []).filter((c) => c.id !== id);
     handleUpdateProvider({ ...provider, catalog: updated }, "Layanan katalog berhasil dihapus.");
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("bantuin_service_updated"));
+    }
   };
 
   // -------------------------------------------------------------
-  // HANDLERS: PAKET BUNDLING
+  // HANDLERS: PAKET BUNDLING (DENGAN LOCALSTORAGE PERSISTENCE)
   // -------------------------------------------------------------
+  const handleOpenAddPackage = () => {
+    setIsPackageModalOpen(true);
+  };
+
   const handleSavePackage = (e) => {
     e.preventDefault();
     if (!packageForm.name || !packageForm.price) {
-      addToast?.("Form Belum Lengkap", "Silakan lengkapi nama dan harga paket.", "error");
+      addToast?.("Form Belum Lengkap", "Silakan isi nama dan harga paket.", "error");
       return;
     }
-
-    const features = packageForm.featuresStr
-      .split("\n")
-      .map((f) => f.trim())
-      .filter(Boolean);
-
     const newPkg = {
       id: `pkg-${Date.now()}`,
       name: packageForm.name,
       tier: packageForm.tier,
       price: Number(packageForm.price),
       duration: packageForm.duration,
-      description: packageForm.description || "Paket pengerjaan lengkap dengan revisi terjamin.",
-      features,
+      description: packageForm.description,
+      features: packageForm.featuresStr.split("\n").map((f) => f.trim()).filter(Boolean),
       isPopular: packageForm.isPopular,
     };
-
-    const updatedPackages = [...(provider.packages || []), newPkg];
-    handleUpdateProvider({ ...provider, packages: updatedPackages }, "Paket bundling baru berhasil disimpan.");
+    const updated = [newPkg, ...(provider.packages || [])];
+    handleUpdateProvider({ ...provider, packages: updated }, "Paket bundling baru berhasil ditambahkan.");
+    if (typeof window !== "undefined" && provider.id) {
+      localStorage.setItem(`bantuin_provider_packages_${provider.id}`, JSON.stringify(updated));
+    }
     setIsPackageModalOpen(false);
+    setPackageForm({
+      name: "",
+      tier: "Paket Hemat",
+      price: 100000,
+      duration: "1 - 2 Hari",
+      description: "",
+      featuresStr: "2 Konsep Desain Pilihan\nFile PNG Transparan & JPEG\nRevisi 2 Kali\nPengerjaan Cepat",
+      isPopular: false,
+    });
   };
 
   const handleDeletePackage = (id) => {
-    const updated = provider.packages.filter((p) => p.id !== id);
+    const updated = (provider.packages || []).filter((p) => p.id !== id);
     handleUpdateProvider({ ...provider, packages: updated }, "Paket bundling berhasil dihapus.");
+    if (typeof window !== "undefined" && provider.id) {
+      localStorage.setItem(`bantuin_provider_packages_${provider.id}`, JSON.stringify(updated));
+    }
   };
 
   // -------------------------------------------------------------
-  // HANDLERS: FOTO PORTOFOLIO
+  // HANDLERS: PORTOFOLIO & FOTO KARYA (DENGAN PERSISTENCE & UPLOAD)
   // -------------------------------------------------------------
+  const handleOpenAddPortfolio = () => {
+    setIsPortfolioModalOpen(true);
+  };
+
   const handlePortfolioPhotoFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
       const res = await imageService.uploadImage(file, "portfolio");
-      if (res.success && res.url) {
+      if (res?.success && res.url) {
         setPortfolioForm((prev) => ({ ...prev, url: res.url }));
-        addToast?.("Foto Terunggah", "Foto karya berhasil dimuat.");
+        addToast?.("Foto Terunggah", "Foto portofolio siap disimpan.");
+      } else {
+        const localUrl = URL.createObjectURL(file);
+        setPortfolioForm((prev) => ({ ...prev, url: localUrl }));
       }
-    } catch (err) {
-      addToast?.("Gagal Upload", err.message || "Gagal mengunggah foto.", "error");
+    } catch {
+      const localUrl = URL.createObjectURL(file);
+      setPortfolioForm((prev) => ({ ...prev, url: localUrl }));
     }
   };
 
   const handleSavePortfolio = (e) => {
     e.preventDefault();
-    if (!portfolioForm.title || !portfolioForm.url) {
-      addToast?.("Form Belum Lengkap", "Silakan isi judul dan foto portofolio.", "error");
+    if (!portfolioForm.title) {
+      addToast?.("Form Belum Lengkap", "Silakan isi judul karya / projek.", "error");
+      return;
+    }
+    const newPhoto = {
+      id: `port-${Date.now()}`,
+      title: portfolioForm.title,
+      category: portfolioForm.category,
+      url: portfolioForm.url,
+      description: portfolioForm.description,
+    };
+    const updated = [newPhoto, ...(provider.portfolioPhotos || [])];
+    handleUpdateProvider({ ...provider, portfolioPhotos: updated }, "Foto portofolio berhasil ditambahkan.");
+    if (typeof window !== "undefined" && provider.id) {
+      localStorage.setItem(`bantuin_provider_portfolio_${provider.id}`, JSON.stringify(updated));
+    }
+    setIsPortfolioModalOpen(false);
+    setPortfolioForm({
+      title: "",
+      category: "Branding",
+      url: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80",
+      description: "",
+    });
+  };
+
+  const handleDeletePortfolio = (identifier) => {
+    const updated = (provider.portfolioPhotos || []).filter((p, i) => {
+      if (typeof identifier === "number") return i !== identifier;
+      return p.id !== identifier && i !== identifier;
+    });
+    handleUpdateProvider({ ...provider, portfolioPhotos: updated }, "Foto portofolio berhasil dihapus.");
+    if (typeof window !== "undefined" && provider.id) {
+      localStorage.setItem(`bantuin_provider_portfolio_${provider.id}`, JSON.stringify(updated));
+    }
+  };
+
+  // -------------------------------------------------------------
+  // HANDLERS: PROFIL & KEAHLIAN (PUT /api/user/profile)
+  // -------------------------------------------------------------
+  const handleSaveProfile = async (e) => {
+    e.preventDefault();
+    try {
+      const skillsArr = profileForm.skillsStr.split(",").map((s) => s.trim()).filter(Boolean);
+      const updatedProvider = {
+        ...provider,
+        name: profileForm.name,
+        brandTitle: profileForm.brandTitle,
+        bio: profileForm.bio,
+        location: profileForm.location,
+        address: profileForm.address,
+        skills: skillsArr,
+      };
+      handleUpdateProvider(updatedProvider, "Profil keahlian berhasil diperbarui.");
+
+      const token = await authService.getValidAccessToken();
+      if (token) {
+        await fetch("/api/user/profile", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            fullName: profileForm.name,
+            bio: profileForm.bio,
+            campusName: profileForm.location,
+            brandTitle: profileForm.brandTitle,
+            partnerBusinessName: profileForm.brandTitle,
+            address: profileForm.address,
+            partnerAddress: profileForm.address,
+            skills: skillsArr,
+          }),
+        });
+      }
+
+      if (typeof setCurrentUser === "function") {
+        setCurrentUser((prev) => ({
+          ...(prev || {}),
+          fullName: profileForm.name,
+          bio: profileForm.bio,
+          campusName: profileForm.location,
+          brandTitle: profileForm.brandTitle,
+          partnerBusinessName: profileForm.brandTitle,
+          partnerAddress: profileForm.address,
+          skills: skillsArr,
+        }));
+      }
+
+      if (typeof window !== "undefined" && provider.id) {
+        localStorage.setItem(`bantuin_provider_profile_${provider.id}`, JSON.stringify(updatedProvider));
+      }
+    } catch (err) {
+      addToast?.("Gagal Simpan Profil", err.message || "Terjadi kesalahan saat menyimpan profil.", "error");
+    }
+  };
+
+  // -------------------------------------------------------------
+  // HANDLERS: PENGATURAN TARIF & KETERSEDIAAN
+  // -------------------------------------------------------------
+  const handleSaveSettings = (e) => {
+    e.preventDefault();
+    if (typeof updateProviderSettings === "function") {
+      updateProviderSettings(settingsForm);
+    }
+    handleUpdateProvider(
+      {
+        ...provider,
+        settings: settingsForm,
+      },
+      "Pengaturan tarif & ketersediaan berhasil disimpan."
+    );
+  };
+
+  // -------------------------------------------------------------
+  // HANDLERS: PENARIKAN SALDO DOMPET (POST /api/profile/wallet)
+  // -------------------------------------------------------------
+  const handleWithdrawSubmit = async (e) => {
+    e.preventDefault();
+    const withdrawAmount = Number(withdrawForm.amount);
+    const available = effectiveAvailableBalance;
+
+    if (!withdrawAmount || withdrawAmount < 20000) {
+      addToast?.("Nominal Tidak Valid", "Minimal penarikan dana adalah Rp20.000.", "error");
+      return;
+    }
+    if (withdrawAmount > available) {
+      addToast?.("Saldo Tidak Cukup", "Nominal penarikan melebihi saldo yang tersedia.", "error");
+      return;
+    }
+    if (!withdrawForm.accountNumber || !withdrawForm.accountHolder) {
+      addToast?.("Data Belum Lengkap", "Nomor rekening dan nama pemilik rekening wajib diisi.", "error");
       return;
     }
 
-    const newPhoto = {
-      url: portfolioForm.url,
-      title: portfolioForm.title,
-      description: portfolioForm.description || "Dokumentasi hasil karya untuk klien Bantuin.",
-      category: portfolioForm.category,
-    };
+    try {
+      const token = await authService.getValidAccessToken();
+      if (token) {
+        const res = await fetch("/api/profile/wallet", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            amount: withdrawAmount,
+            bankName: withdrawForm.bankName,
+            accountNumber: withdrawForm.accountNumber,
+            accountHolder: withdrawForm.accountHolder,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok || !json.success) {
+          throw new Error(json.message || "Gagal memproses penarikan saldo.");
+        }
+      }
 
-    const updatedPhotos = [newPhoto, ...(provider.portfolioPhotos || [])];
-    handleUpdateProvider({ ...provider, portfolioPhotos: updatedPhotos }, "Foto hasil karya berhasil ditambahkan.");
-    setIsPortfolioModalOpen(false);
-  };
+      if (typeof withdrawFunds === "function") {
+        withdrawFunds(
+          withdrawAmount,
+          withdrawForm.bankName,
+          withdrawForm.accountNumber,
+          withdrawForm.accountHolder
+        );
+      }
 
-  const handleDeletePortfolio = (idx) => {
-    const updated = provider.portfolioPhotos.filter((_, i) => i !== idx);
-    handleUpdateProvider({ ...provider, portfolioPhotos: updated }, "Foto portofolio berhasil dihapus.");
-  };
-
-  // -------------------------------------------------------------
-  // HANDLERS: PROFILE
-  // -------------------------------------------------------------
-  const handleSaveProfile = (e) => {
-    e.preventDefault();
-    const skills = profileForm.skillsStr
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    const updated = {
-      ...provider,
-      name: profileForm.name,
-      brandTitle: profileForm.brandTitle,
-      bio: profileForm.bio,
-      location: profileForm.location,
-      address: profileForm.address,
-      skills,
-    };
-
-    handleUpdateProvider(updated, "Profil penyedia jasa berhasil diperbarui.");
-  };
-
-  // -------------------------------------------------------------
-  // HANDLERS: PENARIKAN & SETTINGS
-  // -------------------------------------------------------------
-  const handleWithdrawSubmit = (e) => {
-    e.preventDefault();
-    const success = withdrawFunds({
-      amount: withdrawForm.amount,
-      bankName: withdrawForm.bankName,
-      accountNumber: withdrawForm.accountNumber,
-      accountHolder: withdrawForm.accountHolder,
-    });
-    if (success) {
+      await loadWalletData();
       setIsWithdrawModalOpen(false);
+      addToast?.("Pengajuan Berhasil", "Permintaan penarikan dana Anda telah terkirim dan segera diproses.");
+    } catch (err) {
+      addToast?.("Gagal Penarikan", err.message || "Terjadi kesalahan saat memproses penarikan dana.", "error");
     }
-  };
-
-  const handleSaveSettings = (e) => {
-    e.preventDefault();
-    updateProviderSettings(settingsForm);
-    addToast?.("Pengaturan Disimpan", "Preferensi tarif dan order berhasil diperbarui.");
   };
 
   // -------------------------------------------------------------
@@ -688,7 +1128,10 @@ function JasaDashboardContent() {
   const handleCancelPayment = async () => {
     if (!activePayment?.id) return;
     try {
-      await paymentService.cancelPayment(activePayment.id, "Dibatalkan oleh penyedia jasa");
+      await paymentService.cancelPayment(activePayment.id, "Dibatalkan oleh penyedia jasa", "promotion");
+      if (typeof promotionService.cancelPromotion === "function") {
+        await promotionService.cancelPromotion(activePayment.id, "Dibatalkan oleh penyedia jasa");
+      }
       const updated = promotionService.getPromotionsSync({ ownerId: provider.id });
       setProviderPromotions(updated);
       setPromoModalStep("cancelled");
@@ -734,6 +1177,15 @@ function JasaDashboardContent() {
         description: disputeForm.description,
       });
       setProviderReports([newReport, ...providerReports]);
+      if (typeof submitReport === "function") {
+        submitReport({
+          targetType: "client",
+          targetId: disputeForm.orderId || `client-${Date.now()}`,
+          targetName: disputeForm.targetName || "Klien Terlapor",
+          reason: disputeForm.reason,
+          description: disputeForm.description,
+        });
+      }
       setIsDisputeModalOpen(false);
       setDisputeForm({ targetName: "", orderId: "", reason: "", description: "" });
       addToast?.("Laporan Terkirim", "Laporan pengaduan berhasil dikirim ke Admin Pusat Bantuin.");
@@ -850,16 +1302,6 @@ function JasaDashboardContent() {
 
         {/* Bottom CTA / Cross Portal Switchers */}
         <div className="pt-4 border-t border-slate-100 space-y-2">
-          <Link
-            href="/profile"
-            className="flex items-center justify-between w-full px-3 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-bold transition border border-slate-200/80"
-          >
-            <div className="flex items-center gap-2">
-              <User className="w-3.5 h-3.5 text-slate-600" />
-              <span>Profil Akun Saya</span>
-            </div>
-            <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-          </Link>
 
           {(currentUser?.isPartner || currentUser?.accountRole === "partner" || currentUser?.accountType === "mitra" || currentUser?.isAdmin) && (
             <Link
@@ -875,7 +1317,7 @@ function JasaDashboardContent() {
           )}
 
           <Link
-            href={`/jasa/penyedia/${provider.id}`}
+            href={`/profile/${provider.id}`}
             target="_blank"
             className="flex items-center justify-center gap-1.5 w-full py-2 rounded-xl text-slate-600 hover:text-slate-900 text-xs font-medium transition"
           >
@@ -930,6 +1372,9 @@ function JasaDashboardContent() {
         {/* Content Body */}
         <div className="p-3 sm:p-6 md:p-8 space-y-5 max-w-[1240px] w-full pb-24 lg:pb-8">
           
+          {/* KYC Status Verification Banner */}
+          <VerificationBanner user={currentUser || provider} />
+
           {/* ============================================================ */}
           {/* VIEW 1: OVERVIEW (RINGKASAN)                                  */}
           {/* ============================================================ */}
@@ -985,25 +1430,48 @@ function JasaDashboardContent() {
                         <span className="px-1.5 py-0.5 rounded-md bg-blue-50 text-[#1683FF] text-[9px] sm:text-[11px] font-extrabold uppercase border border-blue-100">
                           {provider.type === "helper" ? "Helper Terverifikasi" : "Penyedia Jasa"}
                         </span>
-                        <span className="px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[9px] sm:text-[11px] font-bold border border-emerald-100 flex items-center gap-1">
-                          <ShieldCheck className="w-3 h-3 text-emerald-600" />
-                          <span>KTP Terverifikasi</span>
-                        </span>
+                        {provider.verificationStatus === "verified" ? (
+                          <span className="px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[9px] sm:text-[11px] font-bold border border-emerald-100 flex items-center gap-1">
+                            <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                            <span>KTP Terverifikasi</span>
+                          </span>
+                        ) : provider.verificationStatus === "pending_review" ? (
+                          <span className="px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-700 text-[9px] sm:text-[11px] font-bold border border-blue-100 flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-[#1683FF]" />
+                            <span>KYC Menunggu Review</span>
+                          </span>
+                        ) : provider.verificationStatus === "rejected" ? (
+                          <span className="px-1.5 py-0.5 rounded-md bg-rose-50 text-rose-700 text-[9px] sm:text-[11px] font-bold border border-rose-100 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3 text-rose-600" />
+                            <span>KYC Ditolak</span>
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 text-[9px] sm:text-[11px] font-bold border border-amber-200 flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3 text-amber-600" />
+                            <span>Belum Verifikasi KTP</span>
+                          </span>
+                        )}
                       </div>
 
                       <h2 className="text-base sm:text-2xl font-black text-slate-900 tracking-tight">
                         {provider.name}
                       </h2>
 
-                      <p className="text-[11px] sm:text-sm font-semibold text-slate-600 truncate">
-                        {provider.brandTitle} &middot; <span className="text-[#1683FF]">{provider.location}</span>
+                      <p className="text-[11px] sm:text-sm font-semibold text-slate-700 truncate">
+                        {provider.brandTitle} &middot; <span className="text-[#1683FF] font-bold">{provider.location}</span>
                       </p>
+                      {provider.address && (
+                        <p className="text-[10px] sm:text-xs font-semibold text-slate-600 flex items-center gap-1 mt-0.5">
+                          <MapPin className="w-3 h-3 text-[#1683FF] shrink-0" />
+                          <span className="truncate">{provider.address}</span>
+                        </p>
+                      )}
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2 sm:pb-1">
                     <Link
-                      href={`/jasa/penyedia/${provider.id}`}
+                      href={`/profile/${provider.id}`}
                       target="_blank"
                       className="px-3 py-1.5 sm:px-4 sm:py-2 bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-[11px] sm:text-xs font-bold rounded-xl shadow-xs transition inline-flex items-center gap-1.5 w-full sm:w-auto justify-center"
                     >
@@ -1017,41 +1485,41 @@ function JasaDashboardContent() {
               {/* 4 Metric Cards — Grid 2 Kolom Kiri dan Kanan di Mobile */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
                 <div className="bg-white border border-slate-200/90 rounded-2xl p-3 sm:p-5 shadow-2xs">
-                  <div className="text-[10px] sm:text-xs text-slate-500 flex items-center gap-1 sm:gap-1.5 mb-1 font-medium truncate">
+                  <div className="text-[10px] sm:text-xs text-slate-600 flex items-center gap-1 sm:gap-1.5 mb-1 font-bold truncate">
                     <DollarSign className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-600 shrink-0" />
                     <span className="truncate">Saldo Dicairkan</span>
                   </div>
                   <div className="text-sm sm:text-2xl font-black text-slate-900 truncate">
-                    {formatIDR(mitraAvailableBalance)}
+                    {formatIDR(effectiveAvailableBalance)}
                   </div>
                   <button 
                     onClick={() => setActiveMenu("wallet")}
-                    className="text-[10px] sm:text-[11px] text-[#1683FF] hover:underline mt-1 font-semibold block cursor-pointer"
+                    className="text-[10px] sm:text-[11px] text-[#1683FF] hover:underline mt-1 font-bold block cursor-pointer"
                   >
                     Tarik Dana →
                   </button>
                 </div>
 
                 <div className="bg-white border border-slate-200/90 rounded-2xl p-3 sm:p-5 shadow-2xs">
-                  <div className="text-[10px] sm:text-xs text-slate-500 flex items-center gap-1 sm:gap-1.5 mb-1 font-medium truncate">
+                  <div className="text-[10px] sm:text-xs text-slate-600 flex items-center gap-1 sm:gap-1.5 mb-1 font-bold truncate">
                     <Layers className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#1683FF] shrink-0" />
                     <span className="truncate">Layanan Aktif</span>
                   </div>
                   <div className="text-sm sm:text-2xl font-black text-slate-900">
                     {provider.catalog?.length || 0} Layanan
                   </div>
-                  <div className="text-[10px] sm:text-[11px] text-slate-500 mt-1 truncate">Di etalase publik</div>
+                  <div className="text-[10px] sm:text-[11px] text-slate-600 font-semibold mt-1 truncate">Di etalase publik</div>
                 </div>
 
                 <div className="bg-white border border-slate-200/90 rounded-2xl p-3 sm:p-5 shadow-2xs">
-                  <div className="text-[10px] sm:text-xs text-slate-500 flex items-center gap-1 sm:gap-1.5 mb-1 font-medium truncate">
+                  <div className="text-[10px] sm:text-xs text-slate-600 flex items-center gap-1 sm:gap-1.5 mb-1 font-bold truncate">
                     <Receipt className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#1683FF] shrink-0" />
                     <span className="truncate">Pesanan Selesai</span>
                   </div>
                   <div className="text-sm sm:text-2xl font-black text-slate-900">
-                    {provider.completedJobs || 72} Projek
+                    {providerOrders.filter((o) => o.status === "Selesai").length || provider.completedTasks || 0} Projek
                   </div>
-                  <div className="text-[10px] sm:text-[11px] text-emerald-600 mt-1 font-semibold truncate">100% Kepuasan</div>
+                  <div className="text-[10px] sm:text-[11px] text-emerald-600 mt-1 font-bold truncate">100% Kepuasan</div>
                 </div>
 
                 <div className="bg-white border border-slate-200/90 rounded-2xl p-3 sm:p-5 shadow-2xs">
@@ -1060,9 +1528,9 @@ function JasaDashboardContent() {
                     <span className="truncate">Rating Jasa</span>
                   </div>
                   <div className="text-sm sm:text-2xl font-black text-slate-900">
-                    {provider.rating} / 5.0
+                    {Number(provider.rating || 0).toFixed(1)} / 5.0
                   </div>
-                  <div className="text-[10px] sm:text-[11px] text-slate-500 mt-1 truncate">{provider.reviewsCount} ulasan</div>
+                  <div className="text-[10px] sm:text-[11px] text-slate-500 mt-1 truncate">{provider.reviewsCount || 0} ulasan</div>
                 </div>
               </div>
 
@@ -1082,89 +1550,55 @@ function JasaDashboardContent() {
                 </div>
 
                 <div className="divide-y divide-slate-100">
-                  {/* Order 1 */}
-                  <div className="py-2.5 sm:py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4">
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      {/* Client Profile Avatar */}
-                      <div className="relative shrink-0">
-                        <div className="w-10 h-10 rounded-full bg-blue-100 text-[#1683FF] font-black text-xs flex items-center justify-center ring-2 ring-blue-50 shadow-2xs">
-                          DA
-                        </div>
-                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white absolute bottom-0 right-0" title="Online" />
-                      </div>
-
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <h4 className="font-bold text-xs sm:text-sm text-slate-900 truncate">Desain Logo &amp; Identitas Brand</h4>
-                          <span className="text-[9px] font-mono font-bold text-[#1683FF] bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded-md shrink-0">
-                            #JS-01
-                          </span>
-                        </div>
-                        <p className="text-[10px] sm:text-[11px] text-slate-500 truncate mt-0.5">
-                          Klien: <span className="font-semibold text-slate-700">Dimas Anggara</span> &middot; Draft Dikirim
-                        </p>
-                      </div>
+                  {providerOrders.filter((o) => o.status === "Sedang Dikerjakan" || o.status === "Menunggu Konfirmasi").length === 0 ? (
+                    <div className="py-8 text-center text-xs text-slate-400">
+                      Belum ada proyek/pesanan yang sedang berjalan.
                     </div>
+                  ) : (
+                    providerOrders
+                      .filter((o) => o.status === "Sedang Dikerjakan" || o.status === "Menunggu Konfirmasi")
+                      .map((ord) => (
+                        <div key={ord.id} className="py-2.5 sm:py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4">
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <div className="relative shrink-0">
+                              <div className="w-10 h-10 rounded-full bg-blue-100 text-[#1683FF] font-black text-xs flex items-center justify-center ring-2 ring-blue-50 shadow-2xs">
+                                {ord.customerName ? ord.customerName.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase() : "U"}
+                              </div>
+                              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white absolute bottom-0 right-0" title="Online" />
+                            </div>
 
-                    <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 shrink-0">
-                      <div className="text-left sm:text-right">
-                        <div className="font-extrabold text-xs text-slate-900">Rp 175.000</div>
-                        <div className="text-[9px] text-emerald-600 font-semibold flex items-center gap-1">
-                          <ShieldCheck className="w-3 h-3 text-emerald-500" />
-                          <span>Dana Terkunci</span>
-                        </div>
-                      </div>
-                      <Link 
-                        href="/chat?room=order-room-102"
-                        className="text-xs font-bold px-3 py-1.5 rounded-xl bg-[#1683FF] text-white hover:bg-[#0F6FE5] transition shadow-2xs flex items-center gap-1 shrink-0"
-                      >
-                        <MessageSquare className="w-3.5 h-3.5" />
-                        <span>Chat Order</span>
-                      </Link>
-                    </div>
-                  </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <h4 className="font-bold text-xs sm:text-sm text-slate-900 truncate">{ord.serviceTitle}</h4>
+                                <span className="text-[9px] font-mono font-bold text-[#1683FF] bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded-md shrink-0">
+                                  #{ord.orderNumber || ord.id}
+                                </span>
+                              </div>
+                              <p className="text-[10px] sm:text-[11px] text-slate-500 truncate mt-0.5">
+                                Klien: <span className="font-semibold text-slate-700">{ord.customerName}</span> &middot; {ord.status}
+                              </p>
+                            </div>
+                          </div>
 
-                  {/* Order 2 */}
-                  <div className="py-2.5 sm:py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4">
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      {/* Client Profile Avatar */}
-                      <div className="relative shrink-0">
-                        <div className="w-10 h-10 rounded-full bg-purple-100 text-purple-600 font-black text-xs flex items-center justify-center ring-2 ring-purple-50 shadow-2xs">
-                          SN
+                          <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 shrink-0">
+                            <div className="text-left sm:text-right">
+                              <div className="font-extrabold text-xs text-slate-900">{formatIDR(ord.amount)}</div>
+                              <div className="text-[9px] text-emerald-600 font-semibold flex items-center gap-1">
+                                <ShieldCheck className="w-3 h-3 text-emerald-500" />
+                                <span>Dana Terkunci</span>
+                              </div>
+                            </div>
+                            <Link 
+                              href="/chat"
+                              className="text-xs font-bold px-3 py-1.5 rounded-xl bg-[#1683FF] text-white hover:bg-[#0F6FE5] transition shadow-2xs flex items-center gap-1 shrink-0"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5" />
+                              <span>Chat Order</span>
+                            </Link>
+                          </div>
                         </div>
-                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white absolute bottom-0 right-0" title="Online" />
-                      </div>
-
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <h4 className="font-bold text-xs sm:text-sm text-slate-900 truncate">Desain Kemasan &amp; Label Produk UMKM</h4>
-                          <span className="text-[9px] font-mono font-bold text-purple-600 bg-purple-50 border border-purple-100 px-1.5 py-0.5 rounded-md shrink-0">
-                            #JS-02
-                          </span>
-                        </div>
-                        <p className="text-[10px] sm:text-[11px] text-slate-500 truncate mt-0.5">
-                          Klien: <span className="font-semibold text-slate-700">Siti Nurhaliza</span> &middot; Sesi Berlangsung
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between sm:justify-end gap-3 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 shrink-0">
-                      <div className="text-left sm:text-right">
-                        <div className="font-extrabold text-xs text-slate-900">Rp 120.000</div>
-                        <div className="text-[9px] text-emerald-600 font-semibold flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                          <span>Siap Cair</span>
-                        </div>
-                      </div>
-                      <Link 
-                        href="/chat?room=order-room-102"
-                        className="text-xs font-bold px-3 py-1.5 rounded-xl bg-slate-800 text-white hover:bg-slate-900 transition shadow-2xs flex items-center gap-1 shrink-0"
-                      >
-                        <MessageSquare className="w-3.5 h-3.5" />
-                        <span>Chat Order</span>
-                      </Link>
-                    </div>
-                  </div>
+                      ))
+                  )}
                 </div>
               </div>
             </>
@@ -1193,99 +1627,124 @@ function JasaDashboardContent() {
 
               {/* Katalog — Grid 2 Kolom Kiri dan Kanan Rapi & Simetris (Bukan Doble Card) */}
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5 sm:gap-4 pt-1">
-                {provider.catalog?.map((item) => (
-                  <div
-                    key={item.id}
-                    className="rounded-2xl border border-slate-200/90 bg-white overflow-hidden shadow-2xs hover:shadow-md transition-all group flex flex-col justify-between"
-                  >
-                    <div>
-                      {/* Foto Layanan (Aspect 16:10) */}
-                      <Link
-                        href={`/jasa/dashboard/katalog/${item.id}`}
-                        className="block relative aspect-[16/10] w-full bg-slate-100 overflow-hidden cursor-pointer"
-                      >
-                        <img
-                          src={item.image}
-                          alt={item.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        />
-                        <div className="absolute top-2 left-2 flex items-center gap-1">
-                          <span className="px-1.5 sm:px-2 py-0.5 rounded-md text-[9px] sm:text-[10px] font-extrabold uppercase bg-black/60 text-white backdrop-blur-xs">
-                            {item.category}
-                          </span>
-                        </div>
-                        {item.locationType && (
-                          <div className="absolute top-2 right-2">
-                            <span className="px-1.5 sm:px-2 py-0.5 rounded-md text-[8px] sm:text-[10px] font-bold bg-white/90 text-slate-700 backdrop-blur-xs shadow-xs">
-                              {item.locationType === "online" ? "Online" : item.locationType === "onsite" ? "Di Tempat" : "Lokasi"}
-                            </span>
-                          </div>
-                        )}
-                      </Link>
-
-                      {/* Detail Judul & Deskripsi */}
-                      <div className="p-2.5 sm:p-4 space-y-1">
-                        <Link href={`/jasa/dashboard/katalog/${item.id}`} className="block">
-                          <h4 className="font-bold text-xs sm:text-sm text-slate-900 group-hover:text-[#1683FF] transition line-clamp-2 leading-snug min-h-[32px] sm:min-h-[40px]">
-                            {item.title}
-                          </h4>
-                        </Link>
-                        {item.desc && (
-                          <p className="text-[10px] sm:text-xs text-slate-500 line-clamp-2 leading-relaxed hidden xs:block">
-                            {item.desc}
-                          </p>
-                        )}
-                      </div>
+                {(!provider.catalog || provider.catalog.length === 0) ? (
+                  <div className="col-span-full bg-white border border-slate-200/90 rounded-2xl p-8 sm:p-12 text-center shadow-2xs">
+                    <div className="w-14 h-14 rounded-2xl bg-blue-50 text-[#1683FF] flex items-center justify-center mx-auto mb-3">
+                      <Layers className="w-7 h-7" />
                     </div>
-
-                    {/* Footer Tarif & Tombol Aksi */}
-                    <div className="p-2 sm:p-3 bg-slate-50/80 border-t border-slate-100 flex flex-col gap-1.5 mt-auto">
-                      <div className="flex items-baseline justify-between gap-1">
-                        <div>
-                          <span className="text-[9px] text-slate-400 block uppercase font-bold tracking-wider">Tarif</span>
-                          <div className="font-black text-xs sm:text-sm text-[#1683FF]">
-                            {formatIDR(item.price)}
-                            {item.unit && <span className="text-[9px] text-slate-400 font-normal ml-0.5">/{item.unit}</span>}
-                          </div>
-                        </div>
-                        <Link
-                          href={`/jasa/${item.id}`}
-                          target="_blank"
-                          className="px-2 py-0.5 rounded-md bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-[10px] font-bold inline-flex items-center gap-0.5 transition shadow-2xs shrink-0"
-                          title="Halaman Publik"
-                        >
-                          <span>Publik</span>
-                          <ExternalLink className="w-2.5 h-2.5" />
-                        </Link>
-                      </div>
-
-                      <div className="flex items-center gap-1 pt-1.5 border-t border-slate-200/60">
+                    <h4 className="font-bold text-sm sm:text-base text-slate-800 mb-1">Belum Ada Layanan di Katalog</h4>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto mb-4">
+                      Halaman ini bersih untuk pengujian fitur. Mulai tawarkan keahlian Anda dengan menambahkan layanan satuan pertama.
+                    </p>
+                    <Link
+                      href="/jasa/dashboard/katalog/tambah"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#1683FF] text-white text-xs font-bold hover:bg-[#0F6FE5] transition shadow-xs"
+                    >
+                      <PlusCircle className="w-4 h-4" />
+                      <span>Tambah Layanan Baru</span>
+                    </Link>
+                  </div>
+                ) : (
+                  provider.catalog.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-2xl border border-slate-200/90 bg-white overflow-hidden shadow-2xs hover:shadow-md transition-all group flex flex-col justify-between"
+                    >
+                      <div>
+                        {/* Foto Layanan (Aspect 16:10) */}
                         <Link
                           href={`/jasa/dashboard/katalog/${item.id}`}
-                          className="flex-1 py-1 rounded-md text-slate-600 hover:bg-white hover:text-[#1683FF] border border-slate-200/80 transition text-center flex items-center justify-center shadow-2xs"
-                          title="Lihat Detail"
+                          className="block relative aspect-[16/10] w-full bg-slate-100 overflow-hidden cursor-pointer"
                         >
-                          <Eye className="w-3 h-3" />
+                          <img
+                            src={item.image}
+                            alt={item.title}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          />
+                          <div className="absolute top-2 left-2 flex items-center gap-1">
+                            <span className="px-1.5 sm:px-2 py-0.5 rounded-md text-[9px] sm:text-[10px] font-extrabold uppercase bg-black/60 text-white backdrop-blur-xs">
+                              {item.category}
+                            </span>
+                          </div>
+                          {item.locationType && (
+                            <div className="absolute top-2 right-2">
+                              <span className="px-1.5 sm:px-2 py-0.5 rounded-md text-[8px] sm:text-[10px] font-bold bg-white/90 text-slate-700 backdrop-blur-xs shadow-xs">
+                                {item.locationType === "online" ? "Online" : item.locationType === "onsite" ? "Di Tempat" : "Lokasi"}
+                              </span>
+                            </div>
+                          )}
                         </Link>
-                        <Link
-                          href={`/jasa/dashboard/katalog/${item.id}/edit`}
-                          className="flex-1 py-1 rounded-md text-slate-600 hover:bg-white hover:text-[#1683FF] border border-slate-200/80 transition text-center flex items-center justify-center shadow-2xs"
-                          title="Edit Layanan"
-                        >
-                          <Edit3 className="w-3 h-3" />
-                        </Link>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteCatalog(item.id)}
-                          className="flex-1 py-1 rounded-md text-rose-500 hover:bg-rose-50 border border-slate-200/80 transition cursor-pointer flex items-center justify-center shadow-2xs"
-                          title="Hapus Layanan"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
+
+                        {/* Detail Judul & Deskripsi */}
+                        <div className="p-2.5 sm:p-4 space-y-1">
+                          <Link href={`/jasa/dashboard/katalog/${item.id}`} className="block">
+                            <h4 className="font-bold text-xs sm:text-sm text-slate-900 group-hover:text-[#1683FF] transition line-clamp-2 leading-snug min-h-[32px] sm:min-h-[40px]">
+                              {item.title}
+                            </h4>
+                          </Link>
+                          {item.address && (
+                            <div className="flex items-center gap-1 text-[10px] sm:text-[11px] font-semibold text-slate-700 truncate">
+                              <MapPin className="w-3 h-3 text-[#1683FF] shrink-0" />
+                              <span className="truncate">{item.address}</span>
+                            </div>
+                          )}
+                          {item.desc && (
+                            <p className="text-[10px] sm:text-xs text-slate-600 line-clamp-2 leading-relaxed hidden xs:block">
+                              {item.desc}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Footer Tarif & Tombol Aksi */}
+                      <div className="p-2 sm:p-3 bg-slate-50/80 border-t border-slate-100 flex flex-col gap-1.5 mt-auto">
+                        <div className="flex items-baseline justify-between gap-1">
+                          <div>
+                            <span className="text-[9px] text-slate-600 block uppercase font-bold tracking-wider">Tarif</span>
+                            <div className="font-black text-xs sm:text-sm text-[#1683FF]">
+                              {formatIDR(item.price)}
+                              {item.unit && <span className="text-[9px] text-slate-600 font-semibold ml-0.5">/{item.unit}</span>}
+                            </div>
+                          </div>
+                          <Link
+                            href={`/jasa/${item.id}`}
+                            target="_blank"
+                            className="px-2 py-0.5 rounded-md bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-[10px] font-bold inline-flex items-center gap-0.5 transition shadow-2xs shrink-0"
+                            title="Halaman Publik"
+                          >
+                            <span>Publik</span>
+                            <ExternalLink className="w-2.5 h-2.5" />
+                          </Link>
+                        </div>
+
+                        <div className="flex items-center gap-1 pt-1.5 border-t border-slate-200/60">
+                          <Link
+                            href={`/jasa/dashboard/katalog/${item.id}`}
+                            className="flex-1 py-1 rounded-md text-slate-600 hover:bg-white hover:text-[#1683FF] border border-slate-200/80 transition text-center flex items-center justify-center shadow-2xs"
+                            title="Lihat Detail"
+                          >
+                            <Eye className="w-3 h-3" />
+                          </Link>
+                          <Link
+                            href={`/jasa/dashboard/katalog/${item.id}/edit`}
+                            className="flex-1 py-1 rounded-md text-slate-600 hover:bg-white hover:text-[#1683FF] border border-slate-200/80 transition text-center flex items-center justify-center shadow-2xs"
+                            title="Edit Layanan"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCatalog(item.id)}
+                            className="flex-1 py-1 rounded-md text-rose-500 hover:bg-rose-50 border border-slate-200/80 transition cursor-pointer flex items-center justify-center shadow-2xs"
+                            title="Hapus Layanan"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
           )}
@@ -1313,82 +1772,101 @@ function JasaDashboardContent() {
 
               {/* Packages — Grid 2 Kolom Kiri dan Kanan Rapi & Simetris */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                {provider.packages?.map((pkg) => (
-                  <div
-                    key={pkg.id}
-                    className={`rounded-2xl p-5 border flex flex-col justify-between relative transition-all ${
-                      pkg.isPopular
-                        ? "border-[#1683FF] bg-gradient-to-b from-blue-50/40 to-white shadow-xs ring-1 ring-[#1683FF]/20"
-                        : "border-slate-200/90 bg-white shadow-2xs hover:border-slate-300"
-                    }`}
-                  >
-                    {pkg.isPopular && (
-                      <div className="absolute -top-2.5 right-4 bg-[#1683FF] text-white text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full shadow-xs flex items-center gap-1">
-                        <Star className="w-3 h-3 fill-white text-white" />
-                        <span>Paling Diminati</span>
-                      </div>
-                    )}
-
-                    <div className="space-y-3">
-                      <div>
-                        <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200/80 inline-block mb-1.5">
-                          {pkg.tier}
-                        </span>
-                        <Link href={`/jasa/dashboard/bundling/${pkg.id}`} className="hover:text-[#1683FF] transition block">
-                          <h4 className="font-black text-base text-slate-900 line-clamp-1">{pkg.name}</h4>
-                        </Link>
-                        <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed">{pkg.description}</p>
-                      </div>
-
-                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between">
-                        <div>
-                          <span className="text-[10px] text-slate-400 block uppercase font-medium">Tarif Paket</span>
-                          <div className="text-xl font-black text-[#1683FF]">{formatIDR(pkg.price)}</div>
-                        </div>
-                        <div className="text-[11px] text-slate-500 flex items-center gap-1">
-                          <Clock className="w-3.5 h-3.5 text-slate-400" />
-                          <span><strong>{pkg.duration}</strong></span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1.5 pt-0.5">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                          Fitur Termasuk:
-                        </span>
-                        {pkg.features?.slice(0, 3).map((feat, idx) => (
-                          <div key={idx} className="flex items-start gap-1.5 text-xs text-slate-600">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
-                            <span className="line-clamp-1">{feat}</span>
-                          </div>
-                        ))}
-                      </div>
+                {(!provider.packages || provider.packages.length === 0) ? (
+                  <div className="col-span-full bg-white border border-slate-200/90 rounded-2xl p-8 sm:p-12 text-center shadow-2xs">
+                    <div className="w-14 h-14 rounded-2xl bg-blue-50 text-[#1683FF] flex items-center justify-center mx-auto mb-3">
+                      <Package className="w-7 h-7" />
                     </div>
-
-                    <div className="pt-3.5 mt-3.5 border-t border-slate-100 flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <Link
-                          href={`/jasa/dashboard/bundling/${pkg.id}`}
-                          className="text-xs font-bold text-[#1683FF] hover:bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-200 transition"
-                        >
-                          Detail
-                        </Link>
-                        <Link
-                          href={`/jasa/dashboard/bundling/${pkg.id}/edit`}
-                          className="text-xs font-bold text-slate-600 hover:bg-slate-100 px-2.5 py-1.5 rounded-lg border border-slate-200 transition"
-                        >
-                          Edit
-                        </Link>
-                      </div>
-                      <button
-                        onClick={() => handleDeletePackage(pkg.id)}
-                        className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                        title="Hapus Paket"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                    <h4 className="font-bold text-sm sm:text-base text-slate-800 mb-1">Belum Ada Paket Bundling</h4>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto mb-4">
+                      Halaman ini bersih untuk pengujian fitur. Buat paket penawaran borongan (misal: Paket Hemat, Komplit, Premium) untuk memudahkan klien.
+                    </p>
+                    <Link
+                      href="/jasa/dashboard/bundling/tambah"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#1683FF] text-white text-xs font-bold hover:bg-[#0F6FE5] transition shadow-xs"
+                    >
+                      <PlusCircle className="w-4 h-4" />
+                      <span>Tambah Paket Baru</span>
+                    </Link>
                   </div>
-                ))}
+                ) : (
+                  provider.packages.map((pkg) => (
+                    <div
+                      key={pkg.id}
+                      className={`rounded-2xl p-5 border flex flex-col justify-between relative transition-all ${
+                        pkg.isPopular
+                          ? "border-[#1683FF] bg-gradient-to-b from-blue-50/40 to-white shadow-xs ring-1 ring-[#1683FF]/20"
+                          : "border-slate-200/90 bg-white shadow-2xs hover:border-slate-300"
+                      }`}
+                    >
+                      {pkg.isPopular && (
+                        <div className="absolute -top-2.5 right-4 bg-[#1683FF] text-white text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full shadow-xs flex items-center gap-1">
+                          <Star className="w-3 h-3 fill-white text-white" />
+                          <span>Paling Diminati</span>
+                        </div>
+                      )}
+
+                      <div className="space-y-3">
+                        <div>
+                          <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200/80 inline-block mb-1.5">
+                            {pkg.tier}
+                          </span>
+                          <Link href={`/jasa/dashboard/bundling/${pkg.id}`} className="hover:text-[#1683FF] transition block">
+                            <h4 className="font-black text-base text-slate-900 line-clamp-1">{pkg.name}</h4>
+                          </Link>
+                          <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed">{pkg.description}</p>
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between">
+                          <div>
+                            <span className="text-[10px] text-slate-400 block uppercase font-medium">Tarif Paket</span>
+                            <div className="text-xl font-black text-[#1683FF]">{formatIDR(pkg.price)}</div>
+                          </div>
+                          <div className="text-[11px] text-slate-500 flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5 text-slate-400" />
+                            <span><strong>{pkg.duration}</strong></span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5 pt-0.5">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                            Fitur Termasuk:
+                          </span>
+                          {pkg.features?.slice(0, 3).map((feat, idx) => (
+                            <div key={idx} className="flex items-start gap-1.5 text-xs text-slate-600">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
+                              <span className="line-clamp-1">{feat}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="pt-3.5 mt-3.5 border-t border-slate-100 flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <Link
+                            href={`/jasa/dashboard/bundling/${pkg.id}`}
+                            className="text-xs font-bold text-[#1683FF] hover:bg-blue-50 px-2.5 py-1.5 rounded-lg border border-blue-200 transition"
+                          >
+                            Detail
+                          </Link>
+                          <Link
+                            href={`/jasa/dashboard/bundling/${pkg.id}/edit`}
+                            className="text-xs font-bold text-slate-600 hover:bg-slate-100 px-2.5 py-1.5 rounded-lg border border-slate-200 transition"
+                          >
+                            Edit
+                          </Link>
+                        </div>
+                        <button
+                          onClick={() => handleDeletePackage(pkg.id)}
+                          className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                          title="Hapus Paket"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}
@@ -1416,65 +1894,84 @@ function JasaDashboardContent() {
 
               {/* Portofolio — Grid 2 Kolom Kiri dan Kanan Rapi & Simetris */}
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5 sm:gap-4 pt-1">
-                {provider.portfolioPhotos?.map((photo, idx) => (
-                  <div
-                    key={idx}
-                    className="rounded-2xl border border-slate-200/90 bg-white overflow-hidden shadow-2xs hover:shadow-md transition-all group flex flex-col justify-between"
-                  >
-                    <div>
-                      <Link href={`/jasa/dashboard/portofolio/${photo.id || idx}`} className="block relative aspect-[16/10] w-full bg-slate-100 overflow-hidden cursor-pointer">
-                        <img
-                          src={photo.url}
-                          alt={photo.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        />
-                        <div className="absolute top-2 left-2">
-                          <span className="px-1.5 sm:px-2 py-0.5 rounded-md text-[9px] sm:text-[10px] font-extrabold uppercase bg-black/60 text-white backdrop-blur-xs">
-                            {photo.category}
-                          </span>
-                        </div>
-                      </Link>
-
-                      <div className="p-2.5 sm:p-4 space-y-1">
-                        <Link href={`/jasa/dashboard/portofolio/${photo.id || idx}`}>
-                          <h4 className="font-bold text-xs sm:text-sm text-slate-900 line-clamp-1 hover:text-[#1683FF] transition">{photo.title}</h4>
-                        </Link>
-                        {photo.description && (
-                          <p className="text-[10px] sm:text-xs text-slate-500 line-clamp-2 leading-relaxed hidden sm:block">
-                            {photo.description}
-                          </p>
-                        )}
-                      </div>
+                {(!provider.portfolioPhotos || provider.portfolioPhotos.length === 0) ? (
+                  <div className="col-span-full bg-white border border-slate-200/90 rounded-2xl p-8 sm:p-12 text-center shadow-2xs">
+                    <div className="w-14 h-14 rounded-2xl bg-blue-50 text-[#1683FF] flex items-center justify-center mx-auto mb-3">
+                      <ImageIcon className="w-7 h-7" />
                     </div>
-
-                    <div className="p-2 sm:px-4 sm:py-3 bg-slate-50/80 border-t border-slate-100 flex items-center justify-between gap-1 mt-auto">
-                      <div className="flex items-center gap-1 flex-1">
-                        <Link
-                          href={`/jasa/dashboard/portofolio/${photo.id || idx}`}
-                          className="flex-1 py-1 rounded-md text-slate-600 hover:bg-white hover:text-[#1683FF] border border-slate-200/80 transition text-center flex items-center justify-center shadow-2xs"
-                          title="Lihat Detail"
-                        >
-                          <Eye className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                        </Link>
-                        <Link
-                          href={`/jasa/dashboard/portofolio/${photo.id || idx}/edit`}
-                          className="flex-1 py-1 rounded-md text-slate-600 hover:bg-white hover:text-[#1683FF] border border-slate-200/80 transition text-center flex items-center justify-center shadow-2xs"
-                          title="Edit"
-                        >
-                          <Edit3 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                        </Link>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleDeletePortfolio(idx)}
-                        className="p-1 px-1.5 rounded-md text-rose-500 hover:bg-rose-50 border border-slate-200/80 transition cursor-pointer flex items-center justify-center shadow-2xs"
-                        title="Hapus"
-                      >
-                        <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                      </button>
-                    </div>
+                    <h4 className="font-bold text-sm sm:text-base text-slate-800 mb-1">Belum Ada Foto Portofolio</h4>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto mb-4">
+                      Halaman ini bersih untuk pengujian. Unggah dokumentasi foto karya asli Anda sendiri dengan tombol di bawah.
+                    </p>
+                    <Link
+                      href="/jasa/dashboard/portofolio/tambah"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#1683FF] text-white text-xs font-bold hover:bg-[#0F6FE5] transition shadow-xs"
+                    >
+                      <PlusCircle className="w-4 h-4" />
+                      <span>Tambah Foto Portofolio</span>
+                    </Link>
                   </div>
-                ))}
+                ) : (
+                  provider.portfolioPhotos.map((photo, idx) => (
+                    <div
+                      key={idx}
+                      className="rounded-2xl border border-slate-200/90 bg-white overflow-hidden shadow-2xs hover:shadow-md transition-all group flex flex-col justify-between"
+                    >
+                      <div>
+                        <Link href={`/jasa/dashboard/portofolio/${photo.id || idx}`} className="block relative aspect-[16/10] w-full bg-slate-100 overflow-hidden cursor-pointer">
+                          <img
+                            src={photo.url}
+                            alt={photo.title}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          />
+                          <div className="absolute top-2 left-2">
+                            <span className="px-1.5 sm:px-2 py-0.5 rounded-md text-[9px] sm:text-[10px] font-extrabold uppercase bg-black/60 text-white backdrop-blur-xs">
+                              {photo.category}
+                            </span>
+                          </div>
+                        </Link>
+
+                        <div className="p-2.5 sm:p-4 space-y-1">
+                          <Link href={`/jasa/dashboard/portofolio/${photo.id || idx}`}>
+                            <h4 className="font-bold text-xs sm:text-sm text-slate-900 line-clamp-1 hover:text-[#1683FF] transition">{photo.title}</h4>
+                          </Link>
+                          {photo.description && (
+                            <p className="text-[10px] sm:text-xs text-slate-500 line-clamp-2 leading-relaxed hidden sm:block">
+                              {photo.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="p-2 sm:px-4 sm:py-3 bg-slate-50/80 border-t border-slate-100 flex items-center justify-between gap-1 mt-auto">
+                        <div className="flex items-center gap-1 flex-1">
+                          <Link
+                            href={`/jasa/dashboard/portofolio/${photo.id || idx}`}
+                            className="flex-1 py-1 rounded-md text-slate-600 hover:bg-white hover:text-[#1683FF] border border-slate-200/80 transition text-center flex items-center justify-center shadow-2xs"
+                            title="Lihat Detail"
+                          >
+                            <Eye className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                          </Link>
+                          <Link
+                            href={`/jasa/dashboard/portofolio/${photo.id || idx}/edit`}
+                            className="flex-1 py-1 rounded-md text-slate-600 hover:bg-white hover:text-[#1683FF] border border-slate-200/80 transition text-center flex items-center justify-center shadow-2xs"
+                            title="Edit"
+                          >
+                            <Edit3 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                          </Link>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeletePortfolio(idx)}
+                          className="p-1 px-1.5 rounded-md text-rose-500 hover:bg-rose-50 border border-slate-200/80 transition cursor-pointer flex items-center justify-center shadow-2xs"
+                          title="Hapus"
+                        >
+                          <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}
@@ -1519,98 +2016,110 @@ function JasaDashboardContent() {
 
               {/* Orders List */}
               <div className="space-y-3 pt-1">
-                {providerOrders
-                  .filter(o => orderFilter === "all" || o.status === orderFilter)
-                  .map((order) => {
-                    const isCompleted = order.status === "Selesai";
-                    const isPendingConfirmation = order.status === "Menunggu Konfirmasi";
+                {providerOrders.filter(o => orderFilter === "all" || o.status === orderFilter).length === 0 ? (
+                  <div className="bg-white border border-slate-200/90 rounded-2xl p-8 sm:p-12 text-center shadow-2xs">
+                    <div className="w-14 h-14 rounded-2xl bg-blue-50 text-[#1683FF] flex items-center justify-center mx-auto mb-3">
+                      <Receipt className="w-7 h-7" />
+                    </div>
+                    <h4 className="font-bold text-sm sm:text-base text-slate-800 mb-1">Belum Ada Pesanan Klien</h4>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                      Daftar pesanan riil dari klien akan otomatis muncul di sini lengkap dengan status pengerjaan dan pelacakan pembayaran aman.
+                    </p>
+                  </div>
+                ) : (
+                  providerOrders
+                    .filter(o => orderFilter === "all" || o.status === orderFilter)
+                    .map((order) => {
+                      const isCompleted = order.status === "Selesai";
+                      const isPendingConfirmation = order.status === "Menunggu Konfirmasi";
 
-                    return (
-                      <div 
-                        key={order.id} 
-                        className="p-3.5 sm:p-5 rounded-2xl border border-slate-200/90 bg-white shadow-2xs flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 sm:gap-4 hover:border-blue-200 transition"
-                      >
-                        <div className="flex items-start sm:items-center gap-3 w-full">
-                          <div className="relative shrink-0">
-                            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-blue-100 text-[#1683FF] font-black text-xs flex items-center justify-center ring-2 ring-blue-50 shadow-2xs">
-                              {order.customerName ? order.customerName.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase() : "U"}
+                      return (
+                        <div 
+                          key={order.id} 
+                          className="p-3.5 sm:p-5 rounded-2xl border border-slate-200/90 bg-white shadow-2xs flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 sm:gap-4 hover:border-blue-200 transition"
+                        >
+                          <div className="flex items-start sm:items-center gap-3 w-full">
+                            <div className="relative shrink-0">
+                              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-blue-100 text-[#1683FF] font-black text-xs flex items-center justify-center ring-2 ring-blue-50 shadow-2xs">
+                                {order.customerName ? order.customerName.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase() : "U"}
+                              </div>
+                              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white absolute bottom-0 right-0" />
                             </div>
-                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white absolute bottom-0 right-0" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                              <span className="text-xs font-bold text-slate-900">{order.customerName}</span>
-                              <span className="text-[10px] text-[#1683FF] bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded-md font-mono font-bold">
-                                {order.orderNumber}
-                              </span>
-                              <span className={`text-[9px] sm:text-[10px] px-2 py-0.5 rounded-md font-bold ${
-                                isCompleted 
-                                  ? "bg-emerald-100 text-emerald-800"
-                                  : isPendingConfirmation
-                                  ? "bg-amber-100 text-amber-800"
-                                  : "bg-blue-100 text-blue-800"
-                              }`}>
-                                {order.status}
-                              </span>
-                            </div>
-                            <h4 className="font-bold text-xs sm:text-sm text-slate-900 mt-0.5 truncate">{order.serviceTitle}</h4>
-                            <p className="text-[11px] text-slate-500 mt-0.5">
-                              {order.packageName} &middot; Batas: <span className="font-semibold text-slate-700">{order.deadline}</span>
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap items-center justify-between lg:justify-end w-full lg:w-auto gap-2.5 pt-2.5 lg:pt-0 border-t lg:border-t-0 border-slate-100">
-                          <div className="text-left lg:text-right">
-                            <div className="text-xs sm:text-sm font-black text-slate-900">{formatIDR(order.amount)}</div>
-                            <div className="text-[9px] sm:text-[10px] text-emerald-600 font-semibold flex items-center gap-1 lg:justify-end">
-                              <ShieldCheck className="w-3 h-3 text-emerald-500" />
-                              <span>{isCompleted ? "Hak Bayar Masuk" : "Terkonfirmasi"}</span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                                <span className="text-xs font-bold text-slate-900">{order.customerName}</span>
+                                <span className="text-[10px] text-[#1683FF] bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded-md font-mono font-bold">
+                                  {order.orderNumber}
+                                </span>
+                                <span className={`text-[9px] sm:text-[10px] px-2 py-0.5 rounded-md font-bold ${
+                                  isCompleted 
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : isPendingConfirmation
+                                    ? "bg-amber-100 text-amber-800"
+                                    : "bg-blue-100 text-blue-800"
+                                }`}>
+                                  {order.status}
+                                </span>
+                              </div>
+                              <h4 className="font-bold text-xs sm:text-sm text-slate-900 mt-0.5 truncate">{order.serviceTitle}</h4>
+                              <p className="text-[11px] text-slate-500 mt-0.5">
+                                {order.packageName} &middot; Batas: <span className="font-semibold text-slate-700">{order.deadline}</span>
+                              </p>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <button
-                              onClick={() => setSelectedOrderForDetail(order)}
-                              className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-[11px] sm:text-xs font-bold rounded-xl transition shadow-2xs inline-flex items-center gap-1 cursor-pointer"
-                            >
-                              <Eye className="w-3.5 h-3.5" />
-                              <span className="hidden xs:inline">Detail</span>
-                            </button>
+                          <div className="flex flex-wrap items-center justify-between lg:justify-end w-full lg:w-auto gap-2.5 pt-2.5 lg:pt-0 border-t lg:border-t-0 border-slate-100">
+                            <div className="text-left lg:text-right">
+                              <div className="text-xs sm:text-sm font-black text-slate-900">{formatIDR(order.amount)}</div>
+                              <div className="text-[9px] sm:text-[10px] text-emerald-600 font-semibold flex items-center gap-1 lg:justify-end">
+                                <ShieldCheck className="w-3 h-3 text-emerald-500" />
+                                <span>{isCompleted ? "Hak Bayar Masuk" : "Terkonfirmasi"}</span>
+                              </div>
+                            </div>
 
-                            {order.status === "Sedang Dikerjakan" && (
+                            <div className="flex items-center gap-1.5 shrink-0">
                               <button
-                                onClick={() => {
-                                  const updated = providerOrders.map(o => o.id === order.id ? {
-                                    ...o,
-                                    status: "Menunggu Konfirmasi",
-                                    timeline: [
-                                      ...o.timeline,
-                                      { status: "Menunggu Konfirmasi", time: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }), note: "Hasil pekerjaan diserahkan. Menunggu konfirmasi klien." }
-                                    ]
-                                  } : o);
-                                  setProviderOrders(updated);
-                                  addToast?.("Status Diperbarui", "Hasil pekerjaan telah diserahkan ke klien.");
-                                }}
-                                className="px-3 py-1.5 bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-[11px] sm:text-xs font-bold rounded-xl transition shadow-2xs inline-flex items-center gap-1 cursor-pointer"
+                                onClick={() => setSelectedOrderForDetail(order)}
+                                className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-[11px] sm:text-xs font-bold rounded-xl transition shadow-2xs inline-flex items-center gap-1 cursor-pointer"
                               >
-                                <CheckCircle className="w-3.5 h-3.5" />
-                                <span>Serahkan</span>
+                                <Eye className="w-3.5 h-3.5" />
+                                <span className="hidden xs:inline">Detail</span>
                               </button>
-                            )}
 
-                            <Link
-                              href="/chat?room=order-room-102&role=helper"
-                              className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-[11px] sm:text-xs font-bold rounded-xl transition shadow-2xs inline-flex items-center gap-1"
-                            >
-                              <MessageSquare className="w-3.5 h-3.5" />
-                              <span className="hidden xs:inline">Chat</span>
-                            </Link>
+                              {order.status === "Sedang Dikerjakan" && (
+                                <button
+                                  onClick={() => {
+                                    const updated = providerOrders.map(o => o.id === order.id ? {
+                                      ...o,
+                                      status: "Menunggu Konfirmasi",
+                                      timeline: [
+                                        ...o.timeline,
+                                        { status: "Menunggu Konfirmasi", time: new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }), note: "Hasil pekerjaan diserahkan. Menunggu konfirmasi klien." }
+                                      ]
+                                    } : o);
+                                    setProviderOrders(updated);
+                                    addToast?.("Status Diperbarui", "Hasil pekerjaan telah diserahkan ke klien.");
+                                  }}
+                                  className="px-3 py-1.5 bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-[11px] sm:text-xs font-bold rounded-xl transition shadow-2xs inline-flex items-center gap-1 cursor-pointer"
+                                >
+                                  <CheckCircle className="w-3.5 h-3.5" />
+                                  <span>Serahkan</span>
+                                </button>
+                              )}
+
+                              <Link
+                                href="/chat"
+                                className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-[11px] sm:text-xs font-bold rounded-xl transition shadow-2xs inline-flex items-center gap-1"
+                              >
+                                <MessageSquare className="w-3.5 h-3.5" />
+                                <span className="hidden xs:inline">Chat</span>
+                              </Link>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                )}
               </div>
             </div>
           )}
@@ -1637,20 +2146,30 @@ function JasaDashboardContent() {
               </div>
 
               <div className="bg-white border border-slate-200/90 rounded-2xl p-3 sm:p-5 shadow-2xs divide-y divide-slate-100">
-                {providerNotifications.map((notif) => (
-                  <div key={notif.id} className={`py-3 flex items-start gap-3 ${!notif.isRead ? "bg-blue-50/40 -mx-2.5 px-2.5 rounded-xl" : ""}`}>
-                    <div className="w-8 h-8 rounded-xl bg-blue-50 text-[#1683FF] flex items-center justify-center shrink-0 mt-0.5 border border-blue-100">
-                      <Bell className="w-3.5 h-3.5" />
+                {providerNotifications.length === 0 ? (
+                  <div className="py-10 text-center">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-50 text-slate-400 flex items-center justify-center mx-auto mb-2.5">
+                      <Bell className="w-6 h-6" />
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-1.5">
-                        <h4 className="text-xs font-bold text-slate-900 truncate">{notif.title}</h4>
-                        <span className="text-[10px] text-slate-400 shrink-0">{notif.time}</span>
-                      </div>
-                      <p className="text-[11px] sm:text-xs text-slate-600 mt-0.5 leading-relaxed">{notif.message}</p>
-                    </div>
+                    <p className="text-xs font-bold text-slate-700">Belum ada notifikasi</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Pemberitahuan aktivitas pesanan dan akun akan muncul di sini.</p>
                   </div>
-                ))}
+                ) : (
+                  providerNotifications.map((notif) => (
+                    <div key={notif.id} className={`py-3 flex items-start gap-3 ${!notif.isRead ? "bg-blue-50/40 -mx-2.5 px-2.5 rounded-xl" : ""}`}>
+                      <div className="w-8 h-8 rounded-xl bg-blue-50 text-[#1683FF] flex items-center justify-center shrink-0 mt-0.5 border border-blue-100">
+                        <Bell className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1.5">
+                          <h4 className="text-xs font-bold text-slate-900 truncate">{notif.title}</h4>
+                          <span className="text-[10px] text-slate-400 shrink-0">{notif.time}</span>
+                        </div>
+                        <p className="text-[11px] sm:text-xs text-slate-600 mt-0.5 leading-relaxed">{notif.message}</p>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}
@@ -1665,62 +2184,72 @@ function JasaDashboardContent() {
                 <p className="text-xs text-slate-500">Diskusi langsung dengan klien mengenai brief, revisi, dan serah terima file</p>
               </div>
 
-              {/* Chat Conversation List (Native Row Style) */}
+              {/* Chat Conversation List */}
               <div className="bg-white border border-slate-200/90 rounded-2xl overflow-hidden shadow-2xs divide-y divide-slate-100">
-                <Link
-                  href="/chat?room=order-room-101&role=helper"
-                  className="flex items-center gap-3 p-3 sm:p-4 hover:bg-blue-50/40 transition group"
-                >
-                  <div className="relative shrink-0">
-                    <div className="w-10 h-10 rounded-full bg-blue-100 text-[#1683FF] font-black flex items-center justify-center text-xs">
-                      DA
+                {myChatRooms.length === 0 ? (
+                  <div className="p-8 sm:p-12 text-center">
+                    <div className="w-14 h-14 rounded-2xl bg-blue-50 text-[#1683FF] flex items-center justify-center mx-auto mb-3">
+                      <MessageSquare className="w-7 h-7" />
                     </div>
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white absolute bottom-0 right-0" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="text-xs sm:text-sm font-bold text-slate-900 truncate group-hover:text-[#1683FF] transition">
-                        Dimas Anggara
-                      </span>
-                      <span className="text-[10px] text-slate-400 font-medium shrink-0">10:24</span>
-                    </div>
-                    <p className="text-xs text-slate-500 truncate mt-0.5">
-                      Halo kak, untuk logo konsep minimalisnya apa sudah mulai disketsa?
+                    <h4 className="font-bold text-sm sm:text-base text-slate-800 mb-1">Belum Ada Percakapan Klien</h4>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                      Ruang obrolan akan otomatis muncul ketika ada interaksi transaksi langsung antara Anda dan klien.
                     </p>
                   </div>
-                  <div className="shrink-0 flex items-center gap-1.5">
-                    <span className="w-5 h-5 rounded-full bg-[#1683FF] text-white text-[10px] font-black flex items-center justify-center shadow-xs">
-                      1
-                    </span>
-                    <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-[#1683FF] transition" />
-                  </div>
-                </Link>
+                ) : (
+                  myChatRooms.map((room) => {
+                    const otherUser = room.user?.id === currentUser?.id ? room.helper : room.user;
+                    const otherName = otherUser?.name || room.clientName || room.userName || "Klien Bantuin";
+                    const otherAvatar = otherUser?.avatar || null;
+                    const lastMsg = room.messages?.[room.messages.length - 1];
 
-                <Link
-                  href="/chat?room=order-room-102&role=helper"
-                  className="flex items-center gap-3 p-3 sm:p-4 hover:bg-blue-50/40 transition group"
-                >
-                  <div className="relative shrink-0">
-                    <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-700 font-black flex items-center justify-center text-xs">
-                      SN
-                    </div>
-                    <span className="w-2.5 h-2.5 rounded-full bg-slate-300 border-2 border-white absolute bottom-0 right-0" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="text-xs sm:text-sm font-bold text-slate-900 truncate group-hover:text-[#1683FF] transition">
-                        Siti Nurhaliza
-                      </span>
-                      <span className="text-[10px] text-slate-400 font-medium shrink-0">Kemarin</span>
-                    </div>
-                    <p className="text-xs text-slate-500 truncate mt-0.5">
-                      Terima kasih kak, file PDF cetak sudah kami terima dengan baik.
-                    </p>
-                  </div>
-                  <div className="shrink-0">
-                    <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-[#1683FF] transition" />
-                  </div>
-                </Link>
+                    return (
+                      <Link
+                        key={room.id}
+                        href={`/chat?room=${room.id}`}
+                        className="p-3.5 sm:p-4 flex items-center justify-between gap-3 hover:bg-slate-50/80 transition group block"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="relative shrink-0">
+                            {otherAvatar ? (
+                              <img src={otherAvatar} alt={otherName} className="w-10 h-10 rounded-full object-cover" />
+                            ) : (
+                              <div className="w-10 h-10 rounded-full bg-blue-100 text-[#1683FF] font-black text-xs flex items-center justify-center ring-2 ring-blue-50">
+                                {otherName.slice(0, 2).toUpperCase()}
+                              </div>
+                            )}
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white absolute bottom-0 right-0" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-bold text-xs sm:text-sm text-slate-900 group-hover:text-[#1683FF] transition truncate">
+                                {otherName}
+                              </h4>
+                              {room.orderTitle && (
+                                <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium truncate hidden sm:inline-block">
+                                  {room.orderTitle}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                              {lastMsg?.text || "Percakapan aktif pesanan..."}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">
+                            {lastMsg?.time || "Aktif"}
+                          </span>
+                          <span className="px-2.5 py-1 rounded-xl bg-[#1683FF] text-white text-[11px] font-bold group-hover:bg-[#0F6FE5] transition flex items-center gap-1 shadow-2xs">
+                            <MessageSquare className="w-3 h-3" />
+                            <span>Buka Chat</span>
+                          </span>
+                        </div>
+                      </Link>
+                    );
+                  })
+                )}
               </div>
             </div>
           )}
@@ -1745,7 +2274,7 @@ function JasaDashboardContent() {
                       </span>
                     </div>
                     <div className="text-2xl sm:text-4xl font-black tracking-tight text-white my-1 sm:my-2">
-                      {formatIDR(mitraAvailableBalance)}
+                      {formatIDR(effectiveAvailableBalance)}
                     </div>
                     <div className="flex items-center gap-1.5 text-[10px] sm:text-xs text-slate-300">
                       <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
@@ -1767,12 +2296,12 @@ function JasaDashboardContent() {
                 <div className="mt-3.5 sm:mt-6 pt-3 sm:pt-4 border-t border-white/10 grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-4 text-xs">
                   <div>
                     <div className="text-[10px] sm:text-xs text-slate-400">Dana Tertahan</div>
-                    <div className="font-bold text-amber-400 text-xs sm:text-sm mt-0.5">{formatIDR(mitraPendingBalance)}</div>
+                    <div className="font-bold text-amber-400 text-xs sm:text-sm mt-0.5">{formatIDR(effectivePendingBalance)}</div>
                   </div>
                   <div>
                     <div className="text-[10px] sm:text-xs text-slate-400">Total Akumulasi</div>
                     <div className="font-bold text-white text-xs sm:text-sm mt-0.5">
-                      {formatIDR(mitraTotalEarned)}
+                      {formatIDR(effectiveTotalEarned)}
                     </div>
                   </div>
                   <div className="col-span-2 sm:col-span-1 pt-1.5 sm:pt-0 border-t border-white/5 sm:border-t-0 flex sm:block items-center justify-between">
@@ -1790,12 +2319,12 @@ function JasaDashboardContent() {
                     <p className="text-[10px] sm:text-xs text-slate-500">Pencairan ditransfer via m-Banking admin</p>
                   </div>
                   <span className="text-[10px] sm:text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full shrink-0">
-                    {withdrawals.length} Pengajuan
+                    {displayWithdrawals.length} Pengajuan
                   </span>
                 </div>
 
                 <div className="divide-y divide-slate-100">
-                  {withdrawals.map((wd) => {
+                  {displayWithdrawals.map((wd) => {
                     const isSuccess = wd.status === "SUCCESS";
 
                     return (
@@ -1832,7 +2361,7 @@ function JasaDashboardContent() {
                     );
                   })}
 
-                  {withdrawals.length === 0 && (
+                  {displayWithdrawals.length === 0 && (
                     <div className="py-8 text-center text-xs text-slate-400">
                       Belum ada riwayat penarikan dana.
                     </div>
@@ -2006,38 +2535,50 @@ function JasaDashboardContent() {
                 </div>
                 <div className="flex items-center gap-1.5 bg-amber-50 px-3 py-1 rounded-xl border border-amber-200 shrink-0">
                   <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-                  <span className="text-xs font-black text-amber-800">{provider.rating} / 5.0</span>
+                  <span className="text-xs font-black text-amber-800">{Number(provider.rating || 0).toFixed(1)} / 5.0</span>
                 </div>
               </div>
 
               <div className="space-y-3 pt-1">
-                {provider.reviews?.map((rev) => (
-                  <div key={rev.id} className="p-4 sm:p-5 rounded-2xl border border-slate-200/90 bg-white shadow-2xs space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <img
-                          src={rev.userAvatar}
-                          alt={rev.userName}
-                          className="w-8 h-8 rounded-full object-cover border border-slate-200"
-                        />
-                        <div>
-                          <div className="text-xs font-bold text-slate-900">{rev.userName}</div>
-                          <div className="text-[10px] text-slate-400">{rev.date} &middot; {rev.packageName}</div>
+                {(!provider.reviews || provider.reviews.length === 0) ? (
+                  <div className="bg-white border border-slate-200/90 rounded-2xl p-8 sm:p-12 text-center shadow-2xs">
+                    <div className="w-14 h-14 rounded-2xl bg-amber-50 text-amber-500 flex items-center justify-center mx-auto mb-3">
+                      <Star className="w-7 h-7" />
+                    </div>
+                    <h4 className="font-bold text-sm sm:text-base text-slate-800 mb-1">Belum Ada Ulasan Pelanggan</h4>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                      Testimoni dan ulasan kepuasan dari klien akan otomatis tampil di sini setelah ada pesanan riil yang selesai dan diberi rating.
+                    </p>
+                  </div>
+                ) : (
+                  provider.reviews.map((rev) => (
+                    <div key={rev.id} className="p-4 sm:p-5 rounded-2xl border border-slate-200/90 bg-white shadow-2xs space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <img
+                            src={rev.userAvatar}
+                            alt={rev.userName}
+                            className="w-8 h-8 rounded-full object-cover border border-slate-200"
+                          />
+                          <div>
+                            <div className="text-xs font-bold text-slate-900">{rev.userName}</div>
+                            <div className="text-[10px] text-slate-400">{rev.date} &middot; {rev.packageName}</div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-0.5 text-amber-400">
+                          {Array.from({ length: rev.rating || 5 }).map((_, r) => (
+                            <Star key={r} className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                          ))}
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-0.5 text-amber-400">
-                        {Array.from({ length: rev.rating || 5 }).map((_, r) => (
-                          <Star key={r} className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                        ))}
-                      </div>
+                      <p className="text-xs text-slate-700 leading-relaxed italic bg-slate-50/80 p-3 rounded-xl border border-slate-100">
+                        &ldquo;{rev.comment}&rdquo;
+                      </p>
                     </div>
-
-                    <p className="text-xs text-slate-700 leading-relaxed italic bg-slate-50/80 p-3 rounded-xl border border-slate-100">
-                      &ldquo;{rev.comment}&rdquo;
-                    </p>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
           )}
@@ -2811,7 +3352,7 @@ function JasaDashboardContent() {
             <form onSubmit={handleWithdrawSubmit} className="space-y-3.5">
               <div className="p-3 rounded-xl bg-blue-50/70 border border-blue-100 flex items-center justify-between">
                 <span className="text-xs text-slate-700 font-medium">Saldo Tersedia:</span>
-                <span className="text-sm font-extrabold text-[#1683FF]">{formatIDR(mitraAvailableBalance)}</span>
+                <span className="text-sm font-extrabold text-[#1683FF]">{formatIDR(effectiveAvailableBalance)}</span>
               </div>
 
               <div>
@@ -2820,7 +3361,7 @@ function JasaDashboardContent() {
                   type="number"
                   required
                   min={20000}
-                  max={mitraAvailableBalance}
+                  max={effectiveAvailableBalance}
                   value={withdrawForm.amount}
                   onChange={(e) => setWithdrawForm({ ...withdrawForm, amount: e.target.value })}
                   className="w-full p-2.5 rounded-xl border border-slate-200 text-xs font-bold focus:outline-none focus:border-[#1683FF]"
@@ -2829,7 +3370,7 @@ function JasaDashboardContent() {
                   <span>Minimal Rp20.000</span>
                   <button
                     type="button"
-                    onClick={() => setWithdrawForm({ ...withdrawForm, amount: mitraAvailableBalance.toString() })}
+                    onClick={() => setWithdrawForm({ ...withdrawForm, amount: effectiveAvailableBalance.toString() })}
                     className="text-[#1683FF] font-bold hover:underline"
                   >
                     Tarik Semua
@@ -3873,17 +4414,9 @@ function JasaDashboardContent() {
             {/* Quick External Links (Shifted from Top Header) */}
             <div className="pt-2 border-t border-slate-100 space-y-2">
               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                Pintas Akun &amp; Platform
+                Pintas Platform
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                <Link
-                  href="/profile"
-                  className="py-2 px-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold text-center flex items-center justify-center gap-1"
-                >
-                  <User className="w-3.5 h-3.5" />
-                  <span>Profil Akun</span>
-                </Link>
-
+              <div className="grid grid-cols-2 gap-2">
                 {(currentUser?.isPartner || currentUser?.accountRole === "partner" || currentUser?.accountType === "mitra" || currentUser?.isAdmin) && (
                   <Link
                     href="/mitra/dashboard"
@@ -3895,11 +4428,11 @@ function JasaDashboardContent() {
                 )}
 
                 <Link
-                  href={`/jasa/penyedia/${provider.id}`}
+                  href={`/profile/${provider.id}`}
                   target="_blank"
                   className="py-2 px-2 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-600 text-[11px] font-bold text-center flex items-center justify-center gap-1"
                 >
-                  <span>Publik</span>
+                  <span>Halaman Publik</span>
                   <ExternalLink className="w-3 h-3" />
                 </Link>
               </div>
