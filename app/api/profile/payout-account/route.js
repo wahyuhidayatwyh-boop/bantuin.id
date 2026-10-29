@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { verifyAccessToken } from "@/lib/auth/jwt";
+import { requireAuth, maskIdNumber } from "@/lib/auth/session";
 
 /**
  * PUT /api/profile/payout-account
@@ -8,43 +8,9 @@ import { verifyAccessToken } from "@/lib/auth/jwt";
  */
 export async function PUT(req) {
   try {
-    const authHeader = req.headers.get("authorization");
-    let token = null;
-
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      token = authHeader.substring(7).trim();
-    }
-
-    if (!token) {
-      return NextResponse.json(
-        { success: false, error: "Akses ditolak. Token otentikasi tidak ditemukan." },
-        { status: 401 }
-      );
-    }
-
-    const decoded = verifyAccessToken(token);
-    if (!decoded || (!decoded.id && !decoded.email)) {
-      return NextResponse.json(
-        { success: false, error: "Sesi tidak valid atau telah kedaluwarsa." },
-        { status: 401 }
-      );
-    }
-
-    const userProfile = await prisma.profile.findFirst({
-      where: {
-        OR: [
-          ...(decoded.id ? [{ id: decoded.id }] : []),
-          ...(decoded.email ? [{ email: decoded.email.toLowerCase() }] : []),
-        ],
-      },
-    });
-
-    if (!userProfile) {
-      return NextResponse.json(
-        { success: false, error: "Profil pengguna tidak ditemukan." },
-        { status: 404 }
-      );
-    }
+    const auth = await requireAuth(req);
+    if (auth.errorResponse) return auth.errorResponse;
+    const userProfile = auth.profile;
 
     const body = await req.json();
     const { payoutBank, payoutAccountNumber, payoutAccountHolder } = body;
@@ -80,9 +46,9 @@ export async function PUT(req) {
         partnerBusinessName: updatedProfile.partnerBusinessName || "",
         campusName: updatedProfile.campusName || "",
         verificationStatus: updatedProfile.verificationStatus || "unverified",
-        idNumber: updatedProfile.idNumber || "",
-        idCardUrl: updatedProfile.idCardUrl || null,
-        selfieUrl: updatedProfile.selfieUrl || null,
+        idNumber: maskIdNumber(updatedProfile.idNumber),
+        hasIdCardUploaded: Boolean(updatedProfile.idCardUrl),
+        hasSelfieUploaded: Boolean(updatedProfile.selfieUrl),
         payoutBank: updatedProfile.payoutBank || "",
         payoutAccountNumber: updatedProfile.payoutAccountNumber || "",
         payoutAccountHolder: updatedProfile.payoutAccountHolder || "",

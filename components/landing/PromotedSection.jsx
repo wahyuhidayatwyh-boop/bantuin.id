@@ -15,7 +15,16 @@ export default function PromotedSection() {
   const [activeTab, setActiveTab] = useState("all"); // 'all' | 'service' | 'rental'
 
   useEffect(() => {
-    const loadPromotions = (trackImpressions = false) => {
+    let isMounted = true;
+    const loadPromotions = async (trackImpressions = false) => {
+      try {
+        await promotionService.fetchLivePromotions();
+      } catch (err) {
+        console.warn("Could not sync live promotions:", err);
+      }
+
+      if (!isMounted) return;
+
       const active = promotionService
         .getActivePromotionsSync({
           placement: "landing",
@@ -24,9 +33,7 @@ export default function PromotedSection() {
         .filter((p) => p.targetType === "service" || p.targetType === "rental");
       setPromotions(active);
 
-      // Catat impresi sekali saat section pertama dimuat. Jangan lakukan saat
-      // event pembaruan diterima, karena pencatatan sendiri memancarkan event
-      // yang sama dan sebelumnya dapat membuat browser berulang tanpa henti.
+      // Catat impresi sekali saat section pertama dimuat
       if (trackImpressions) {
         active.forEach((p) => {
           promotionService.recordImpression(p.id);
@@ -36,26 +43,89 @@ export default function PromotedSection() {
 
     loadPromotions(true);
 
-    const handleSync = () => loadPromotions(false);
+    const handleSync = () => {
+      if (!isMounted) return;
+      const active = promotionService
+        .getActivePromotionsSync({
+          placement: "landing",
+          userLocation: filterByKabupaten ? activeKabupaten : undefined,
+        })
+        .filter((p) => p.targetType === "service" || p.targetType === "rental");
+      setPromotions(active);
+    };
+
     window.addEventListener("bantuin_promotions_updated", handleSync);
     window.addEventListener("bantuin_promotion_packages_updated", handleSync);
     return () => {
+      isMounted = false;
       window.removeEventListener("bantuin_promotions_updated", handleSync);
       window.removeEventListener("bantuin_promotion_packages_updated", handleSync);
     };
   }, [activeKabupaten, filterByKabupaten]);
 
+/**
+ * Sistem Rotasi Berkala Berbobot (Weighted Impression Rotation)
+ * Berdasarkan priority_level:
+ * Priority 1 = weight 1
+ * Priority 2 = weight 2
+ * Priority 3 = weight 4
+ */
+function selectWeightedRotation(items, limit = 4) {
+  if (!Array.isArray(items) || items.length <= limit) {
+    return [...items];
+  }
+
+  const pool = items.map((item) => {
+    const priority = Number(item.package?.priority || item.priority || item.priority_level || 1);
+    let weight = 1;
+    if (priority >= 3) weight = 4;
+    else if (priority === 2) weight = 2;
+    return { item, weight };
+  });
+
+  const selected = [];
+  while (selected.length < limit && pool.length > 0) {
+    const totalWeight = pool.reduce((sum, entry) => sum + entry.weight, 0);
+    let randomThreshold = Math.random() * totalWeight;
+
+    let chosenIndex = 0;
+    for (let i = 0; i < pool.length; i++) {
+      randomThreshold -= pool[i].weight;
+      if (randomThreshold <= 0) {
+        chosenIndex = i;
+        break;
+      }
+    }
+
+    selected.push(pool[chosenIndex].item);
+    pool.splice(chosenIndex, 1);
+  }
+
+  return selected;
+}
+
   // Beranda memiliki total delapan slot: maksimal empat Jasa dan empat Sewa.
-  // Promosi setelah urutan keempat per jenis tetap aktif di katalog terkait.
+  // Rotasi acak berbobot diperbarui setiap kali halaman dimuat/di-refresh.
   const landingGroups = useMemo(() => {
     const createGroup = (id, label) => {
-      const allItems = promotions.filter((promo) => promo.targetType === id);
-      const limit = LANDING_SLOT_LIMITS[id];
+      const allForType = promotions.filter((promo) => promo.targetType === id);
+      // Deduplikasi ketat berdasarkan targetId / targetTitle
+      const seen = new Set();
+      const allItems = [];
+      for (const p of allForType) {
+        const key = `${p.targetId || p.serviceId || p.rentalId || p.targetTitle || p.id}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          allItems.push(p);
+        }
+      }
+      const limit = LANDING_SLOT_LIMITS[id] || 4;
+      const rotatedItems = selectWeightedRotation(allItems, limit);
       return {
         id,
         label,
         limit,
-        items: allItems.slice(0, limit),
+        items: rotatedItems,
         queuedCount: Math.max(0, allItems.length - limit),
       };
     };
@@ -72,12 +142,20 @@ export default function PromotedSection() {
   );
 
   // Slot tetap dibatasi per jenis, tetapi Beranda menampilkannya dalam satu
-  // etalase yang rapi. Dengan begitu tidak ada kolom kategori kosong ketika
-  // jumlah promosi Jasa dan Sewa belum penuh.
-  const visiblePromotions = useMemo(
-    () => visibleGroups.flatMap((group) => group.items),
-    [visibleGroups]
-  );
+  // etalase yang rapi tanpa duplikasi kartu.
+  const visiblePromotions = useMemo(() => {
+    const raw = visibleGroups.flatMap((group) => group.items);
+    const seen = new Set();
+    const unique = [];
+    for (const p of raw) {
+      const key = `${p.targetType || "service"}-${p.targetId || p.serviceId || p.rentalId || p.targetTitle || p.id}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(p);
+      }
+    }
+    return unique;
+  }, [visibleGroups]);
 
   // Promosi tersimpan dapat mengarah ke item yang sudah dihapus atau ID lama.
   // Validasi target sebelum membuat tautan agar klik kartu tidak membuka rute detail
@@ -99,21 +177,25 @@ export default function PromotedSection() {
         .filter(Boolean);
       const type = promo.targetType;
 
+      let href = "";
       if (type === "service") {
         const service = services.find((item) => targetIds.includes(String(item.id))) ||
           services.find((item) => item.title === promo.targetTitle);
-        const href = service
+        href = service
           ? `/jasa/${encodeURIComponent(service.id)}`
+          : promo.targetId
+          ? `/jasa/${encodeURIComponent(promo.targetId)}`
           : `/jasa?search=${encodeURIComponent(promo.targetTitle || "")}`;
-        return [promo.id, href];
+      } else {
+        const rental = rentalItems.find((item) => targetIds.includes(String(item.id))) ||
+          rentalItems.find((item) => (item.title || item.name) === promo.targetTitle) ||
+          rentalItems.find((item) => item.storeId === promo.ownerId);
+        href = rental
+          ? `/sewa/${encodeURIComponent(rental.id)}`
+          : promo.targetId
+          ? `/sewa/${encodeURIComponent(promo.targetId)}`
+          : `/sewa?search=${encodeURIComponent(promo.targetTitle || "")}`;
       }
-
-      const rental = rentalItems.find((item) => targetIds.includes(String(item.id))) ||
-        rentalItems.find((item) => (item.title || item.name) === promo.targetTitle) ||
-        rentalItems.find((item) => item.storeId === promo.ownerId);
-      const href = rental
-        ? `/sewa/${encodeURIComponent(rental.id)}`
-        : `/sewa?search=${encodeURIComponent(promo.targetTitle || "")}`;
       return [promo.id, href];
     }));
   }, [promotions, rentals]);

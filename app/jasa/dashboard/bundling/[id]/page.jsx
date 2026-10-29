@@ -7,6 +7,7 @@ import RoleGuard from "@/components/auth/RoleGuard";
 import { useApp } from "@/lib/context/AppContext";
 import { getProviderById, saveProviderData } from "@/lib/mock/providersData";
 import { formatIDR } from "@/lib/utils";
+import { authService } from "@/lib/services/authService";
 import { 
   ArrowLeft, 
   Package, 
@@ -22,28 +23,86 @@ import {
 export default function DetailBundlingJasaPage() {
   const { id } = useParams();
   const router = useRouter();
-  const { addToast } = useApp() || {};
+  const { currentUser, setCurrentUser, addToast } = useApp() || {};
 
   const [provider, setProvider] = useState(() => {
-    return getProviderById("fajar-ramadhan-desain") || {};
+    return currentUser || {};
   });
 
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
-    const p = getProviderById("fajar-ramadhan-desain");
-    if (p) setProvider(p);
-  }, []);
+    let isMounted = true;
+    async function loadLiveProfile() {
+      try {
+        const token = await authService.getValidAccessToken();
+        if (token) {
+          const res = await fetch("/api/user/profile", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const json = await res.json();
+          if (isMounted && res.ok && json.success && json.data) {
+            setProvider((prev) => ({
+              ...prev,
+              ...json.data,
+              packages: Array.isArray(json.data.packages) ? json.data.packages : [],
+            }));
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Could not load live packages in detail bundling:", err);
+      }
+      if (isMounted && currentUser) {
+        const p = currentUser.id ? (getProviderById(currentUser.id) || currentUser) : currentUser;
+        setProvider(p);
+      }
+    }
+    loadLiveProfile();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser]);
 
   const pkg = (provider.packages || []).find((p) => p.id === id);
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     setIsDeleting(true);
     const updatedPackages = (provider.packages || []).filter((p) => p.id !== id);
     const updatedProvider = { ...provider, packages: updatedPackages };
     saveProviderData(updatedProvider);
+    if (typeof window !== "undefined" && provider.id) {
+      localStorage.setItem(`bantuin_provider_packages_${provider.id}`, JSON.stringify(updatedPackages));
+    }
     setProvider(updatedProvider);
+
+    // Hapus dari PostgreSQL database
+    try {
+      const token = await authService.getValidAccessToken();
+      if (token) {
+        await fetch("/api/user/profile", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ packages: updatedPackages }),
+        });
+      }
+    } catch (err) {
+      console.error("Gagal hapus paket bundling dari database:", err);
+    }
+
+    if (typeof setCurrentUser === "function") {
+      setCurrentUser((prev) => ({ ...(prev || {}), packages: updatedPackages }));
+    }
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("bantuin_provider_updated"));
+      window.dispatchEvent(new Event("bantuin_service_updated"));
+    }
+
     setIsDeleting(false);
     setIsDeleteModalOpen(false);
     addToast?.("Paket Dihapus", `Paket "${pkg?.name}" berhasil dihapus.`);

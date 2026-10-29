@@ -108,6 +108,7 @@ enum PromotionStatus {
   pending_payment
   paid
   active
+  paused
   expired
   cancelled
 
@@ -184,8 +185,17 @@ model Profile {
   isPartner             Boolean            @default(false) @map("is_partner")
   partnerBusinessName   String?            @map("partner_business_name")
   partnerAddress        String?            @map("partner_address")
+  isAcceptingRentals    Boolean            @default(true) @map("is_accepting_rentals")
+  requirePhysicalId     Boolean            @default(true) @map("require_physical_id")
+  securityDepositPolicy String?            @map("security_deposit_policy")
   isAdmin               Boolean            @default(false) @map("is_admin")
   verificationStatus    VerificationStatus @default(unverified) @map("verification_status")
+
+  // Banner, Portofolio & Skills Profil Penyedia
+  bannerUrl             String?            @map("banner_url")
+  portfolioPhotos       Json?              @default("[]") @map("portfolio_photos")
+  packages              Json?              @default("[]") @map("packages")
+  skills                String[]           @default([])
 
   // KYC Vault (NIK / NIM & Dokumen Terenkripsi)
   idNumber              String?            @map("id_number")
@@ -227,7 +237,11 @@ model Profile {
   withdrawals           Withdrawal[]
   promotions            Promotion[]
   notifications         Notification[]
+  landingReviewsCreated LandingReview[]      @relation("LandingReviewAuthor")
+  landingPartnersCreated LandingPartnerLogo[] @relation("LandingPartnerAuthor")
 
+  @@index([accountRole])
+  @@index([verificationStatus])
   @@map("profiles")
 }
 
@@ -288,9 +302,13 @@ model Request {
   selectedHelper      Profile?       @relation("SelectedHelper", fields: [selectedHelperId], references: [id])
   bantuinPoint        BantuinPoint?  @relation(fields: [bantuinPointId], references: [id])
   offers              Offer[]
-  orderRoom           OrderRoom?
+  orderRooms          OrderRoom[]
   reports             Report[]
 
+  @@index([status, category])
+  @@index([requesterId])
+  @@index([selectedHelperId])
+  @@index([createdAt(sort: Desc)])
   @@map("requests")
 }
 
@@ -305,6 +323,10 @@ model Offer {
   proposedPrice           Decimal?     @map("proposed_price") @db.Decimal(12, 2)
   estimatedArrivalMinutes Int?         @map("estimated_arrival_minutes")
   status                  OfferStatus  @default(submitted)
+  cvUrl                   String?      @map("cv_url")
+  cvName                  String?      @map("cv_name")
+  portfolioUrl            String?      @map("portfolio_url")
+  portfolioName           String?      @map("portfolio_name")
   createdAt               DateTime     @default(now()) @map("created_at") @db.Timestamptz
   updatedAt               DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -312,6 +334,8 @@ model Offer {
   helper                  Profile      @relation(fields: [helperId], references: [id], onDelete: Cascade)
 
   @@unique([requestId, helperId])
+  @@index([requestId])
+  @@index([helperId, status])
   @@map("offers")
 }
 
@@ -320,7 +344,7 @@ model Offer {
 // ----------------------------------------------------------------------------
 model OrderRoom {
   id                    String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  requestId             String        @unique @map("request_id") @db.Uuid
+  requestId             String        @map("request_id") @db.Uuid
   requesterId           String        @map("requester_id") @db.Uuid
   helperId              String        @map("helper_id") @db.Uuid
   lockedAmount          Decimal       @map("locked_amount") @db.Decimal(12, 2)
@@ -335,6 +359,14 @@ model OrderRoom {
   xenditDisbursementId  String?       @map("xendit_disbursement_id")
   tripayReference       String?       @map("tripay_reference")
 
+  // Midtrans Payment Gateway Fields (Additive & Nullable)
+  midtransOrderId       String?       @unique @map("midtrans_order_id")
+  midtransTransactionId String?       @map("midtrans_transaction_id")
+  midtransSnapToken     String?       @map("midtrans_snap_token")
+  paymentStatus         String        @default("UNPAID") @map("payment_status")
+  paymentMethodType     String?       @map("payment_method_type")
+  paidAt                DateTime?     @map("paid_at") @db.Timestamptz
+
   // Checkpoint & Bukti Pengerjaan
   startedAt             DateTime?     @map("started_at") @db.Timestamptz
   proofPhotoUrls        String[]      @default([]) @map("proof_photo_urls")
@@ -343,9 +375,10 @@ model OrderRoom {
   autoApproveDeadline   DateTime?     @map("auto_approve_deadline") @db.Timestamptz
   completedAt           DateTime?     @map("completed_at") @db.Timestamptz
 
-  // Sengketa
+  // Sengketa & Penghapusan Obrolan Per-User
   disputeReason         String?       @map("dispute_reason")
   disputeOpenedBy       String?       @map("dispute_opened_by") @db.Uuid
+  deletedFor            String[]      @default([]) @map("deleted_for")
 
   createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz
   updatedAt             DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
@@ -355,6 +388,12 @@ model OrderRoom {
   helper                Profile       @relation("HelperRooms", fields: [helperId], references: [id])
   chatMessages          ChatMessage[]
 
+  @@unique([requestId, helperId])
+  @@index([requesterId, orderStatus])
+  @@index([helperId, orderStatus])
+  @@index([orderStatus])
+  @@index([midtransOrderId])
+  @@index([createdAt(sort: Desc)])
   @@map("order_rooms")
 }
 
@@ -375,6 +414,9 @@ model ChatMessage {
   orderRoom       OrderRoom  @relation(fields: [orderRoomId], references: [id], onDelete: Cascade)
   sender          Profile    @relation(fields: [senderId], references: [id])
 
+  @@index([orderRoomId, createdAt(sort: Asc)])
+  @@index([orderRoomId, isRead])
+  @@index([senderId])
   @@map("chat_messages")
 }
 
@@ -406,6 +448,9 @@ model Rental {
   reports            Report[]
   promotions         Promotion[]
 
+  @@index([isAvailable, category])
+  @@index([ownerId])
+  @@index([createdAt(sort: Desc)])
   @@map("rentals")
 }
 
@@ -427,6 +472,14 @@ model RentalBooking {
   bookingStatus          BookingStatus  @default(temp_locked) @map("booking_status")
   lockExpiresAt          DateTime?      @map("lock_expires_at") @db.Timestamptz
 
+  // Midtrans Payment Gateway Fields (Additive & Nullable)
+  midtransOrderId        String?        @unique @map("midtrans_order_id")
+  midtransTransactionId  String?        @map("midtrans_transaction_id")
+  midtransSnapToken      String?        @map("midtrans_snap_token")
+  paymentStatus          String         @default("UNPAID") @map("payment_status")
+  paymentMethodType      String?        @map("payment_method_type")
+  paidAt                 DateTime?      @map("paid_at") @db.Timestamptz
+
   // Checklist & Bukti Kondisi Fisik
   initialConditionNotes  String?        @map("initial_condition_notes")
   initialConditionPhotos String[]       @default([]) @map("initial_condition_photos")
@@ -444,6 +497,10 @@ model RentalBooking {
   renter                 Profile        @relation("Renter", fields: [renterId], references: [id])
   owner                  Profile        @relation("BookingOwner", fields: [ownerId], references: [id])
 
+  @@index([rentalId, bookingStatus])
+  @@index([renterId, bookingStatus])
+  @@index([ownerId, bookingStatus])
+  @@index([midtransOrderId])
   @@map("rental_bookings")
 }
 
@@ -462,12 +519,23 @@ model Service {
   ratingAvg       Decimal      @default(5.00) @map("rating_avg") @db.Decimal(3, 2)
   ratingCount     Int          @default(0) @map("rating_count")
   completedOrders Int          @default(0) @map("completed_orders")
+  packages        Json?        @default("[]") @map("packages")
+  
+  // Mode Pengerjaan & Lokasi Fisik
+  locationType    String?      @default("hybrid") @map("location_type")
+  latitude        Float?
+  longitude       Float?
+  address         String?
+
   createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   provider        Profile      @relation(fields: [providerId], references: [id], onDelete: Cascade)
   promotions      Promotion[]
 
+  @@index([providerId])
+  @@index([category])
+  @@index([createdAt(sort: Desc)])
   @@map("services")
 }
 
@@ -488,6 +556,9 @@ model Review {
   reviewer        Profile   @relation("Reviewer", fields: [reviewerId], references: [id])
   reviewee        Profile   @relation("Reviewee", fields: [revieweeId], references: [id])
 
+  @@index([revieweeId])
+  @@index([reviewerId])
+  @@index([transactionId, transactionType])
   @@map("reviews")
 }
 
@@ -558,6 +629,7 @@ model Withdrawal {
 
   owner               Profile          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
+  @@index([ownerId, status])
   @@map("withdrawals")
 }
 
@@ -600,6 +672,13 @@ model Promotion {
   amount       Decimal           @db.Decimal(12, 2)
   startsAt     DateTime?         @map("starts_at") @db.Timestamptz
   expiresAt    DateTime?         @map("expires_at") @db.Timestamptz
+
+  // Midtrans Payment Gateway Fields (Additive & Nullable)
+  midtransOrderId       String?           @unique @map("midtrans_order_id")
+  midtransTransactionId String?           @map("midtrans_transaction_id")
+  midtransSnapToken     String?           @map("midtrans_snap_token")
+  paymentStatus         String            @default("UNPAID") @map("payment_status")
+  paidAt                DateTime?         @map("paid_at") @db.Timestamptz
   viewsCount   Int               @default(0) @map("views_count")
   clicksCount  Int               @default(0) @map("clicks_count")
   createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz
@@ -610,6 +689,10 @@ model Promotion {
   service      Service?          @relation(fields: [serviceId], references: [id])
   rental       Rental?           @relation(fields: [rentalId], references: [id])
 
+  @@index([status, reachType])
+  @@index([ownerId])
+  @@index([serviceId])
+  @@index([rentalId])
   @@map("promotions")
 }
 
@@ -654,6 +737,39 @@ model Announcement {
 }
 
 // ----------------------------------------------------------------------------
+// LANDING CONTENT (Konten beranda yang dikelola administrator)
+// ----------------------------------------------------------------------------
+model LandingReview {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  company     String?
+  quote       String
+  avatarUrl   String?  @map("avatar_url")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdById String   @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  createdBy   Profile  @relation("LandingReviewAuthor", fields: [createdById], references: [id])
+
+  @@map("landing_reviews")
+}
+
+model LandingPartnerLogo {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  logoUrl     String?  @map("logo_url")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdById String   @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  createdBy   Profile  @relation("LandingPartnerAuthor", fields: [createdById], references: [id])
+
+  @@map("landing_partner_logos")
+}
+
+// ----------------------------------------------------------------------------
 // NOTIFICATIONS (Notifikasi In-App Pengguna)
 // ----------------------------------------------------------------------------
 model Notification {
@@ -668,5 +784,7 @@ model Notification {
 
   user      Profile          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId, isRead])
+  @@index([userId, createdAt(sort: Desc)])
   @@map("notifications")
 }

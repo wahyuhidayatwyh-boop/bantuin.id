@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useApp } from "@/lib/context/AppContext";
 import { formatIDR } from "@/lib/utils";
 import { isVoucherLocationMatch } from "@/lib/mock/voucherData";
@@ -32,10 +32,15 @@ export default function VoucherPicker({
   appliedVoucher, 
   orderLocation = null 
 }) {
-  const { vouchers = [], redeemVoucher, selectedLocation } = useApp();
+  const { vouchers = [], redeemVoucher, selectedLocation, refreshVouchers } = useApp();
   const [inputCode, setInputCode] = useState("");
   const [error, setError] = useState("");
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // Auto-refresh vouchers on mount from database
+  useEffect(() => {
+    refreshVouchers?.();
+  }, [refreshVouchers]);
 
   // Lokasi efektif pesanan atau user
   const effectiveLocation = orderLocation || selectedLocation || "Semua Wilayah";
@@ -44,7 +49,7 @@ export default function VoucherPicker({
   const availableVouchers = vouchers.filter(
     (v) =>
       v.isActive &&
-      v.quota - v.usedCount > 0 &&
+      ((v.quota || 100) - (v.usedCount || 0) > 0) &&
       new Date(v.expiresAt) >= new Date() &&
       (v.appliesTo === "all" || v.appliesTo === category)
   );

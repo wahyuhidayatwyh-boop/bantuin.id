@@ -222,12 +222,89 @@ export default function TermsPage() {
             </p>
             <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <div className="font-bold text-slate-800 text-xs">Pusat Layanan &amp; Pengaduan Komunitas</div>
-                <div className="text-[11px] text-slate-500">Email: bantuan@bantuin.id • Jam Kerja: 08.00 - 22.00 WIB</div>
+                <div className="font-bold text-slate-800 text-xs">Pusat Layanan &amp; Pengaduan Komunitas Bantuin</div>
+                <div className="text-[11px] text-slate-500">
+                  Email: <a href="mailto:hellobantuinaja@gmail.com" className="text-[#1683FF] hover:underline font-semibold">hellobantuinaja@gmail.com</a> • WhatsApp: <a href="https://wa.me/6283843653251" className="text-emerald-700 hover:underline font-semibold">+62 838-4365-3251 (083843653251)</a> • Lokasi: Purwokerto, Jawa Tengah
+                </div>
               </div>
-              <span className="text-xs font-bold text-[#1683FF] bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-200 self-start sm:self-auto">
+              <span className="text-xs font-bold text-[#1683FF] bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-200 self-start sm:self-auto shrink-0">
                 Merespons dalam 24 Jam
               </span>
+            </div>
+          </section>
+
+          {/* Section 9: Kebijakan Pembatalan, Pengembalian Dana (Refund), & Penyelesaian Sengketa (Midtrans Compliance) */}
+          <section id="kebijakan-refund" className="space-y-4 pt-4 border-t border-slate-100">
+            <div className="flex items-center gap-2.5 text-[#102A43] font-bold text-base border-b border-slate-100 pb-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              <h2>9. Kebijakan Pembatalan &amp; Pengembalian Dana (Refund Policy)</h2>
+            </div>
+            
+            <p>
+              Bantuin.id berkomitmen memberikan perlindungan finansial yang adil bagi seluruh pengguna platform melalui sistem rekening bersama terverifikasi (*Escrow Payment Protection*).
+            </p>
+
+            <div className="space-y-3.5 text-xs sm:text-sm">
+              <div className="p-4 rounded-2xl bg-blue-50/70 border border-blue-200 space-y-2">
+                <h3 className="font-bold text-slate-900 text-xs sm:text-sm flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-[#1683FF]" />
+                  9.1 Prinsip Perlindungan Escrow Terverifikasi
+                </h3>
+                <p className="text-[11px] sm:text-xs text-slate-600 leading-relaxed">
+                  Seluruh pembayaran pesanan yang dibayarkan pemesan melalui Payment Gateway resmi berizin Bank Indonesia akan <strong>diamankan sementara oleh platform</strong>. Hak bayar mitra/helper baru akan dicairkan setelah pemesan mengonfirmasi bahwa pekerjaan atau masa sewa telah selesai dengan baik tanpa adanya komplain yang tertunda.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+                <h3 className="font-bold text-slate-900 text-xs sm:text-sm">
+                  9.2 Kriteria Kelayakan Pengembalian Dana (Refund Eligibility)
+                </h3>
+                <ul className="list-disc pl-5 space-y-1.5 text-[11px] sm:text-xs text-slate-600">
+                  <li>
+                    <strong>Pembatalan Bantuan / Jasa:</strong> Pemesan berhak atas <strong>pengembalian dana 100%</strong> apabila:
+                    <ul className="list-circle pl-4 mt-1 space-y-1">
+                      <li>Mitra helper membatalkan pesanan secara sepihak atau tidak hadir di titik temu tanpa konfirmasi.</li>
+                      <li>Pemesan membatalkan pesanan sebelum helper mengambil/memproses penugasan tersebut.</li>
+                      <li>Hasil pekerjaan jasa terbukti tidak sesuai kesepakatan tertulis setelah dimediasi oleh tim dispute Bantuin.</li>
+                    </ul>
+                  </li>
+                  <li>
+                    <strong>Rental Sewa Barang &amp; Uang Jaminan (Deposit 100% Refundable):</strong>
+                    <ul className="list-circle pl-4 mt-1 space-y-1">
+                      <li>Uang deposit/jaminan unit sewa <strong>100% dikembalikan</strong> kepada penyewa segera setelah barang sewa diserahkan kembali kepada pemilik dalam kondisi utuh dan berfungsi normal.</li>
+                      <li>Apabila saat serah terima awal unit sewa mengalami kerusakan atau tidak sesuai deskripsi katalog, penyewa berhak menolak unit dan mendapatkan <strong>pengembalian penuh seluruh biaya sewa dan deposit</strong>.</li>
+                    </ul>
+                  </li>
+                </ul>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                <h3 className="font-bold text-slate-900 text-xs sm:text-sm">
+                  9.3 Prosedur Pengajuan Klaim Refund
+                </h3>
+                <ol className="list-decimal pl-5 space-y-1 text-[11px] sm:text-xs text-slate-600">
+                  <li>Buka bilik transaksi terkait pada menu <strong>Aktivitas &rarr; Order Room</strong> di aplikasi Bantuin.</li>
+                  <li>Pilih menu <strong>&quot;Buka Sengketa&quot;</strong> atau <strong>&quot;Laporkan Masalah&quot;</strong> sebelum batas waktu konfirmasi otomatis berakhir.</li>
+                  <li>Unggah bukti foto/video kondisi paket atau barang serta kronologi kendala yang dialami.</li>
+                  <li>Pengguna juga dapat menghubungi Customer Support resmi via WhatsApp: <strong>083843653251</strong> atau email: <strong>hellobantuinaja@gmail.com</strong>.</li>
+                </ol>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                <h3 className="font-bold text-slate-900 text-xs sm:text-sm">
+                  9.4 Jangka Waktu Pemrosesan &amp; Pencairan (SLA)
+                </h3>
+                <p className="text-[11px] sm:text-xs text-slate-600 leading-relaxed">
+                  Tim mediasi admin Bantuin akan meninjau dan memberikan keputusan penyelesaian sengketa dalam waktu <strong>1 x 24 jam</strong> hari kerja. Apabila refund disetujui, dana akan dikembalikan ke saldo dompet akun pengguna atau ditransfer kembali ke metode pembayaran asal (rekening bank / e-wallet) dalam jangka waktu <strong>1 (satu) hingga 3 (tiga) hari kerja</strong> sesuai ketentuan bank penerbit.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-emerald-50/60 border border-emerald-200 space-y-1.5">
+                <div className="font-bold text-emerald-900 text-xs sm:text-sm">Kontak Khusus Bantuan &amp; Klaim Transaksi</div>
+                <div className="text-[11px] sm:text-xs text-emerald-800">
+                  WhatsApp: <strong>+62 838-4365-3251 (083843653251)</strong> • Email: <strong>hellobantuinaja@gmail.com</strong> • Alamat Operasional: Purwokerto, Jawa Tengah, Indonesia • Jam Layanan: 08.00 – 22.00 WIB
+                </div>
+              </div>
             </div>
           </section>
 

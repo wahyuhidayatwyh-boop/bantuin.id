@@ -42,6 +42,8 @@ next-env.d.ts
 .vercel/
 .next/
 node_modules/
+backups/
+scratch/
 *.pem
 *.key
 service-account*.json

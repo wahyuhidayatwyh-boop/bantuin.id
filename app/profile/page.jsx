@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from "react";
+import React, { useState, useEffect, useRef, Suspense } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { useApp } from "@/lib/context/AppContext";
@@ -12,8 +13,10 @@ import { extractKabupatenName } from "@/lib/services/gpsService";
 import LocationSearchDropdown from "@/components/ui/LocationSearchDropdown";
 import AvatarCropModal from "@/components/ui/AvatarCropModal";
 import ProfileSkeleton from "@/components/skeletons/ProfileSkeleton";
+import { saveFormDraft, getFormDraft, clearFormDraft, useBeforeUnload } from "@/lib/hooks/useFormDraft";
 import {
   ShieldCheck,
+  ShieldAlert,
   Star,
   CheckCircle2,
   Clock,
@@ -49,6 +52,7 @@ import {
   AlertCircle,
   FileText,
   Image as ImageIcon,
+  XCircle,
 } from "lucide-react";
 
 function ProfilePageContent() {
@@ -60,7 +64,32 @@ function ProfilePageContent() {
     isDetectingLocation,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState("profile"); // profile, wallet, kyc, service_settings, bank, security
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  const getInitialTab = () => {
+    if (typeof window !== "undefined") {
+      const urlTab = searchParams.get("tab");
+      if (urlTab) return urlTab;
+      const stored = sessionStorage.getItem("bantuin_profile_active_tab");
+      if (stored) return stored;
+    }
+    return "profile";
+  };
+
+  const [activeTab, setActiveTabState] = useState(getInitialTab);
+
+  const setActiveTab = (tabId) => {
+    setActiveTabState(tabId);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("bantuin_profile_active_tab", tabId);
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", tabId);
+      window.history.replaceState(null, "", url.toString());
+    }
+  };
+
+  const DRAFT_PROFILE_KEY = "bantuin_draft_profile_data";
   const [isSaved, setIsSaved] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [isBankSaved, setIsBankSaved] = useState(false);
@@ -80,15 +109,20 @@ function ProfilePageContent() {
   const [isLoadingWallet, setIsLoadingWallet] = useState(false);
   const [isSubmittingWithdraw, setIsSubmittingWithdraw] = useState(false);
 
-  const isUser = !currentUser || currentUser?.accountRole === "user" || currentUser?.accountType === "user" || (!currentUser?.accountRole && !currentUser?.accountType);
-  const isProvider = currentUser?.accountRole === "provider" || currentUser?.accountType === "provider";
-  const isMitra = currentUser?.accountRole === "partner" || currentUser?.accountType === "mitra" || currentUser?.isPartner;
+  const isPartner = Boolean(currentUser?.accountRole === "partner" || currentUser?.isPartner);
+  const isMitra = isPartner;
+  const isProvider = !isPartner && currentUser?.accountRole === "provider" && currentUser?.verificationStatus === "verified";
+  const isUser = !isPartner && !isProvider;
+
+  const isKycVerified = currentUser?.verificationStatus === "verified";
+  const isKycPending = currentUser?.verificationStatus === "pending_review";
+  const isKycRejected = currentUser?.verificationStatus === "rejected";
 
   const tabsList = isUser
     ? [
       { id: "profile", label: "Profil & Kontak", icon: User },
       { id: "wallet", label: "Dompet & Transaksi", icon: CreditCard },
-      { id: "kyc", label: "Verifikasi Akun Jasa", icon: ShieldCheck },
+      { id: "kyc", label: isKycPending ? "Status Verifikasi" : "Verifikasi Akun Jasa", icon: ShieldCheck },
       { id: "bank", label: "Rekening Bank", icon: Building2 },
       { id: "security", label: "Keamanan & Sandi", icon: Lock },
     ]
@@ -96,7 +130,7 @@ function ProfilePageContent() {
       ? [
         { id: "profile", label: "Profil & Kontak", icon: User },
         { id: "wallet", label: "Dompet & Payout", icon: CreditCard },
-        { id: "kyc", label: "Verifikasi KYC", icon: ShieldCheck },
+        { id: "kyc", label: "Status Verifikasi", icon: ShieldCheck },
         { id: "service_settings", label: "Pengaturan Jasa", icon: Briefcase },
         { id: "bank", label: "Rekening Bank", icon: Building2 },
         { id: "security", label: "Keamanan & Sandi", icon: Lock },
@@ -104,7 +138,7 @@ function ProfilePageContent() {
       : [
         { id: "profile", label: "Profil & Kontak", icon: User },
         { id: "wallet", label: "Dompet Toko", icon: CreditCard },
-        { id: "kyc", label: "Verifikasi Pemilik", icon: ShieldCheck },
+        { id: "kyc", label: "Status Verifikasi", icon: ShieldCheck },
         { id: "bank", label: "Rekening Bank", icon: Building2 },
         { id: "security", label: "Keamanan & Sandi", icon: Lock },
       ];
@@ -127,17 +161,20 @@ function ProfilePageContent() {
   // -----------------------------------------------------------------
   // PROFILE STATE (SYNCED WITH DATABASE & CURRENT USER)
   // -----------------------------------------------------------------
+  const hasInitializedProfileRef = useRef(false);
   const [profileData, setProfileData] = useState({
     fullName: currentUser?.fullName || "",
     email: currentUser?.email || "",
     phone: currentUser?.phoneNumber || currentUser?.phone || "",
-    city: currentUser?.campusName || currentUser?.address || "",
+    city: currentUser?.campusName || "",
+    address: currentUser?.partnerAddress || currentUser?.address || "",
     bio: currentUser?.bio || "",
     field: currentUser?.faculty || "Pengguna Umum & Komunitas",
     fieldSelect: currentUser?.faculty || "Pengguna Umum & Komunitas",
     customField: "",
     isProviderEnabled: true,
     skills: Array.isArray(currentUser?.skills) ? currentUser.skills : [],
+    skillsStr: Array.isArray(currentUser?.skills) ? currentUser.skills.join(", ") : "",
     bankName: currentUser?.payoutBank || "",
     accountNumber: currentUser?.payoutAccountNumber || "",
     accountHolder: currentUser?.payoutAccountHolder || "",
@@ -173,22 +210,29 @@ function ProfilePageContent() {
           setCurrentUser((prev) => ({ ...prev, ...dbUser, avatarUrl: cleanAvatar }));
         }
 
-        const isPresetSkill = availableSkills.includes(dbUser.faculty);
-        setProfileData({
-          fullName: dbUser.fullName || "",
-          email: dbUser.email || "",
-          phone: dbUser.phoneNumber || "",
-          city: dbUser.campusName || "Bekasi Barat, Kota Bekasi",
-          bio: dbUser.bio || "",
-          field: dbUser.faculty || "Pengguna Umum & Komunitas",
-          fieldSelect: isPresetSkill ? (dbUser.faculty || "Pengguna Umum & Komunitas") : (dbUser.faculty ? "other" : "Pengguna Umum & Komunitas"),
-          customField: !isPresetSkill && dbUser.faculty ? dbUser.faculty : "",
-          isProviderEnabled: true,
-          skills: Array.isArray(dbUser.skills) ? dbUser.skills : [],
-          bankName: dbUser.payoutBank || "",
-          accountNumber: dbUser.payoutAccountNumber || "",
-          accountHolder: dbUser.payoutAccountHolder || "",
-        });
+        if (!hasInitializedProfileRef.current) {
+          hasInitializedProfileRef.current = true;
+          const isPresetSkill = availableSkills.includes(dbUser.faculty);
+          const savedDraft = getFormDraft(DRAFT_PROFILE_KEY, null);
+          const initialData = {
+            fullName: dbUser.fullName || "",
+            email: dbUser.email || "",
+            phone: dbUser.phoneNumber || "",
+            city: dbUser.campusName || "",
+            address: dbUser.partnerAddress || dbUser.address || "",
+            bio: dbUser.bio || "",
+            field: dbUser.faculty || "Pengguna Umum & Komunitas",
+            fieldSelect: isPresetSkill ? (dbUser.faculty || "Pengguna Umum & Komunitas") : (dbUser.faculty ? "other" : "Pengguna Umum & Komunitas"),
+            customField: !isPresetSkill && dbUser.faculty ? dbUser.faculty : "",
+            isProviderEnabled: true,
+            skills: Array.isArray(dbUser.skills) ? dbUser.skills : [],
+            skillsStr: Array.isArray(dbUser.skills) ? dbUser.skills.join(", ") : "",
+            bankName: dbUser.payoutBank || "",
+            accountNumber: dbUser.payoutAccountNumber || "",
+            accountHolder: dbUser.payoutAccountHolder || "",
+          };
+          setProfileData(savedDraft ? { ...initialData, ...savedDraft } : initialData);
+        }
 
         setWithdrawForm((prev) => ({
           ...prev,
@@ -200,7 +244,7 @@ function ProfilePageContent() {
         setUserJasaVerifyForm((prev) => ({
           ...prev,
           idNumber: dbUser.idNumber || prev.idNumber || "",
-          idCardUrl: dbUser.idCardUrl || prev.idCardUrl || null,
+          idCardUrl: dbUser.idCardViewUrl || dbUser.idCardUrl || prev.idCardUrl || null,
           bankName: dbUser.payoutBank || "",
           accountNumber: dbUser.payoutAccountNumber || "",
           accountHolder: dbUser.payoutAccountHolder || "",
@@ -209,8 +253,8 @@ function ProfilePageContent() {
         setKycForm((prev) => ({
           ...prev,
           nik: dbUser.idNumber || prev.nik || "",
-          ktpUrl: dbUser.idCardUrl || prev.ktpUrl || null,
-          selfieUrl: dbUser.selfieUrl || dbUser.avatarUrl || prev.selfieUrl || null,
+          ktpUrl: dbUser.idCardViewUrl || dbUser.idCardUrl || prev.ktpUrl || null,
+          selfieUrl: dbUser.selfieViewUrl || dbUser.selfieUrl || dbUser.avatarUrl || prev.selfieUrl || null,
         }));
       }
 
@@ -222,6 +266,22 @@ function ProfilePageContent() {
       if (showLoading) setIsLoadingProfile(false);
     }
   };
+
+  // Auto-save profile draft on changes
+  useEffect(() => {
+    if (hasInitializedProfileRef.current) {
+      saveFormDraft(DRAFT_PROFILE_KEY, profileData);
+    }
+  }, [profileData]);
+
+  const isProfileDirty = Boolean(
+    hasInitializedProfileRef.current &&
+    (profileData.fullName !== (currentUser?.fullName || "") ||
+     profileData.bio !== (currentUser?.bio || "") ||
+     profileData.phone !== (currentUser?.phoneNumber || currentUser?.phone || "") ||
+     profileData.address !== (currentUser?.partnerAddress || currentUser?.address || ""))
+  );
+  useBeforeUnload(isProfileDirty, "Ada data profil yang belum disimpan. Yakin ingin meninggalkan halaman?");
 
   // Fetch real financial wallet data from DB
   const loadWalletData = async () => {
@@ -261,8 +321,6 @@ function ProfilePageContent() {
     setIsBankSaved(false);
     setPasswordError("");
     setPasswordSuccess("");
-    // Synchronize fresh database state silently when switching tabs
-    loadDbProfile(false);
     if (tabId === "kyc" || tabId === "jasa") {
       setUserJasaVerifyForm((prev) => ({
         ...prev,
@@ -278,7 +336,6 @@ function ProfilePageContent() {
 
   useEffect(() => {
     const handleAuthSync = () => {
-      loadDbProfile(false);
       loadWalletData();
     };
 
@@ -288,25 +345,28 @@ function ProfilePageContent() {
     return () => window.removeEventListener("bantuin_auth_changed", handleAuthSync);
   }, []);
 
-  // Re-sync if currentUser updates from context
+  // Initialize once if currentUser arrives before loadDbProfile finishes
   useEffect(() => {
-    if (currentUser) {
+    if (currentUser && !hasInitializedProfileRef.current) {
+      hasInitializedProfileRef.current = true;
       const isPresetSkill = availableSkills.includes(currentUser.faculty);
-      setProfileData((prev) => ({
-        ...prev,
-        fullName: currentUser.fullName || prev.fullName,
-        email: currentUser.email || prev.email,
-        phone: currentUser.phoneNumber || currentUser.phone || prev.phone,
-        city: currentUser.campusName || currentUser.address || prev.city,
-        bio: currentUser.bio || prev.bio,
-        field: currentUser.faculty || prev.field,
-        fieldSelect: isPresetSkill ? (currentUser.faculty || prev.fieldSelect) : (currentUser.faculty ? "other" : prev.fieldSelect),
-        customField: !isPresetSkill && currentUser.faculty ? currentUser.faculty : prev.customField,
-        skills: Array.isArray(currentUser.skills) ? currentUser.skills : prev.skills,
+      setProfileData({
+        fullName: currentUser.fullName || "",
+        email: currentUser.email || "",
+        phone: currentUser.phoneNumber || currentUser.phone || "",
+        city: currentUser.campusName || "",
+        address: currentUser.partnerAddress || currentUser.address || "",
+        bio: currentUser.bio || "",
+        field: currentUser.faculty || "Pengguna Umum & Komunitas",
+        fieldSelect: isPresetSkill ? (currentUser.faculty || "Pengguna Umum & Komunitas") : (currentUser.faculty ? "other" : "Pengguna Umum & Komunitas"),
+        customField: !isPresetSkill && currentUser.faculty ? currentUser.faculty : "",
+        isProviderEnabled: true,
+        skills: Array.isArray(currentUser.skills) ? currentUser.skills : [],
+        skillsStr: Array.isArray(currentUser.skills) ? currentUser.skills.join(", ") : "",
         bankName: currentUser.payoutBank || "",
         accountNumber: currentUser.payoutAccountNumber || "",
         accountHolder: currentUser.payoutAccountHolder || "",
-      }));
+      });
 
       setUserJasaVerifyForm((prev) => ({
         ...prev,
@@ -321,15 +381,31 @@ function ProfilePageContent() {
 
   // State untuk input keahlian kustom di tab service_settings
   const [newCustomSkill, setNewCustomSkill] = useState("");
-  const handleAddNewSkill = (e) => {
+  const handleAddNewSkill = async (e) => {
     e?.preventDefault();
     const trimmed = newCustomSkill.trim();
     if (!trimmed) return;
     if (!profileData.skills.includes(trimmed)) {
       const updated = [...profileData.skills, trimmed];
-      setProfileData((prev) => ({ ...prev, skills: updated }));
+      setProfileData((prev) => ({ ...prev, skills: updated, skillsStr: updated.join(", ") }));
       if (setCurrentUser) {
         setCurrentUser((prev) => ({ ...prev, skills: updated }));
+      }
+      try {
+        const token = await authService.getValidAccessToken();
+        if (token) {
+          await fetch("/api/profile/update", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ skills: updated }),
+          });
+          await authService.updateProfile({ skills: updated }, false);
+          if (typeof window !== "undefined") {
+            window.dispatchEvent(new CustomEvent("bantuin_provider_updated"));
+          }
+        }
+      } catch (err) {
+        console.warn("Gagal auto-save keahlian baru:", err);
       }
       if (addToast) {
         addToast("Keahlian Ditambahkan", `Bidang "${trimmed}" berhasil ditambahkan ke keahlian aktif Anda.`);
@@ -445,7 +521,6 @@ function ProfilePageContent() {
     }
   };
 
-  // -----------------------------------------------------------------
   // FORM SAVE HANDLER (ACTUALLY PERSISTS TO DATABASE)
   // -----------------------------------------------------------------
   const handleSaveProfile = async (e) => {
@@ -458,18 +533,27 @@ function ProfilePageContent() {
         throw new Error("Sesi tidak ditemukan. Silakan masuk kembali.");
       }
 
+      const skillsToSave = Array.isArray(profileData.skills)
+        ? profileData.skills
+        : (profileData.skillsStr ? profileData.skillsStr.split(",").map((s) => s.trim()).filter(Boolean) : []);
+
+      const updatePayload = {
+        fullName: profileData.fullName,
+        phoneNumber: profileData.phone,
+        campusName: profileData.city,
+        address: profileData.address,
+        partnerAddress: profileData.address,
+        bio: profileData.bio,
+        skills: skillsToSave,
+      };
+
       const res = await fetch("/api/profile/update", {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          fullName: profileData.fullName,
-          phoneNumber: profileData.phone,
-          campusName: profileData.city,
-          bio: profileData.bio,
-        }),
+        body: JSON.stringify(updatePayload),
       });
 
       const json = await res.json();
@@ -477,15 +561,40 @@ function ProfilePageContent() {
         throw new Error(json.error || "Gagal memperbarui profil.");
       }
 
-      if (json.data) {
-        if (setCurrentUser) {
-          setCurrentUser((prev) => ({ ...prev, ...json.data }));
-        }
-        await authService.updateProfile(json.data, false);
+      // Also sync to /api/user/profile for complete consistency
+      await fetch("/api/user/profile", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(updatePayload),
+      }).catch(() => {});
+
+      const updatedUser = {
+        ...(json.data || {}),
+        fullName: profileData.fullName,
+        phoneNumber: profileData.phone,
+        phone: profileData.phone,
+        campusName: profileData.city,
+        address: profileData.address,
+        partnerAddress: profileData.address,
+        bio: profileData.bio,
+        skills: skillsToSave,
+      };
+
+      if (setCurrentUser) {
+        setCurrentUser((prev) => ({ ...prev, ...updatedUser }));
+      }
+      await authService.updateProfile(updatedUser, false);
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("bantuin_provider_updated"));
       }
 
       setIsSaved(true);
-      addToast?.("Profil Disimpan", "Informasi identitas, domisili, dan kontak berhasil diperbarui di database.", "success");
+      clearFormDraft(DRAFT_PROFILE_KEY);
+      addToast?.("Profil Disimpan", "Informasi identitas, alamat domisili, keahlian, dan kontak berhasil diperbarui di database.", "success");
       setTimeout(() => setIsSaved(false), 2500);
     } catch (err) {
       console.error("Save profile error:", err);
@@ -495,14 +604,30 @@ function ProfilePageContent() {
     }
   };
 
-  const toggleSkill = (skill) => {
+  const toggleSkill = async (skill) => {
     const updatedSkills = profileData.skills.includes(skill)
       ? profileData.skills.filter((s) => s !== skill)
       : [...profileData.skills, skill];
 
-    setProfileData({ ...profileData, skills: updatedSkills });
+    setProfileData((prev) => ({ ...prev, skills: updatedSkills, skillsStr: updatedSkills.join(", ") }));
     if (setCurrentUser) {
       setCurrentUser((prev) => ({ ...prev, skills: updatedSkills }));
+    }
+    try {
+      const token = await authService.getValidAccessToken();
+      if (token) {
+        await fetch("/api/profile/update", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ skills: updatedSkills }),
+        });
+        await authService.updateProfile({ skills: updatedSkills }, false);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("bantuin_provider_updated"));
+        }
+      }
+    } catch (err) {
+      console.warn("Gagal auto-save toggle skill:", err);
     }
   };
 
@@ -668,7 +793,7 @@ function ProfilePageContent() {
   // -----------------------------------------------------------------
   // KYC MODAL & RE-UPLOAD STATE
   // -----------------------------------------------------------------
-  const isJasaVerified = currentUser?.accountRole === "provider" || currentUser?.accountType === "provider" || (currentUser?.verificationStatus === "verified" && currentUser?.accountRole !== "user");
+  const isJasaVerified = currentUser?.verificationStatus === "verified";
 
   const [userJasaVerifyForm, setUserJasaVerifyForm] = useState({
     idNumber: currentUser?.idNumber || "",
@@ -721,14 +846,12 @@ function ProfilePageContent() {
     const targetAccountHolder = (userJasaVerifyForm.accountHolder || profileData.accountHolder || currentUser?.payoutAccountHolder || "").trim().toUpperCase();
 
     if (!targetBankName || !targetAccountNumber) {
-      addToast?.("Rekening Belum Diatur", "Harap simpan data rekening Anda di menu Rekening Bank terlebih dahulu.", "error");
-      handleSelectTab("bank");
+      addToast?.("Rekening Belum Lengkap", "Harap pilih Bank dan isi nomor rekening pencairan pada formulir di atas.", "error");
       return;
     }
 
     if (!targetAccountHolder) {
-      addToast?.("Nama Pemilik Belum Lengkap", "Harap lengkapi nama pemilik rekening di menu Rekening Bank terlebih dahulu.", "error");
-      handleSelectTab("bank");
+      addToast?.("Nama Pemilik Belum Lengkap", "Harap isi nama pemilik rekening sesuai KTP/buku tabungan.", "error");
       return;
     }
 
@@ -753,29 +876,42 @@ function ProfilePageContent() {
             body: uploadFormData,
           });
           const uploadJson = await uploadRes.json();
-          if (uploadRes.ok && (uploadJson.url || uploadJson.urls?.[0])) {
-            finalKtpUrl = uploadJson.url || uploadJson.urls[0];
+          const uploadedStorageRef = uploadJson.storageRef || uploadJson.url || uploadJson.data?.storageRef || uploadJson.data?.url;
+          if (uploadRes.ok && uploadedStorageRef) {
+            finalKtpUrl = uploadedStorageRef;
+          } else {
+            throw new Error(uploadJson.error || "Gagal mengunggah foto KTP ke penyimpanan.");
           }
         } catch (uploadErr) {
-          console.warn("KTP Supabase upload warning:", uploadErr);
+          console.error("KTP Supabase upload error:", uploadErr);
+          throw uploadErr;
         }
       }
 
-      // 2. Kirim update ke Database melalui PUT /api/user/profile
-      const res = await fetch("/api/user/profile", {
+      // 2. Simpan Rekening Bank Payout
+      await fetch("/api/profile/payout-account", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          accountRole: "provider",
-          verificationStatus: "verified",
-          idNumber: userJasaVerifyForm.idNumber.trim(),
-          idCardUrl: finalKtpUrl,
           payoutBank: targetBankName,
           payoutAccountNumber: targetAccountNumber,
           payoutAccountHolder: targetAccountHolder,
+        }),
+      }).catch(() => {});
+
+      // 3. Kirim pengajuan KYC resmi ke POST /api/profile/kyc
+      const res = await fetch("/api/profile/kyc", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          idNumber: userJasaVerifyForm.idNumber.trim(),
+          idCardUrl: finalKtpUrl,
         }),
       });
 
@@ -785,14 +921,14 @@ function ProfilePageContent() {
       }
 
       const updatedPayload = {
-        ...(json.data || {}),
-        accountRole: "provider",
-        accountType: "provider",
-        role: "provider",
-        verificationStatus: "verified",
-        isProviderEnabled: true,
+        accountRole: currentUser?.accountRole || "user",
+        accountType: currentUser?.accountRole || "user",
+        role: currentUser?.accountRole || "user",
+        verificationStatus: "pending_review",
+        verificationNotes: "Menunggu peninjauan oleh Administrator Bantuin",
         idNumber: userJasaVerifyForm.idNumber.trim(),
-        idCardUrl: finalKtpUrl,
+        idCardUrl: json.data?.idCardViewUrl || finalKtpUrl,
+        idCardViewUrl: json.data?.idCardViewUrl || finalKtpUrl,
         payoutBank: targetBankName,
         payoutAccountNumber: targetAccountNumber,
         payoutAccountHolder: targetAccountHolder,
@@ -803,9 +939,7 @@ function ProfilePageContent() {
         },
       };
 
-      // 3. Update localStorage session & global context
       await authService.updateProfile(updatedPayload, false);
-
       if (setCurrentUser) {
         setCurrentUser((prev) => ({
           ...prev,
@@ -813,14 +947,9 @@ function ProfilePageContent() {
         }));
       }
 
-      // 4. Emit event agar seluruh komponen navbar / portal langsung bereaksi
       window.dispatchEvent(new Event("bantuin_auth_changed"));
-
-      addToast?.(
-        "Verifikasi Akun Jasa Berhasil",
-        "Akun Anda kini resmi aktif sebagai Penyedia Jasa yang terverifikasi resmi di Bantuin.id.",
-        "success"
-      );
+      addToast?.("Pengajuan KYC Dikirim", "Dokumen identitas Anda berhasil dikirim dan sedang ditinjau oleh Admin Bantuin.", "success");
+      handleSelectTab("kyc");
     } catch (err) {
       console.error("KYC Verification error:", err);
       addToast?.("Gagal Verifikasi", err.message || "Terjadi kendala saat memproses verifikasi.", "error");
@@ -834,13 +963,12 @@ function ProfilePageContent() {
   const [kycForm, setKycForm] = useState({
     ktpUrl: currentUser?.idCardUrl || null,
     ktpFile: null,
-    selfieUrl: currentUser?.selfieUrl || currentUser?.avatarUrl || null,
-    selfieFile: null,
+    ktpFileName: "",
     nik: currentUser?.idNumber || "",
     notes: "",
   });
 
-  const handleKycFile = (file, type) => {
+  const handleKycFile = (file) => {
     if (!file) return;
     const validation = validateFile(file, "bantuin-kyc");
     if (!validation.valid) {
@@ -850,9 +978,9 @@ function ProfilePageContent() {
     const localUrl = URL.createObjectURL(file);
     setKycForm((prev) => ({
       ...prev,
-      [type === "ktp" ? "ktpUrl" : "selfieUrl"]: localUrl,
-      [type === "ktp" ? "ktpFile" : "selfieFile"]: file,
-      [type === "ktp" ? "ktpFileName" : "selfieFileName"]: file.name,
+      ktpUrl: localUrl,
+      ktpFile: file,
+      ktpFileName: file.name,
     }));
   };
 
@@ -872,36 +1000,22 @@ function ProfilePageContent() {
 
       let finalKtpUrl = kycForm.ktpUrl;
       if (kycForm.ktpFile) {
-        try {
-          const uploadFormData = new FormData();
-          uploadFormData.append("file", kycForm.ktpFile);
-          uploadFormData.append("bucket", "bantuin-kyc");
-          uploadFormData.append("folder", "ktp");
-          const uploadRes = await fetch("/api/upload", { method: "POST", body: uploadFormData });
-          const uploadJson = await uploadRes.json();
-          if (uploadRes.ok && (uploadJson.url || uploadJson.urls?.[0])) {
-            finalKtpUrl = uploadJson.url || uploadJson.urls[0];
-          }
-        } catch (err) {
-          console.warn("Upload KYC KTP warning:", err);
+        const uploadFormData = new FormData();
+        uploadFormData.append("file", kycForm.ktpFile);
+        uploadFormData.append("bucket", "bantuin-kyc");
+        uploadFormData.append("folder", "ktp");
+        const uploadRes = await fetch("/api/upload", { method: "POST", body: uploadFormData });
+        const uploadJson = await uploadRes.json();
+        const uploadedRef = uploadJson.storageRef || uploadJson.url || uploadJson.data?.storageRef || uploadJson.data?.url;
+        if (uploadRes.ok && uploadedRef) {
+          finalKtpUrl = uploadedRef;
+        } else {
+          throw new Error(uploadJson.error || "Gagal mengunggah dokumen KTP ke penyimpanan.");
         }
       }
 
-      let finalSelfieUrl = kycForm.selfieUrl;
-      if (kycForm.selfieFile) {
-        try {
-          const uploadFormData = new FormData();
-          uploadFormData.append("file", kycForm.selfieFile);
-          uploadFormData.append("bucket", "bantuin-kyc");
-          uploadFormData.append("folder", "selfie");
-          const uploadRes = await fetch("/api/upload", { method: "POST", body: uploadFormData });
-          const uploadJson = await uploadRes.json();
-          if (uploadRes.ok && (uploadJson.url || uploadJson.urls?.[0])) {
-            finalSelfieUrl = uploadJson.url || uploadJson.urls[0];
-          }
-        } catch (err) {
-          console.warn("Upload KYC Selfie warning:", err);
-        }
+      if (!finalKtpUrl) {
+        throw new Error("Foto KTP asli wajib diunggah terlebih dahulu.");
       }
 
       const res = await fetch("/api/profile/kyc", {
@@ -913,7 +1027,6 @@ function ProfilePageContent() {
         body: JSON.stringify({
           idNumber: kycForm.nik,
           idCardUrl: finalKtpUrl,
-          selfieUrl: finalSelfieUrl,
         }),
       });
 
@@ -923,9 +1036,9 @@ function ProfilePageContent() {
       }
 
       const updatedKyc = {
-        verificationStatus: "verified",
-        idCardUrl: finalKtpUrl,
-        selfieUrl: finalSelfieUrl,
+        verificationStatus: json.data?.verificationStatus || "pending_review",
+        idCardUrl: json.data?.idCardViewUrl || finalKtpUrl,
+        idCardViewUrl: json.data?.idCardViewUrl || finalKtpUrl,
         idNumber: kycForm.nik,
       };
 
@@ -939,7 +1052,7 @@ function ProfilePageContent() {
 
       window.dispatchEvent(new Event("bantuin_auth_changed"));
       setIsKycModalOpen(false);
-      addToast?.("Dokumen KYC Terverifikasi", "Dokumen KTP & Foto Wajah Anda telah diverifikasi dan tersimpan aman di database.", "success");
+      addToast?.("Pengajuan KYC Dikirim", "Dokumen identitas Anda sedang ditinjau oleh Admin. Fitur penarikan saldo akan aktif setelah diverifikasi.", "success");
     } catch (err) {
       console.error("KYC Submit error:", err);
       addToast?.("Gagal Mengunggah KYC", err.message || "Terjadi kesalahan saat menyimpan dokumen.", "error");
@@ -1043,13 +1156,50 @@ function ProfilePageContent() {
       <main className="flex-1 max-w-[1240px] w-full mx-auto px-4 md:px-6 lg:px-8 py-8">
 
         {/* ============================================================ */}
+        {/* BANNER ENFORCEMENT JIKA AKUN SEDANG DITANGGUHKAN (SUSPENDED) */}
+        {/* ============================================================ */}
+        {currentUser?.verificationStatus === "suspended" && (
+          <div className="bg-rose-50 border-2 border-rose-300 rounded-3xl p-5 sm:p-6 mb-8 text-rose-900 shadow-md animate-in fade-in">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 border border-rose-200">
+                <ShieldAlert className="w-6 h-6" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-base font-extrabold text-rose-950">Akun Anda Ditangguhkan oleh Admin</h3>
+                  <span className="text-[10px] font-black uppercase tracking-wider bg-rose-200 text-rose-900 px-2.5 py-0.5 rounded-full">
+                    Suspended
+                  </span>
+                </div>
+                <p className="text-xs sm:text-sm text-rose-800 mt-1 leading-relaxed">
+                  Semua aktivitas transaksi baru, penawaran bantuan, dan penarikan saldo Anda saat ini dibekukan sementara.
+                </p>
+                <div className="mt-2.5 p-3 bg-white/80 rounded-xl border border-rose-200 text-xs italic text-rose-900">
+                  <strong>Alasan Penangguhan:</strong> {currentUser?.verificationNotes || "Pelanggaran pedoman kepatuhan dan integritas komunitas Bantuin."}
+                </div>
+                <div className="mt-3">
+                  <a
+                    href="https://wa.me/6281250269781?text=Halo%20Admin%20Bantuin,%20saya%20ingin%20mengajukan%20banding%20terkait%20penangguhan%20akun%20saya"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs transition cursor-pointer"
+                  >
+                    <span>Hubungi Admin untuk Banding / Pemulihan</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================ */}
         {/* TOP PROFILE BANNER & SUMMARY CARD (INTERCONNECTED)           */}
         {/* ============================================================ */}
-        <div className="bg-white border border-slate-200/90 rounded-3xl p-6 sm:p-8 shadow-2xs mb-8">
-          <div className="flex flex-col lg:flex-row items-center lg:items-start justify-between gap-6 text-center lg:text-left">
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-5 sm:p-8 shadow-2xs mb-8">
+          <div className="flex flex-col sm:flex-row items-center sm:items-start justify-between gap-6 text-center sm:text-left">
 
             {/* Avatar & User Details */}
-            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5">
+            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5 flex-1 min-w-0 w-full">
 
               {/* Profile Avatar with Real Local Upload Trigger */}
               <div className="relative group shrink-0">
@@ -1066,10 +1216,17 @@ function ProfilePageContent() {
                   />
                 )}
 
-                {/* Verified KYC Badge */}
-                <div className={`absolute -bottom-1 -right-1 rounded-full p-1.5 shadow ring-2 ring-white ${currentUser?.verificationStatus === "verified" ? "bg-emerald-500 text-white" : "bg-blue-500 text-white"
-                  }`}>
-                  <ShieldCheck className="w-3.5 h-3.5" />
+                {/* Verified KYC Badge on avatar */}
+                <div className={`absolute -bottom-1 -right-1 rounded-full p-1.5 shadow ring-2 ring-white ${
+                  isKycVerified ? "bg-[#1683FF] text-white" : isKycPending ? "bg-amber-500 text-white" : "bg-slate-400 text-white"
+                }`}>
+                  {isKycVerified ? (
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                  ) : isKycPending ? (
+                    <Clock className="w-3.5 h-3.5" />
+                  ) : (
+                    <User className="w-3.5 h-3.5" />
+                  )}
                 </div>
 
                 {/* Local Photo Upload Overlay */}
@@ -1095,114 +1252,126 @@ function ProfilePageContent() {
                 </label>
               </div>
 
-              <div>
+              <div className="flex-1 min-w-0 w-full flex flex-col items-center sm:items-start">
                 <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
-                  <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-                    {currentUser?.fullName || profileData.fullName || "Pengguna Bantuin"}
+                  <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-1.5">
+                    <span>{profileData.fullName || currentUser?.fullName || "Pengguna Bantuin"}</span>
+                    {isKycVerified && (
+                      <CheckCircle2 className="w-5 h-5 text-[#1683FF] fill-blue-50 shrink-0 inline-block" title="Akun Terverifikasi" />
+                    )}
                   </h1>
-                  {isUser && (
-                    <>
-                      <span className="text-[10px] font-bold bg-blue-50 text-[#1683FF] px-2.5 py-0.5 rounded-full border border-blue-200">
-                        Pengguna Umum
-                      </span>
-                      <span className="text-[10px] font-bold bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-full border border-slate-200 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3 text-[#1683FF]" />
-                        <span>{currentUser?.verificationStatus === "verified" ? "Terverifikasi KYC" : "Akun Aktif"}</span>
-                      </span>
-                    </>
-                  )}
-                  {isProvider && (
-                    <>
-                      <span className="text-[10px] font-bold bg-blue-50 text-[#1683FF] px-2.5 py-0.5 rounded-full border border-blue-200">
-                        Penyedia Jasa
-                      </span>
-                      <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                        <span>{currentUser?.verificationStatus === "verified" ? "KTP Terverifikasi" : "Menunggu Review KYC"}</span>
-                      </span>
-                    </>
-                  )}
-                  {isMitra && (
-                    <>
-                      <span className="text-[10px] font-bold bg-blue-50 text-[#1683FF] px-2.5 py-0.5 rounded-full border border-blue-200">
-                        Mitra Toko Sewa
-                      </span>
-                      <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                        <span>Outlet Terdaftar</span>
-                      </span>
-                    </>
-                  )}
+
+                  {/* Clean, Subtle Role Badge */}
+                  <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 shrink-0">
+                    {isPartner ? "Mitra Toko Sewa" : isProvider && isKycVerified ? "Penyedia Jasa" : "Pengguna Umum"}
+                  </span>
+
+                  {isKycPending ? (
+                    <span className="text-[11px] font-medium bg-amber-50 text-amber-700 px-2.5 py-0.5 rounded-full border border-amber-200 flex items-center gap-1 shrink-0">
+                      <Clock className="w-3.5 h-3.5 text-amber-500" />
+                      <span>Menunggu Review</span>
+                    </span>
+                  ) : isKycRejected ? (
+                    <span className="text-[11px] font-medium bg-rose-50 text-rose-700 px-2.5 py-0.5 rounded-full border border-rose-200 flex items-center gap-1 shrink-0">
+                      <XCircle className="w-3.5 h-3.5 text-rose-500" />
+                      <span>Perlu Perbaikan</span>
+                    </span>
+                  ) : null}
                 </div>
 
-                <p className="text-xs text-slate-500 mt-1 flex items-center justify-center sm:justify-start gap-1">
-                  <MapPin className="w-3.5 h-3.5 text-[#1683FF]" />
-                  <span>{currentUser?.campusName || profileData.city} &middot; Pengguna Aktif Bantuin</span>
-                </p>
+                {/* Location & Status Line - MapPin locked inline with city */}
+                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-x-2 gap-y-1 text-xs text-slate-500 mt-1.5">
+                  {(profileData.city || currentUser?.campusName) ? (
+                    <span className="inline-flex items-center gap-1 font-medium text-slate-600">
+                      <MapPin className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
+                      <span>{profileData.city || currentUser?.campusName}</span>
+                    </span>
+                  ) : null}
+                  <span className="hidden sm:inline text-slate-300">•</span>
+                  <span className="text-slate-400">Pengguna Aktif Bantuin</span>
+                </div>
 
-                <p className="text-xs text-slate-600 mt-2 max-w-xl line-clamp-2">
-                  {currentUser?.bio || profileData.bio || ""}
-                </p>
+                {(profileData.bio || currentUser?.bio) ? (
+                  <p className="text-xs sm:text-sm text-slate-600 mt-2 max-w-xl leading-relaxed text-center sm:text-left line-clamp-2">
+                    {profileData.bio !== undefined && profileData.bio !== "" ? profileData.bio : (currentUser?.bio || "")}
+                  </p>
+                ) : null}
 
-                {/* Performance Stats: Rating & Completed Bantuan / Jasa */}
-                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3 sm:gap-4 pt-3 mt-2 border-t border-slate-100 text-xs">
-                  <div className="flex items-center gap-1.5 bg-amber-50/80 px-2.5 py-1 rounded-lg border border-amber-200/70">
-                    <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
-                    <span className="font-black text-amber-800">{Number(currentUser?.ratingAvg || 5.0).toFixed(2)}</span>
-                    <span className="text-[11px] text-amber-700/80">({currentUser?.ratingCount ?? 0} ulasan)</span>
+                {/* Unified, Neutral Performance Stats as neat chips */}
+                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 sm:gap-3 pt-3 mt-2.5 border-t border-slate-100 text-xs w-full">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200/70 text-slate-700">
+                    <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400 shrink-0" />
+                    <span className="font-bold text-slate-900">{Number(currentUser?.ratingAvg || 5.0).toFixed(2)}</span>
+                    <span className="text-[11px] text-slate-400">({currentUser?.ratingCount ?? 0} ulasan)</span>
                   </div>
 
-                  <div className="flex items-center gap-1.5 bg-emerald-50/80 px-2.5 py-1 rounded-lg border border-emerald-200/70">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    <span className="font-black text-emerald-800">{currentUser?.completedHelpsCount ?? 0}</span>
-                    <span className="text-[11px] text-emerald-700">Tugas &amp; Jasa Selesai</span>
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200/70 text-slate-700">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
+                    <span className="font-bold text-slate-900">{currentUser?.completedHelpsCount ?? 0}</span>
+                    <span className="text-[11px] text-slate-600">Jasa Selesai</span>
                   </div>
 
-                  <div className="hidden sm:flex items-center gap-1.5 bg-blue-50/80 px-2.5 py-1 rounded-lg border border-blue-200/70">
-                    <ShieldCheck className="w-3.5 h-3.5 text-[#1683FF]" />
-                    <span className="font-black text-blue-800">{currentUser?.reliabilityScore ?? 100}%</span>
-                    <span className="text-[11px] text-blue-700">Tingkat Keandalan</span>
+                  <div className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 border border-slate-200/70 text-slate-700">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span className="font-bold text-slate-900">{currentUser?.reliabilityScore ?? 100}%</span>
+                    <span className="text-[11px] text-slate-600">Keandalan</span>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* ACTION BUTTON SESUAI ROLE */}
-            <div className="flex flex-col sm:flex-row lg:flex-col gap-2.5 w-full sm:w-auto shrink-0">
-              {isUser && (
+            {/* ACTION BUTTON SESUAI ROLE & STATUS VERIFIKASI */}
+            <div className="flex flex-col sm:flex-row lg:flex-col gap-2.5 w-full sm:w-auto shrink-0 justify-center mt-2 sm:mt-0">
+              {isProvider && isKycVerified ? (
+                <Link
+                  href="/jasa/dashboard"
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#1683FF] hover:bg-[#1268cc] text-white font-semibold text-xs shadow-sm shadow-blue-500/20 transition active:scale-98"
+                  title="Buka Dashboard Penyedia Jasa"
+                >
+                  <Briefcase className="w-4 h-4 text-white" />
+                  <span>Dashboard Jasa</span>
+                  <ExternalLink className="w-3.5 h-3.5 text-blue-200" />
+                </Link>
+              ) : isPartner ? (
+                <div className="flex flex-col sm:flex-row lg:flex-col gap-2 w-full sm:w-auto">
+                  <Link
+                    href="/mitra/dashboard"
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-[#1683FF] hover:bg-[#1268cc] text-white font-semibold text-xs shadow-sm shadow-blue-500/20 transition active:scale-98"
+                    title="Buka Dashboard Mitra Toko Sewa"
+                  >
+                    <Store className="w-4 h-4 text-white" />
+                    <span>Dashboard Mitra Sewa</span>
+                    <ExternalLink className="w-3.5 h-3.5 text-blue-200" />
+                  </Link>
+                  <Link
+                    href={`/mitra/${currentUser?.id}`}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#1683FF] font-semibold text-xs border border-blue-200 transition"
+                    title="Lihat Profil Toko Publik Saya"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>Halaman Toko Publik</span>
+                  </Link>
+                </div>
+              ) : isKycPending ? (
                 <button
                   type="button"
-                  onClick={() => setActiveTab("kyc")}
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#1683FF] font-bold text-xs border border-blue-200 shadow-2xs transition active:scale-98 cursor-pointer"
+                  onClick={() => handleSelectTab("kyc")}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 font-semibold text-xs border border-amber-200 shadow-2xs transition active:scale-98 cursor-pointer"
+                  title="Lihat Status Verifikasi"
+                >
+                  <Clock className="w-4 h-4 text-amber-600" />
+                  <span>Menunggu Review Admin</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleSelectTab("kyc")}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#1683FF] font-semibold text-xs border border-blue-200 shadow-2xs transition active:scale-98 cursor-pointer"
                   title="Verifikasi Akun Jasa"
                 >
                   <ShieldCheck className="w-4 h-4 text-[#1683FF]" />
                   <span>Verifikasi Akun Jasa</span>
                 </button>
-              )}
-
-              {isProvider && (
-                <Link
-                  href="/jasa/dashboard"
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#1683FF] font-bold text-xs border border-blue-200 shadow-2xs transition active:scale-98"
-                  title="Buka Dashboard Penyedia Jasa"
-                >
-                  <Briefcase className="w-4 h-4 text-[#1683FF]" />
-                  <span>Dashboard Jasa</span>
-                  <ExternalLink className="w-3 h-3 text-[#1683FF]/60" />
-                </Link>
-              )}
-
-              {isMitra && (
-                <Link
-                  href="/mitra/dashboard"
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#1683FF] font-bold text-xs border border-blue-200 shadow-2xs transition active:scale-98"
-                  title="Buka Dashboard Mitra Toko Sewa"
-                >
-                  <Store className="w-4 h-4 text-[#1683FF]" />
-                  <span>Dashboard Mitra Sewa</span>
-                  <ExternalLink className="w-3 h-3 text-[#1683FF]/60" />
-                </Link>
               )}
             </div>
           </div>
@@ -1301,7 +1470,7 @@ function ProfilePageContent() {
 
             {/* KHUSUS MITRA: HANYA DASHBOARD MITRA */}
             {isMitra && (
-              <div className="pt-3 border-t border-slate-100">
+              <div className="pt-3 border-t border-slate-100 space-y-1">
                 <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 py-1.5">
                   Portal Mitra Toko
                 </div>
@@ -1312,6 +1481,16 @@ function ProfilePageContent() {
                   <div className="flex items-center gap-2.5">
                     <Store className="w-4 h-4 text-[#1683FF]" />
                     <span>Dashboard Mitra Sewa</span>
+                  </div>
+                  <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                </Link>
+                <Link
+                  href={`/mitra/${currentUser?.id}`}
+                  className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold text-slate-700 hover:text-[#1683FF] hover:bg-blue-50/60 transition"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Eye className="w-4 h-4 text-emerald-600" />
+                    <span>Halaman Toko Publik</span>
                   </div>
                   <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
                 </Link>
@@ -1433,6 +1612,24 @@ function ProfilePageContent() {
                   </div>
                 </div>
 
+                {/* Alamat Lengkap Tempat Mitra / Lokasi Kerja */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Alamat Lengkap Lokasi Kerja / Tempat Mitra (Jalan, RT/RW, Patokan) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Misal: Jalan Gelora Indah No. 12, RT 02 / RW 04"
+                    value={profileData.address || ""}
+                    onChange={(e) => setProfileData({ ...profileData, address: e.target.value })}
+                    className="w-full text-xs sm:text-sm px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-[#1683FF]"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-1 block">
+                    Alamat lengkap domisili atau tempat kerja/kantor pengerjaan jasa yang tampil di profil Anda
+                  </span>
+                </div>
+
                 {/* Bidang Keahlian / Aktivitas Utama */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -1488,6 +1685,40 @@ function ProfilePageContent() {
                       </p>
                     </div>
                   )}
+                </div>
+
+                {/* Keahlian & Software Spesialisasi Tambahan */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold text-slate-700">
+                      Keahlian &amp; Software Spesialisasi (Pisahkan dengan koma)
+                    </label>
+                    <span className="text-[11px] text-slate-400">
+                      {(profileData.skills || []).length} keahlian terdaftar
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Contoh: UI/UX, Web, Mobile, Desktop, Photoshop, Video Editing"
+                    value={profileData.skillsStr !== undefined ? profileData.skillsStr : (profileData.skills || []).join(", ")}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const arr = val.split(",").map((s) => s.trim()).filter(Boolean);
+                      setProfileData({ ...profileData, skillsStr: val, skills: arr });
+                    }}
+                    className="w-full text-xs sm:text-sm px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:border-[#1683FF]"
+                  />
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {(profileData.skills || []).map((skill, sIdx) => (
+                      <span key={sIdx} className="px-2.5 py-1 rounded-lg bg-blue-50 text-[#1683FF] text-[11px] font-bold border border-blue-100 flex items-center gap-1">
+                        <Check className="w-3 h-3" />
+                        <span>{skill}</span>
+                      </span>
+                    ))}
+                  </div>
+                  <span className="text-[10px] text-slate-400 mt-1 block">
+                    Daftar keahlian dan keahlian software yang tampil di profil publik penyedia jasa Anda
+                  </span>
                 </div>
 
                 <div>
@@ -1659,8 +1890,12 @@ function ProfilePageContent() {
                   <div className="border border-slate-100 rounded-2xl divide-y divide-slate-100 bg-white">
                     {walletData.withdrawals && walletData.withdrawals.length > 0 ? (
                       walletData.withdrawals.map((wd) => {
-                        const isSuccess = wd.status === "completed" || wd.status === "approved";
-                        const isPending = wd.status === "pending" || wd.status === "processing";
+                        const s = String(wd.status || "").toLowerCase();
+                        const isSuccess = s === "completed" || s === "approved" || s === "success";
+                        const isPending = s === "pending" || s === "processing";
+                        const bankName = wd.destinationType || wd.bankName || "Bank";
+                        const accNo = wd.destinationAccount || wd.accountNumber || "-";
+                        const holder = wd.destinationHolder || wd.accountHolder || "-";
                         return (
                           <div key={wd.id} className="p-3.5 flex items-center justify-between gap-3">
                             <div className="flex items-center gap-3">
@@ -1671,10 +1906,10 @@ function ProfilePageContent() {
                               </div>
                               <div>
                                 <div className="text-xs font-bold text-slate-900">
-                                  Transfer ke {wd.destinationType} ({wd.destinationAccount})
+                                  Transfer ke {bankName} ({accNo})
                                 </div>
                                 <div className="text-[10px] text-slate-400">
-                                  {formatDateIndo(wd.requestedAt)} &middot; Atas Nama: {wd.destinationHolder}
+                                  {formatDateIndo(wd.requestedAt)} &middot; Atas Nama: {holder}
                                 </div>
                               </div>
                             </div>
@@ -1712,17 +1947,21 @@ function ProfilePageContent() {
                 <div className="border-b border-slate-100 pb-3 mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
                     <h3 className="text-base font-black text-slate-900">
-                      {isUser && !isJasaVerified
-                        ? "Verifikasi Akun Jasa (Kualifikasi Helper)"
-                        : "Status Verifikasi Identitas Resmi (KYC)"}
+                      {isKycVerified
+                        ? "Status Verifikasi Identitas Resmi (KYC)"
+                        : isKycPending
+                        ? "Verifikasi Akun Jasa Sedang Ditinjau Admin"
+                        : "Verifikasi Akun Jasa (Kualifikasi Helper)"}
                     </h3>
                     <p className="text-xs text-slate-500">
-                      {isUser && !isJasaVerified
-                        ? "Verifikasi KTP dan keahlian untuk mengaktifkan status penyedia jasa & menerima tugas bantuan"
-                        : "Identitas resmi yang menjamin keamanan transaksi di Bantuin"}
+                      {isKycVerified
+                        ? "Identitas resmi yang menjamin keamanan transaksi di Bantuin"
+                        : isKycPending
+                        ? "Dokumen identitas Anda sedang dalam proses peninjauan oleh tim Administrator Bantuin"
+                        : "Verifikasi KTP dan keahlian untuk mengaktifkan status penyedia jasa & menerima tugas bantuan"}
                     </p>
                   </div>
-                  {(!isUser || isJasaVerified) && (
+                  {isKycVerified && (
                     <button
                       onClick={() => setIsKycModalOpen(true)}
                       className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold shadow-2xs transition active:scale-95 cursor-pointer self-start sm:self-auto"
@@ -1733,9 +1972,203 @@ function ProfilePageContent() {
                   )}
                 </div>
 
-                {/* JIKA PENGGUNA UMUM BELUM TERVERIFIKASI JASA */}
-                {isUser && !isJasaVerified ? (
+                {/* 1. JIKA SUDAH DIVERIFIKASI ADMIN (LEVEL 3) */}
+                {isKycVerified ? (
+                  <>
+                    <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-start gap-3">
+                      <ShieldCheck className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="text-xs font-bold text-emerald-950 flex items-center gap-2">
+                          <span>Identitas KTP &amp; No. HP Anda Telah Terverifikasi Penuh</span>
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[9px] font-bold">
+                            Level 3 (Maksimal)
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-emerald-800 mt-1 leading-relaxed">
+                          Akun Anda memiliki badge <strong>Verified Helper &amp; Partner</strong>. Anda memiliki kuota transaksi tanpa batas, hak menerima tugas bantuan, dan membuka jasa atau outlet sewa di Bantuin.
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Document Preview Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                      {/* KTP Digital Card */}
+                      <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/70 space-y-3">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-0">
+                            <FileText className="w-4 h-4 text-[#1683FF] shrink-0" />
+                            <span>KTP Elektronik (e-KTP)</span>
+                          </span>
+                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0 whitespace-nowrap">
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>Lolos Verifikasi Admin</span>
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          {currentUser?.idCardUrl ? (
+                            <img
+                              src={currentUser.idCardUrl}
+                              alt="e-KTP Preview"
+                              className="w-20 h-14 object-cover rounded-xl border border-slate-200 bg-white"
+                            />
+                          ) : (
+                            <div className="w-20 h-14 rounded-xl border border-slate-200 bg-slate-100 flex items-center justify-center text-slate-400">
+                              <FileText className="w-6 h-6" />
+                            </div>
+                          )}
+                          <div className="text-xs text-slate-600 space-y-0.5">
+                            <div className="font-bold text-slate-900">
+                              NIK: {currentUser?.idNumber ? (currentUser.idNumber.length >= 10 ? `${currentUser.idNumber.slice(0, 6)}******${currentUser.idNumber.slice(-4)}` : currentUser.idNumber) : "Telah Terverifikasi"}
+                            </div>
+                            <div className="text-[10px] text-slate-400">Nama: {currentUser?.fullName || profileData.fullName}</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Face Liveness Card */}
+                      <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/70 space-y-3">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-0">
+                            <Camera className="w-4 h-4 text-[#1683FF] shrink-0" />
+                            <span>Verifikasi Identitas Profil</span>
+                          </span>
+                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0 whitespace-nowrap">
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>Terverifikasi</span>
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          {currentUser?.avatarUrl ? (
+                            <img
+                              src={currentUser.avatarUrl}
+                              alt="Face Preview"
+                              className="w-14 h-14 object-cover rounded-full border border-slate-200 bg-white"
+                            />
+                          ) : (
+                            <div className="w-14 h-14 rounded-full border border-slate-200 bg-blue-50 flex items-center justify-center text-[#1683FF]">
+                              <User className="w-6 h-6" />
+                            </div>
+                          )}
+                          <div className="text-xs text-slate-600 space-y-0.5">
+                            <div className="font-bold text-slate-900">Profil Tervalidasi</div>
+                            <div className="text-[10px] text-slate-400">Status: Sesuai Dokumen KTP</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Table Details */}
+                    <div className="border border-slate-200/90 rounded-2xl p-4 bg-white space-y-2 text-xs">
+                      <div className="font-bold text-slate-900 mb-2">Informasi Validasi Identitas:</div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-slate-600">
+                        <div>
+                          <span className="text-[10px] text-slate-400 block">Status Akun:</span>
+                          <span className="font-bold text-emerald-600">Aktif &amp; Terverifikasi</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 block">Metode Validasi:</span>
+                          <span className="font-bold text-slate-800">Verifikasi Resmi Admin</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 block">Batas Penarikan:</span>
+                          <span className="font-bold text-slate-800">Tidak Terbatas</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 block">Layanan Terbuka:</span>
+                          <span className="font-bold text-slate-800">Bantuan, Jasa &amp; Sewa</span>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : isKycPending ? (
+                  /* 2. JIKA SEDANG MENUNGGU REVIEW ADMIN */
                   <div className="space-y-5">
+                    <div className="p-5 rounded-2xl bg-amber-50/90 border border-amber-200 flex items-start gap-3.5">
+                      <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 mt-0.5">
+                        <Clock className="w-5 h-5 text-amber-600 animate-pulse" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-xs sm:text-sm font-bold text-amber-950 flex items-center gap-2">
+                            <span>Pengajuan Verifikasi Sedang Ditinjau Admin</span>
+                            <span className="px-2.5 py-0.5 rounded-full bg-amber-200/80 text-amber-900 text-[10px] font-bold">
+                              Menunggu Persetujuan
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-[11px] text-amber-800 mt-1.5 leading-relaxed">
+                          Dokumen identitas KTP dan data rekening pencairan Anda telah berhasil kami terima. Saat ini tim Administrator Bantuin sedang melakukan proses peninjauan kepatuhan.
+                        </p>
+                        <div className="mt-3 p-3 bg-white/70 rounded-xl border border-amber-200/80 text-xs text-amber-900 space-y-1">
+                          <div className="font-semibold text-[11px] flex items-center gap-1.5">
+                            <span>💡 Apa yang terjadi selanjutnya?</span>
+                          </div>
+                          <p className="text-[11px] text-amber-800 leading-relaxed">
+                            Setelah disetujui admin, akun Anda akan otomatis berstatus <strong>Penyedia Jasa Terverifikasi</strong> (Level 3), memiliki badge resmi, dan dapat membuka jasa atau menerima tugas bantuan.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Ringkasan Dokumen yang Diajukan */}
+                    <div className="p-5 rounded-2xl border border-slate-200 bg-white space-y-4">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                          <FileText className="w-4 h-4 text-[#1683FF]" />
+                          <span>Dokumen Identitas yang Diajukan</span>
+                        </h4>
+                        <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                          <Clock className="w-3 h-3" />
+                          <span>Sedang Diperiksa</span>
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-1">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase block">Nomor Induk Kependudukan (NIK)</span>
+                          <span className="font-bold text-slate-900 block text-xs">
+                            {currentUser?.idNumber ? (currentUser.idNumber.length >= 10 ? `${currentUser.idNumber.slice(0, 6)}******${currentUser.idNumber.slice(-4)}` : currentUser.idNumber) : "Telah Dikirimkan"}
+                          </span>
+                        </div>
+                        <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 space-y-1">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase block">Rekening Payout Pencairan</span>
+                          <span className="font-bold text-slate-900 block text-xs truncate">
+                            {currentUser?.payoutBank || profileData.bankName || "-"} &middot; {currentUser?.payoutAccountNumber || profileData.accountNumber || "-"} ({currentUser?.payoutAccountHolder || profileData.accountHolder || "-"})
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="pt-2 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setIsKycModalOpen(true)}
+                          className="text-xs font-bold text-[#1683FF] hover:underline flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Unggah Ulang Dokumen (Jika Ingin Memperbaiki Data)</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* 3. JIKA BELUM MENGAJUKAN (UNVERIFIED ATAU REJECTED) */
+                  <div className="space-y-5">
+                    {isKycRejected && (
+                      <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 flex items-start gap-3">
+                        <XCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="text-xs font-bold text-rose-950 flex items-center gap-2">
+                            <span>Pengajuan Verifikasi Belum Disetujui Admin</span>
+                          </div>
+                          <div className="text-[11px] text-rose-800 mt-1 leading-relaxed">
+                            {currentUser?.verificationNotes || "Dokumen KTP yang diunggah kurang jelas atau data tidak sesuai. Silakan lengkapi dan kirimkan kembali formulir di bawah ini."}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     <div className="p-4 rounded-2xl bg-blue-50/70 border border-blue-200 flex items-start gap-3">
                       <ShieldCheck className="w-6 h-6 text-[#1683FF] shrink-0 mt-0.5" />
                       <div>
@@ -1746,7 +2179,7 @@ function ProfilePageContent() {
                           </span>
                         </div>
                         <div className="text-[11px] text-slate-600 mt-1 leading-relaxed">
-                          Sesuai aturan kepatuhan keamanan Bantuin.id, akun umum yang ingin mengajukan penawaran bantuan atau membuka jasa keahlian diwajibkan melakukan verifikasi KTP (NIK 16 digit), keahlian, dan rekening pencairan dana.
+                          Sesuai aturan kepatuhan keamanan Bantuin.id, akun umum yang ingin mengajukan penawaran bantuan atau membuka jasa keahlian diwajibkan melakukan verifikasi KTP (NIK 16 digit), keahlian, dan rekening pencairan dana. Setelah dikirim, data akan ditinjau oleh Administrator.
                         </div>
                       </div>
                     </div>
@@ -1838,7 +2271,7 @@ function ProfilePageContent() {
                             </div>
                             <button
                               type="button"
-                              onClick={() => setUserJasaVerifyForm({ ...userJasaVerifyForm, idCardUrl: null, idCardFileName: "", idCardType: null, idCardSize: 0 })}
+                              onClick={() => setUserJasaVerifyForm({ ...userJasaVerifyForm, idCardUrl: null, idCardFile: null, idCardFileName: "", idCardType: null, idCardSize: 0 })}
                               className="text-xs text-rose-600 font-bold hover:underline cursor-pointer px-2 py-1 shrink-0 ml-2"
                             >
                               Ganti File
@@ -1894,35 +2327,40 @@ function ProfilePageContent() {
                             <label className="block text-xs font-bold text-slate-700">
                               Bank / E-Wallet Pencairan <span className="text-red-500">*</span>
                             </label>
-                            {profileData.bankName && (
+                            {(userJasaVerifyForm.bankName || profileData.bankName) && (
                               <span className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1">
-                                <CheckCircle2 className="w-3 h-3" /> Rekening Tersimpan
+                                <CheckCircle2 className="w-3 h-3" /> Rekening Terisi
                               </span>
                             )}
                           </div>
                           <select
+                            required
                             value={userJasaVerifyForm.bankName || profileData.bankName || ""}
                             onChange={(e) => {
                               const val = e.target.value;
-                              setUserJasaVerifyForm({
-                                ...userJasaVerifyForm,
+                              setUserJasaVerifyForm((prev) => ({
+                                ...prev,
                                 bankName: val,
-                                accountNumber: val === profileData.bankName ? (profileData.accountNumber || "") : "",
-                                accountHolder: val === profileData.bankName ? (profileData.accountHolder || "") : "",
-                              });
+                              }));
+                              setProfileData((prev) => ({
+                                ...prev,
+                                bankName: val,
+                              }));
                             }}
-                            disabled={!profileData.bankName}
-                            className={`w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border font-medium focus:outline-none focus:border-[#1683FF] ${
-                              !profileData.bankName
-                                ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
-                                : "bg-white text-slate-800 border-slate-200"
-                            }`}
+                            className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-800 font-medium focus:outline-none focus:border-[#1683FF] transition"
                           >
-                            {profileData.bankName ? (
-                              <option value={profileData.bankName}>{profileData.bankName}</option>
-                            ) : (
-                              <option value="">-- Belum ada rekening bank tersimpan --</option>
-                            )}
+                            <option value="">-- Pilih Bank / E-Wallet Penerima --</option>
+                            <option value="BCA">Bank Central Asia (BCA)</option>
+                            <option value="Mandiri">Bank Mandiri</option>
+                            <option value="BRI">Bank Rakyat Indonesia (BRI)</option>
+                            <option value="BNI">Bank Negara Indonesia (BNI)</option>
+                            <option value="BSI">Bank Syariah Indonesia (BSI)</option>
+                            <option value="CIMB Niaga">Bank CIMB Niaga</option>
+                            <option value="Permata">Bank Permata</option>
+                            <option value="DANA">DANA (E-Wallet)</option>
+                            <option value="GoPay">GoPay (E-Wallet)</option>
+                            <option value="OVO">OVO (E-Wallet)</option>
+                            <option value="ShopeePay">ShopeePay (E-Wallet)</option>
                           </select>
                         </div>
 
@@ -1934,44 +2372,49 @@ function ProfilePageContent() {
                           </div>
                           <input
                             type="text"
-                            readOnly
+                            inputMode="numeric"
                             required
-                            placeholder={profileData.bankName ? "Nomor rekening otomatis terisi" : "Atur rekening di tab Rekening Bank"}
+                            placeholder="Contoh: 1234567890 / 08123456789"
                             value={userJasaVerifyForm.accountNumber || profileData.accountNumber || ""}
-                            className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-700 font-bold cursor-not-allowed focus:outline-none"
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/\D/g, "");
+                              setUserJasaVerifyForm((prev) => ({
+                                ...prev,
+                                accountNumber: val,
+                              }));
+                              setProfileData((prev) => ({
+                                ...prev,
+                                accountNumber: val,
+                              }));
+                            }}
+                            className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-800 font-bold focus:outline-none focus:border-[#1683FF] transition"
                           />
                         </div>
                       </div>
 
                       <div>
                         <label className="block text-xs font-bold text-slate-700 mb-1">
-                          Nama Pemilik Rekening <span className="text-red-500">*</span>
+                          Nama Pemilik Rekening (Sesuai KTP / Buku Tabungan) <span className="text-red-500">*</span>
                         </label>
                         <input
                           type="text"
-                          readOnly
                           required
-                          placeholder={profileData.bankName ? "Nama pemilik rekening otomatis terisi" : "Atur rekening di tab Rekening Bank"}
+                          placeholder="Contoh: WAHYU HIDAYAT"
                           value={userJasaVerifyForm.accountHolder || profileData.accountHolder || ""}
-                          className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-700 font-bold uppercase placeholder:normal-case tracking-wide cursor-not-allowed focus:outline-none"
+                          onChange={(e) => {
+                            const val = e.target.value.toUpperCase();
+                            setUserJasaVerifyForm((prev) => ({
+                              ...prev,
+                              accountHolder: val,
+                            }));
+                            setProfileData((prev) => ({
+                              ...prev,
+                              accountHolder: val,
+                            }));
+                          }}
+                          className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-800 font-bold uppercase placeholder:normal-case tracking-wide focus:outline-none focus:border-[#1683FF] transition"
                         />
                       </div>
-
-                      {!profileData.bankName && (
-                        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs text-amber-900 animate-in fade-in">
-                          <div className="flex items-center gap-2">
-                            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                            <span>Rekening pencairan belum diatur. Silakan simpan data rekening Anda di menu <strong>Rekening Bank</strong> terlebih dahulu.</span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleSelectTab("bank")}
-                            className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] shrink-0 transition cursor-pointer self-start sm:self-auto"
-                          >
-                            Atur Rekening Bank
-                          </button>
-                        </div>
-                      )}
 
                       <button
                         type="submit"
@@ -1992,115 +2435,6 @@ function ProfilePageContent() {
                       </button>
                     </form>
                   </div>
-                ) : (
-                  <>
-                    <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-start gap-3">
-                      <ShieldCheck className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
-                      <div>
-                        <div className="text-xs font-bold text-emerald-950 flex items-center gap-2">
-                          <span>Identitas KTP &amp; No. HP Anda Telah Terverifikasi Penuh</span>
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[9px] font-bold">
-                            Level 3 (Maksimal)
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-emerald-800 mt-1 leading-relaxed">
-                          Akun Anda memiliki badge <strong>Verified Helper &amp; Partner</strong>. Anda memiliki kuota transaksi tanpa batas, hak menerima tugas bantuan, dan membuka jasa atau outlet sewa di Bantuin.
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Document Preview Cards */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                      {/* KTP Digital Card */}
-                      <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/70 space-y-3">
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-0">
-                            <FileText className="w-4 h-4 text-[#1683FF] shrink-0" />
-                            <span>KTP Elektronik (e-KTP)</span>
-                          </span>
-                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0 whitespace-nowrap">
-                            <CheckCircle2 className="w-3 h-3" />
-                            <span>Lolos OCR Dukcapil</span>
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          {currentUser?.idCardUrl ? (
-                            <img
-                              src={currentUser.idCardUrl}
-                              alt="e-KTP Preview"
-                              className="w-20 h-14 object-cover rounded-xl border border-slate-200 bg-white"
-                            />
-                          ) : (
-                            <div className="w-20 h-14 rounded-xl border border-slate-200 bg-slate-100 flex items-center justify-center text-slate-400">
-                              <FileText className="w-6 h-6" />
-                            </div>
-                          )}
-                          <div className="text-xs text-slate-600 space-y-0.5">
-                            <div className="font-bold text-slate-900">
-                              NIK: {currentUser?.idNumber ? (currentUser.idNumber.length >= 10 ? `${currentUser.idNumber.slice(0, 6)}******${currentUser.idNumber.slice(-4)}` : currentUser.idNumber) : "Telah Terverifikasi"}
-                            </div>
-                            <div className="text-[10px] text-slate-400">Nama: {currentUser?.fullName || profileData.fullName}</div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Face Liveness Card */}
-                      <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/70 space-y-3">
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-0">
-                            <Camera className="w-4 h-4 text-[#1683FF] shrink-0" />
-                            <span>Verifikasi Biometrik Wajah</span>
-                          </span>
-                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0 whitespace-nowrap">
-                            <CheckCircle2 className="w-3 h-3" />
-                            <span>Match 99.4%</span>
-                          </span>
-                        </div>
-
-                        <div className="flex items-center gap-3">
-                          {currentUser?.avatarUrl ? (
-                            <img
-                              src={currentUser.avatarUrl}
-                              alt="Face Preview"
-                              className="w-14 h-14 object-cover rounded-full border border-slate-200 bg-white"
-                            />
-                          ) : (
-                            <div className="w-14 h-14 rounded-full border border-slate-200 bg-blue-50 flex items-center justify-center text-[#1683FF]">
-                              <User className="w-6 h-6" />
-                            </div>
-                          )}
-                          <div className="text-xs text-slate-600 space-y-0.5">
-                            <div className="font-bold text-slate-900">Validasi Wajah Realtime</div>
-                            <div className="text-[10px] text-slate-400">Status: Sesuai Dokumen KTP</div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Table Details */}
-                    <div className="border border-slate-200/90 rounded-2xl p-4 bg-white space-y-2 text-xs">
-                      <div className="font-bold text-slate-900 mb-2">Informasi Validasi Identitas:</div>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-slate-600">
-                        <div>
-                          <span className="text-[10px] text-slate-400 block">Status Akun:</span>
-                          <span className="font-bold text-emerald-600">Aktif &amp; Terverifikasi</span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-slate-400 block">Metode Validasi:</span>
-                          <span className="font-bold text-slate-800">OCR e-KTP + Face Liveness</span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-slate-400 block">Batas Penarikan:</span>
-                          <span className="font-bold text-slate-800">Tidak Terbatas</span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-slate-400 block">Layanan Terbuka:</span>
-                          <span className="font-bold text-slate-800">Bantuan, Jasa &amp; Sewa</span>
-                        </div>
-                      </div>
-                    </div>
-                  </>
                 )}
               </div>
             )}
@@ -2569,7 +2903,7 @@ function ProfilePageContent() {
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
               <div>
                 <h3 className="text-sm font-extrabold text-slate-900">Perbarui Dokumen Verifikasi KYC</h3>
-                <p className="text-[11px] text-slate-500">Unggah foto KTP dan foto selfie wajah terbaru Anda</p>
+                <p className="text-[11px] text-slate-500">Unggah foto e-KTP asli Anda untuk verifikasi identitas resmi</p>
               </div>
               <button onClick={() => setIsKycModalOpen(false)} className="text-slate-400 hover:text-slate-700">
                 <X className="w-4 h-4" />
@@ -2597,7 +2931,7 @@ function ProfilePageContent() {
                     e.preventDefault();
                     setIsDraggingKycKtp(false);
                     const file = e.dataTransfer.files?.[0];
-                    if (file) handleKycFile(file, "ktp");
+                    if (file) handleKycFile(file);
                   }}
                   className={`flex items-center justify-between p-3 rounded-2xl border transition ${
                     isDraggingKycKtp
@@ -2607,13 +2941,13 @@ function ProfilePageContent() {
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <img
-                      src={kycForm.ktpUrl}
+                      src={kycForm.ktpUrl || "https://images.unsplash.com/photo-1544717305-2782549b5136?auto=format&fit=crop&w=120&q=80"}
                       alt="Preview KTP"
                       className="w-16 h-11 object-cover rounded-xl border border-slate-200 bg-white shrink-0 shadow-2xs"
                     />
                     <div className="min-w-0">
                       <span className="text-xs font-bold text-slate-800 block truncate">
-                        {kycForm.ktpFileName || "e-KTP Siap Terlampir"}
+                        {kycForm.ktpFileName || (kycForm.ktpUrl ? "e-KTP Siap Terlampir" : "Belum ada file KTP dipilih")}
                       </span>
                       <span className="text-[10px] text-slate-500 block">
                         {isDraggingKycKtp ? "Lepaskan file KTP di sini" : "Tarik & lepas file atau pilih manual"}
@@ -2628,66 +2962,7 @@ function ProfilePageContent() {
                       accept={getAcceptAttribute("bantuin-kyc")}
                       onChange={(e) => {
                         const file = e.target.files?.[0];
-                        if (file) handleKycFile(file, "ktp");
-                      }}
-                      className="hidden"
-                    />
-                  </label>
-                </div>
-              </div>
-
-              {/* Selfie Upload */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-bold text-slate-700">
-                    Foto Selfie Wajah Jelas / Pegang KTP <span className="text-red-500">*</span>
-                  </label>
-                  <span className="text-[10px] text-slate-400 font-semibold">
-                    JPG, PNG, WEBP (Maks. 10MB)
-                  </span>
-                </div>
-                <div
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setIsDraggingKycSelfie(true);
-                  }}
-                  onDragLeave={() => setIsDraggingKycSelfie(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setIsDraggingKycSelfie(false);
-                    const file = e.dataTransfer.files?.[0];
-                    if (file) handleKycFile(file, "selfie");
-                  }}
-                  className={`flex items-center justify-between p-3 rounded-2xl border transition ${
-                    isDraggingKycSelfie
-                      ? "border-[#1683FF] bg-blue-50/90 ring-2 ring-[#1683FF]/30"
-                      : "border-slate-200 bg-slate-50/60 hover:bg-slate-50"
-                  }`}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <img
-                      src={kycForm.selfieUrl}
-                      alt="Preview Selfie"
-                      className="w-12 h-12 object-cover rounded-full border border-slate-200 bg-white shrink-0 shadow-2xs"
-                    />
-                    <div className="min-w-0">
-                      <span className="text-xs font-bold text-slate-800 block truncate">
-                        {kycForm.selfieFileName || "Foto Selfie Terlampir"}
-                      </span>
-                      <span className="text-[10px] text-slate-500 block">
-                        {isDraggingKycSelfie ? "Lepaskan file foto di sini" : "Tarik & lepas file atau pilih manual"}
-                      </span>
-                    </div>
-                  </div>
-                  <label className="px-3.5 py-2 rounded-xl bg-white hover:bg-blue-50 text-[#1683FF] border border-blue-200 font-bold text-xs cursor-pointer transition flex items-center gap-1.5 shadow-2xs shrink-0 active:scale-95">
-                    <Camera className="w-3.5 h-3.5" />
-                    <span>Pilih Foto</span>
-                    <input
-                      type="file"
-                      accept={getAcceptAttribute("bantuin-kyc")}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) handleKycFile(file, "selfie");
+                        if (file) handleKycFile(file);
                       }}
                       className="hidden"
                     />

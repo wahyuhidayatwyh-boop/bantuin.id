@@ -7,7 +7,7 @@ import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { useApp } from "@/lib/context/AppContext";
 import { authService } from "@/lib/services/authService";
-import { formatIDR } from "@/lib/utils";
+import { formatIDR, getGoogleMapsUrl } from "@/lib/utils";
 import {
   Activity,
   ArrowRight,
@@ -30,28 +30,34 @@ import {
   AlertCircle,
   LogIn,
   RotateCw,
+  Trash2,
+  ExternalLink,
 } from "lucide-react";
 
 // ─── Status Badge Logic ──────────────────────────────────────────────────────
 function getStatusBadge(order) {
   const status = (order.orderStatus || order.status || "").toLowerCase();
   const orderType = (order.orderType || order.categoryType || "").toLowerCase();
+  const userRole = (order.userRole || (order.isRequester ? "requester" : order.isHelper ? "helper" : "requester")).toLowerCase();
+  const isRequester = userRole === "requester";
+  const isHelper = userRole === "helper";
+  const isPaid = order.paymentStatus === "PAID";
 
-  if (status === "completed" || status === "verified_settled") {
-    return {
-      label: "Selesai",
-      color: "bg-emerald-50 text-emerald-700 border-emerald-200",
-      dot: "bg-emerald-500",
-      icon: CheckCircle2,
-    };
-  }
-
-  if (status === "cancelled" || status === "batal") {
+  if (status === "cancelled" || status === "batal" || order.isCancelled || order.paymentStatus === "CANCELLED") {
     return {
       label: "Dibatalkan",
       color: "bg-rose-50 text-rose-700 border-rose-200",
       dot: "bg-rose-500",
       icon: AlertCircle,
+    };
+  }
+
+  if (status === "completed" || status === "verified_settled") {
+    return {
+      label: isRequester ? "Selesai · Beri Ulasan" : "Selesai · Dana Diteruskan",
+      color: "bg-emerald-50 text-emerald-700 border-emerald-200",
+      dot: "bg-emerald-500",
+      icon: CheckCircle2,
     };
   }
 
@@ -64,10 +70,104 @@ function getStatusBadge(order) {
     };
   }
 
+  // BANTUAN & JASA
+  if (orderType === "task" || orderType === "bantuan" || orderType === "service" || orderType === "jasa") {
+    if (status === "published") {
+      return {
+        label: isRequester ? "Mencari Helper · Terpublikasi" : "Tugas Terbuka",
+        color: "bg-amber-50 text-amber-800 border-amber-200",
+        dot: "bg-amber-500 animate-pulse",
+        icon: Clock,
+      };
+    }
+
+    if (status === "has_offers") {
+      const offersCount = order.offersCount || (order.offers?.length) || 1;
+      return {
+        label: isRequester ? `Tawaran Masuk (${offersCount}) · Pilih Helper` : "Tawaran Terkirim",
+        color: "bg-blue-50 text-blue-700 border-blue-200",
+        dot: "bg-blue-500 animate-pulse",
+        icon: User,
+      };
+    }
+
+    if (status === "submitted") {
+      return {
+        label: "Lamaran Terkirim · Menunggu Dipilih",
+        color: "bg-blue-50 text-blue-700 border-blue-200",
+        dot: "bg-blue-500 animate-pulse",
+        icon: Clock,
+      };
+    }
+
+    if (status === "helper_selected" || status === "room_created" || status === "pending_payment") {
+      if (!isPaid) {
+        return {
+          label: isRequester ? "Helper Terpilih · Menunggu Pembayaran Anda" : "Terpilih · Menunggu Pembayaran Pemohon",
+          color: "bg-amber-50 text-amber-800 border-amber-200",
+          dot: "bg-amber-500 animate-pulse",
+          icon: Clock,
+        };
+      }
+      return {
+        label: isRequester ? "Dana Diamankan · Helper Siap Bertugas" : "Pembayaran Aman · Silakan Menuju Lokasi",
+        color: "bg-blue-50 text-blue-700 border-blue-200",
+        dot: "bg-blue-500 animate-pulse",
+        icon: ShieldCheck,
+      };
+    }
+
+    if (status === "paid_escrow") {
+      return {
+        label: isRequester ? "Dana Diamankan · Helper Siap Bertugas" : "Pembayaran Aman · Silakan Menuju Lokasi",
+        color: "bg-blue-50 text-blue-700 border-blue-200",
+        dot: "bg-blue-500 animate-pulse",
+        icon: ShieldCheck,
+      };
+    }
+
+    if (status === "on_the_way") {
+      return {
+        label: isRequester ? "Helper Menuju Lokasi Tugas" : "Anda Sedang Menuju Lokasi",
+        color: "bg-[#EAF4FF] text-[#1683FF] border-[#DCEAF7]",
+        dot: "bg-[#1683FF] animate-pulse",
+        icon: Loader2,
+      };
+    }
+
+    if (status === "item_picked_up") {
+      return {
+        label: isRequester ? "Tugas Diproses · Helper di Lokasi" : "Tiba di Lokasi · Memproses Tugas",
+        color: "bg-[#EAF4FF] text-[#1683FF] border-[#DCEAF7]",
+        dot: "bg-[#1683FF] animate-pulse",
+        icon: Loader2,
+      };
+    }
+
+    if (status === "in_progress") {
+      return {
+        label: isRequester ? "Tugas Sedang Dikerjakan" : "Sedang Anda Kerjakan",
+        color: "bg-[#EAF4FF] text-[#1683FF] border-[#DCEAF7]",
+        dot: "bg-[#1683FF] animate-pulse",
+        icon: Loader2,
+      };
+    }
+
+    if (status === "task_delivered" || status === "proof_submitted" || status === "awaiting_confirmation") {
+      return {
+        label: isRequester ? "Bukti Masuk · Konfirmasi Selesai" : "Bukti Terkirim · Menunggu Konfirmasi",
+        color: "bg-indigo-50 text-indigo-700 border-indigo-200",
+        dot: "bg-indigo-500 animate-pulse",
+        icon: Clock,
+      };
+    }
+  }
+
+  // SEWA / RENTAL
   if (orderType === "rental" || orderType === "sewa") {
     if (status === "returned") {
       return {
-        label: "Unit Kembali · Refund Selesai",
+        label: "Unit Kembali · Selesai",
         color: "bg-[#EAF4FF] text-[#1683FF] border-[#DCEAF7]",
         dot: "bg-[#1683FF]",
         icon: Clock,
@@ -83,112 +183,30 @@ function getStatusBadge(order) {
     }
     if (status === "confirmed_by_owner") {
       return {
-        label: "Dikonfirmasi · Siap Diambil",
+        label: isRequester ? "Disetujui Toko · Menunggu Pembayaran" : "Dikonfirmasi · Menunggu Pembayaran",
+        color: "bg-amber-50 text-amber-800 border-amber-200",
+        dot: "bg-amber-500 animate-pulse",
+        icon: Clock,
+      };
+    }
+    if (status === "temp_locked" || status === "pending_payment" || (!isPaid && status !== "payment_held" && status !== "paid_escrow")) {
+      return {
+        label: isRequester ? "Menunggu Pembayaran Anda" : "Menunggu Pembayaran Penyewa",
         color: "bg-amber-50 text-amber-800 border-amber-200",
         dot: "bg-amber-500 animate-pulse",
         icon: Clock,
       };
     }
     return {
-      label: "Dana Terverifikasi · Siap Diambil",
-      color: "bg-amber-50 text-amber-800 border-amber-200",
-      dot: "bg-amber-500 animate-pulse",
-      icon: Clock,
-    };
-  }
-
-  if (orderType === "task" || orderType === "bantuan" || orderType === "service" || orderType === "jasa") {
-    if (status === "item_picked_up") {
-      return {
-        label: "Barang Diambil · Menuju Lokasi",
-        color: "bg-[#EAF4FF] text-[#1683FF] border-[#DCEAF7]",
-        dot: "bg-[#1683FF] animate-pulse",
-        icon: Loader2,
-      };
-    }
-    if (status === "on_the_way") {
-      return {
-        label: "Helper Menuju Lokasi",
-        color: "bg-[#EAF4FF] text-[#1683FF] border-[#DCEAF7]",
-        dot: "bg-[#1683FF] animate-pulse",
-        icon: Loader2,
-      };
-    }
-    if (status === "task_delivered" || status === "proof_submitted") {
-      return {
-        label: "Tugas Selesai · Menunggu Konfirmasi",
-        color: "bg-indigo-50 text-indigo-700 border-indigo-200",
-        dot: "bg-indigo-500 animate-pulse",
-        icon: Clock,
-      };
-    }
-    if (status === "helper_selected" || status === "room_created") {
-      return {
-        label: "Helper Terpilih · Proses Pengerjaan",
-        color: "bg-emerald-50 text-emerald-700 border-emerald-200",
-        dot: "bg-emerald-500 animate-pulse",
-        icon: Loader2,
-      };
-    }
-    if (status === "in_progress") {
-      return {
-        label: "Sedang Dikerjakan",
-        color: "bg-[#EAF4FF] text-[#1683FF] border-[#DCEAF7]",
-        dot: "bg-[#1683FF] animate-pulse",
-        icon: Loader2,
-      };
-    }
-    if (status === "awaiting_confirmation") {
-      return {
-        label: "Menunggu Konfirmasi Selesai",
-        color: "bg-amber-50 text-amber-800 border-amber-200",
-        dot: "bg-amber-500 animate-pulse",
-        icon: Clock,
-      };
-    }
-    if (status === "has_offers") {
-      return {
-        label: "Tawaran Masuk · Pilih Helper",
-        color: "bg-blue-50 text-blue-700 border-blue-200",
-        dot: "bg-blue-500 animate-pulse",
-        icon: User,
-      };
-    }
-    if (status === "submitted") {
-      return {
-        label: "Lamaran Terkirim · Menunggu Review",
-        color: "bg-blue-50 text-blue-700 border-blue-200",
-        dot: "bg-blue-500 animate-pulse",
-        icon: Clock,
-      };
-    }
-    if (status === "published") {
-      return {
-        label: "Mencari Helper · Terpublikasi",
-        color: "bg-amber-50 text-amber-800 border-amber-200",
-        dot: "bg-amber-500 animate-pulse",
-        icon: Clock,
-      };
-    }
-    return {
-      label: "Dalam Proses Pengerjaan",
-      color: "bg-[#EAF4FF] text-[#1683FF] border-[#DCEAF7]",
-      dot: "bg-[#1683FF] animate-pulse",
-      icon: Clock,
-    };
-  }
-
-  if (status === "in_progress") {
-    return {
-      label: "Sedang Dikerjakan",
-      color: "bg-[#EAF4FF] text-[#1683FF] border-[#DCEAF7]",
-      dot: "bg-[#1683FF] animate-pulse",
-      icon: Loader2,
+      label: isRequester ? "Dana Diamankan · Siap Ambil Unit" : "Dana Diamankan · Siap Serah Terima",
+      color: "bg-blue-50 text-blue-700 border-blue-200",
+      dot: "bg-blue-500 animate-pulse",
+      icon: ShieldCheck,
     };
   }
 
   return {
-    label: "Pembayaran Terverifikasi Aman",
+    label: "Aktivitas Berjalan",
     color: "bg-[#EAF4FF] text-[#1683FF] border-[#DCEAF7]",
     dot: "bg-[#1683FF]",
     icon: ShieldCheck,
@@ -205,19 +223,44 @@ function getCategoryStyle(cat) {
 }
 
 // ─── Activity Card ────────────────────────────────────────────────────────────
-function ActivityCard({ item }) {
+function ActivityCard({ item, onDeleteActivity }) {
   const isStandaloneRequest = !item.orderRoomId && item.orderType !== "rental";
-  const targetLink = isStandaloneRequest
-    ? `/bantuan/${item.requestId || item.id}`
-    : `/chat?room=${item.chatRoomId || item.id}`;
+  const isRequester = item.userRole === "requester" || item.isRequester;
+  const isCancelled = Boolean(item.isCancelled) || item.orderStatus === "cancelled" || item.status === "cancelled" || item.paymentStatus === "CANCELLED";
+  const isUnpaid = !isCancelled && (
+    item.orderStatus === "helper_selected" || 
+    item.orderStatus === "room_created" || 
+    item.status === "helper_selected" ||
+    item.orderStatus === "temp_locked" ||
+    item.status === "temp_locked" ||
+    item.status === "pending_payment"
+  ) && item.paymentStatus !== "PAID";
 
-  const ctaLabel = item.isCancelled
+  const targetLink = isCancelled
+    ? (item.isRental
+        ? `/sewa/${item.rentalDetails?.rentalId || item.id}`
+        : item.isJasa
+        ? `/chat?room=${item.chatRoomId || item.id}`
+        : `/bantuan/${item.requestId || item.id}`)
+    : isStandaloneRequest
+    ? (isRequester && item.orderStatus === "has_offers"
+        ? `/bantuan/${item.requestId || item.id}#pelamar`
+        : `/bantuan/${item.requestId || item.id}`)
+    : (isRequester && isUnpaid && item.requestId
+        ? `/bantuan/${item.requestId}/pembayaran?roomId=${item.chatRoomId || item.id}`
+        : isRequester && isUnpaid && item.isRental
+        ? `/sewa/${item.rentalDetails?.rentalId || item.id}/pembayaran?roomId=${item.chatRoomId || item.id}`
+        : `/chat?room=${item.chatRoomId || item.id}`);
+
+  const ctaLabel = isCancelled
     ? "Detail Batal"
     : isStandaloneRequest
-    ? "Lihat Detail"
+    ? (isRequester && item.orderStatus === "has_offers" ? "Pilih Helper" : "Lihat Permintaan")
+    : isUnpaid && isRequester
+    ? "Bayar Sekarang"
     : item.isCompleted
-    ? "Chat Selesai"
-    : "Chat & Lacak";
+    ? "Buka Chat"
+    : "Buka Chat";
 
   return (
     <div className="bg-white border border-[#DCEAF7] hover:border-[#1683FF]/50 rounded-xl sm:rounded-2xl transition-all duration-200 shadow-2xs hover:shadow-md group overflow-hidden flex flex-col sm:flex-row min-w-0">
@@ -274,12 +317,33 @@ function ActivityCard({ item }) {
               </div>
             )}
 
-            {item.pickupPoint && (
-              <div className="flex items-center gap-1 truncate">
-                <MapPin className="w-3 h-3 shrink-0 text-[#1683FF]" />
-                <span className="truncate">{item.pickupPoint}</span>
-              </div>
-            )}
+            {item.pickupPoint && (() => {
+              const mapsUrl = item.googleMapsUrl || getGoogleMapsUrl(item.pickupPoint);
+              if (mapsUrl) {
+                return (
+                  <div className="flex items-center gap-1 truncate">
+                    <a
+                      href={mapsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 truncate text-slate-600 hover:text-emerald-700 hover:underline transition group/map"
+                      title={`Buka "${item.pickupPoint}" di Google Maps`}
+                    >
+                      <MapPin className="w-3 h-3 shrink-0 text-emerald-600 group-hover/map:scale-110 transition-transform" />
+                      <span className="truncate">{item.pickupPoint}</span>
+                      <ExternalLink className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                    </a>
+                  </div>
+                );
+              }
+              return (
+                <div className="flex items-center gap-1 truncate">
+                  <MapPin className="w-3 h-3 shrink-0 text-[#1683FF]" />
+                  <span className="truncate">{item.pickupPoint}</span>
+                </div>
+              );
+            })()}
 
             {item.partner?.name && (
               <div className="flex items-center gap-1 truncate">
@@ -310,18 +374,31 @@ function ActivityCard({ item }) {
             </div>
           </div>
 
-          <Link
-            href={targetLink}
-            className="w-full sm:w-auto flex items-center justify-center gap-1 sm:gap-1.5 px-2.5 sm:px-4 py-1.5 sm:py-2.5 rounded-lg sm:rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] active:scale-95 text-white text-[11px] sm:text-xs font-bold transition shadow-2xs shrink-0"
-          >
-            {isStandaloneRequest ? (
-              <User className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
-            ) : (
-              <MessageSquare className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+          <div className="flex items-center gap-1.5 w-full sm:w-auto">
+            <Link
+              href={targetLink}
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-1 sm:gap-1.5 px-2.5 sm:px-4 py-1.5 sm:py-2.5 rounded-lg sm:rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] active:scale-95 text-white text-[11px] sm:text-xs font-bold transition shadow-2xs shrink-0"
+            >
+              {isStandaloneRequest ? (
+                <User className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+              ) : (
+                <MessageSquare className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+              )}
+              <span>{ctaLabel}</span>
+              <ChevronRight className="w-3.5 h-3.5 hidden sm:inline" />
+            </Link>
+
+            {(item.isCompleted || item.isCancelled) && (
+              <button
+                type="button"
+                onClick={() => onDeleteActivity?.(item)}
+                className="p-1.5 sm:p-2.5 rounded-lg sm:rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 transition cursor-pointer shrink-0"
+                title="Hapus riwayat aktivitas selesai ini dari database"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
             )}
-            <span>{ctaLabel}</span>
-            <ChevronRight className="w-3.5 h-3.5 hidden sm:inline" />
-          </Link>
+          </div>
         </div>
       </div>
     </div>
@@ -400,6 +477,51 @@ function ActivityContent() {
       setFetchError("Terjadi kendala koneksi ke server.");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleDeleteActivity = async (item) => {
+    if (!item.isCompleted && !item.isCancelled) {
+      alert("Hanya aktivitas yang sudah selesai atau dibatalkan yang dapat dihapus dari database.");
+      return;
+    }
+    if (!window.confirm("Hapus riwayat aktivitas ini dari database?")) return;
+
+    try {
+      const token = await authService.getValidAccessToken();
+      const res = await fetch(`/api/user/activities?id=${encodeURIComponent(item.id)}`, {
+        method: "DELETE",
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setActivities((prev) => prev.filter((a) => a.id !== item.id));
+      } else {
+        alert(data.error || "Gagal menghapus aktivitas.");
+      }
+    } catch {
+      alert("Terjadi kendala koneksi ke server.");
+    }
+  };
+
+  const handleClearCompletedActivities = async () => {
+    if (completedItems.length === 0) return;
+    if (!window.confirm("Bersihkan seluruh riwayat aktivitas yang telah selesai dari database?")) return;
+
+    try {
+      const token = await authService.getValidAccessToken();
+      const res = await fetch("/api/user/activities?allCompleted=true", {
+        method: "DELETE",
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setActivities((prev) => prev.filter((a) => !a.isCompleted && !a.isCancelled));
+      } else {
+        alert(data.error || "Gagal membersihkan riwayat aktivitas.");
+      }
+    } catch {
+      alert("Terjadi kendala koneksi ke server.");
     }
   };
 
@@ -566,40 +688,54 @@ function ActivityContent() {
         </div>
 
         {/* ── BAGIAN 1: STATUS PESANAN (SEGMENTED CONTROL TABS) ────────── */}
-        <div className="flex items-center p-1 bg-slate-200/70 rounded-2xl mb-3 sm:mb-4 w-full sm:w-auto sm:inline-flex">
-          <button
-            type="button"
-            onClick={() => setMainTab("ongoing")}
-            className={`flex-1 sm:flex-initial py-2 sm:py-2.5 px-4 sm:px-5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
-              mainTab === "ongoing"
-                ? "bg-white text-[#1683FF] shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            <span>Pesanan Aktif</span>
-            <span className={`text-[10px] sm:text-xs font-extrabold px-1.5 py-0.2 rounded-full ${
-              mainTab === "ongoing" ? "bg-blue-100 text-[#1683FF]" : "bg-slate-300 text-slate-700"
-            }`}>
-              {ongoingItems.length}
-            </span>
-          </button>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3 sm:mb-4">
+          <div className="flex items-center p-1 bg-slate-200/70 rounded-2xl w-full sm:w-auto sm:inline-flex">
+            <button
+              type="button"
+              onClick={() => setMainTab("ongoing")}
+              className={`flex-1 sm:flex-initial py-2 sm:py-2.5 px-4 sm:px-5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                mainTab === "ongoing"
+                  ? "bg-white text-[#1683FF] shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <span>Pesanan Aktif</span>
+              <span className={`text-[10px] sm:text-xs font-extrabold px-1.5 py-0.2 rounded-full ${
+                mainTab === "ongoing" ? "bg-blue-100 text-[#1683FF]" : "bg-slate-300 text-slate-700"
+              }`}>
+                {ongoingItems.length}
+              </span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => setMainTab("completed")}
-            className={`flex-1 sm:flex-initial py-2 sm:py-2.5 px-4 sm:px-5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
-              mainTab === "completed"
-                ? "bg-white text-emerald-700 shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            <span>Riwayat Selesai</span>
-            <span className={`text-[10px] sm:text-xs font-extrabold px-1.5 py-0.2 rounded-full ${
-              mainTab === "completed" ? "bg-emerald-100 text-emerald-800" : "bg-slate-300 text-slate-700"
-            }`}>
-              {completedItems.length}
-            </span>
-          </button>
+            <button
+              type="button"
+              onClick={() => setMainTab("completed")}
+              className={`flex-1 sm:flex-initial py-2 sm:py-2.5 px-4 sm:px-5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                mainTab === "completed"
+                  ? "bg-white text-emerald-700 shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <span>Riwayat Selesai</span>
+              <span className={`text-[10px] sm:text-xs font-extrabold px-1.5 py-0.2 rounded-full ${
+                mainTab === "completed" ? "bg-emerald-100 text-emerald-800" : "bg-slate-300 text-slate-700"
+              }`}>
+                {completedItems.length}
+              </span>
+            </button>
+          </div>
+
+          {mainTab === "completed" && completedItems.length > 0 && (
+            <button
+              type="button"
+              onClick={handleClearCompletedActivities}
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 text-xs font-bold transition shadow-2xs cursor-pointer self-start sm:self-auto"
+              title="Bersihkan seluruh riwayat aktivitas yang selesai dari database"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Bersihkan Riwayat Selesai</span>
+            </button>
+          )}
         </div>
 
         {/* ── BAGIAN 2: FILTER KATEGORI (HORIZONTAL SCROLL PILLS) ───────── */}
@@ -733,7 +869,7 @@ function ActivityContent() {
           /* ── Items Grid ── */
           <div className="grid grid-cols-2 sm:grid-cols-1 gap-2.5 sm:gap-3.5">
             {displayedItems.map((item) => (
-              <ActivityCard key={item.id} item={item} />
+              <ActivityCard key={item.id} item={item} onDeleteActivity={handleDeleteActivity} />
             ))}
           </div>
         )}

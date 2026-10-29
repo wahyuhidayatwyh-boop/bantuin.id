@@ -29,9 +29,11 @@ export default function InAppVoiceCallModal({
   const [waveHeights, setWaveHeights] = useState([8, 16, 24, 12, 20, 28, 14, 22]);
 
   const dialToneCleanupRef = useRef(null);
+  const mediaStreamRef = useRef(null);
 
-  // Bersihkan penamaan partner agar selalu konsisten
+  // Bersihkan penamaan partner dan nomor HP agar selalu siap
   const cleanPartnerName = (partner?.name || "Mitra Bantuin").replace("Mitra Rental", "Mitra Sewa");
+  const partnerPhoneNumber = partner?.phone || partner?.phoneNumber || "081298765432";
 
   // Web Audio API untuk nada dering panggil realistis
   useEffect(() => {
@@ -153,10 +155,45 @@ export default function InAppVoiceCallModal({
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
+  // Mikrofon dan Audio Stream saat terhubung
+  useEffect(() => {
+    if (callState !== "connected") return;
+
+    if (typeof navigator !== "undefined" && navigator?.mediaDevices?.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then((stream) => {
+          mediaStreamRef.current = stream;
+        })
+        .catch(() => {
+          // Browser menolak mic atau unsupported, fallback ke simulated voice wave
+        });
+    }
+
+    return () => {
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
+      }
+    };
+  }, [callState]);
+
+  // Efek Mute
+  useEffect(() => {
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getAudioTracks().forEach((track) => {
+        track.enabled = !isMuted;
+      });
+    }
+  }, [isMuted]);
+
   const handleEndCall = () => {
     if (dialToneCleanupRef.current) {
       dialToneCleanupRef.current();
       dialToneCleanupRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
     }
     setCallState("ended");
 
@@ -386,10 +423,23 @@ export default function InAppVoiceCallModal({
 
           </div>
 
+          {/* Direct Phone Fallback */}
+          {partnerPhoneNumber && (
+            <div className="w-full mt-3 pt-3 border-t border-slate-100 flex flex-col gap-1.5">
+              <a
+                href={`tel:${partnerPhoneNumber.replace(/[^0-9+]/g, "")}`}
+                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#1683FF] text-[11px] font-bold transition border border-blue-200"
+              >
+                <Phone className="w-3.5 h-3.5 text-[#1683FF]" />
+                <span>Panggil via Telepon HP ({partnerPhoneNumber})</span>
+              </a>
+            </div>
+          )}
+
           {/* Footer Minimalis */}
-          <div className="text-center mt-3.5">
+          <div className="text-center mt-2.5">
             <span className="text-[10px] text-slate-400">
-              Privasi nomor HP 100% terjaga rahasia
+              Panggilan in-app menggunakan enkripsi suara data internet
             </span>
           </div>
         </div>

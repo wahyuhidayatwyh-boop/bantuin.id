@@ -8,9 +8,11 @@ import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { useApp } from "@/lib/context/AppContext";
 import { getProviderById } from "@/lib/mock/providersData";
-import { promotionService, PROMOTION_PACKAGES } from "@/lib/services/promotionService";
+import { promotionService } from "@/lib/services/promotionService";
 import { paymentService } from "@/lib/services/paymentService";
+import { authService } from "@/lib/services/authService";
 import { formatIDR } from "@/lib/utils";
+import { saveFormDraft, getFormDraft, clearFormDraft } from "@/lib/hooks/useFormDraft";
 import { 
   QrisLogo, 
   BcaLogo, 
@@ -24,11 +26,12 @@ import {
   Rocket, 
   CheckCircle2, 
   Clock, 
-  Lock,
-  Building2,
+  Lock, 
+  Building2, 
   ShieldCheck, 
   Loader2, 
   ExternalLink,
+  Package,
   Copy,
   Check,
   Star,
@@ -52,12 +55,69 @@ function BuatPromosiJasaContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialServiceId = searchParams.get("serviceId") || "";
-  const initialPkgId = searchParams.get("pkg") || "pkg-jasa-7d";
-  const { addToast } = useApp() || {};
+  const initialPkgId = searchParams.get("pkg") || "";
+  const { currentUser, addToast } = useApp() || {};
 
   const [provider, setProvider] = useState(() => {
-    return getProviderById("fajar-ramadhan-desain") || {};
+    return currentUser || {};
   });
+
+  const [providerServices, setProviderServices] = useState(() => {
+    if (typeof window !== "undefined" && currentUser?.id) {
+      try {
+        const stored = localStorage.getItem(`bantuin_provider_catalog_${currentUser.id}`);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch (_) {}
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    if (currentUser) {
+      setProvider(currentUser);
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    const fetchServices = async () => {
+      if (!currentUser?.id) return;
+      try {
+        const res = await fetch(`/api/services/provider/${currentUser.id}`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && json.data?.services) {
+            const mapped = (json.data.services || []).map((s) => ({
+              id: s.id,
+              title: s.title,
+              category: s.category,
+              price: Number(s.startingPrice),
+              startingPrice: Number(s.startingPrice),
+              unit: "/ proyek",
+              image: s.portfolioUrls?.[0] || "/logotab.png",
+              desc: s.description,
+              locationType: s.locationType || "hybrid",
+              address: s.address || "",
+            }));
+            if (mapped.length > 0) {
+              setProviderServices(mapped);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Could not load services for promo:", err);
+      }
+    };
+    fetchServices();
+  }, [currentUser?.id]);
+
+  const catalog = React.useMemo(() => {
+    if (providerServices.length > 0) return providerServices;
+    if (Array.isArray(provider?.catalog) && provider.catalog.length > 0) return provider.catalog;
+    return [];
+  }, [providerServices, provider?.catalog]);
 
   const [isSuccess, setIsSuccess] = useState(false);
   const [selectedServiceIds, setSelectedServiceIds] = useState(() => {
@@ -71,21 +131,58 @@ function BuatPromosiJasaContent() {
   const [isCopiedNominal, setIsCopiedNominal] = useState(false);
   const [timeLeft, setTimeLeft] = useState(15 * 60);
 
-  // Dynamic Packages dari promotionService (Admin Sync)
+  const DRAFT_KEY = "bantuin_draft_jasa_promosi_buat";
+
+  useEffect(() => {
+    const draft = getFormDraft(DRAFT_KEY, null);
+    if (draft) {
+      if (Array.isArray(draft.selectedServiceIds) && draft.selectedServiceIds.length > 0) {
+        setSelectedServiceIds(draft.selectedServiceIds);
+      }
+      if (draft.selectedPackageId) setSelectedPackageId(draft.selectedPackageId);
+      if (draft.selectedMethod) setSelectedMethod(draft.selectedMethod);
+    }
+  }, []);
+
+  useEffect(() => {
+    saveFormDraft(DRAFT_KEY, {
+      selectedServiceIds,
+      selectedPackageId,
+      selectedMethod,
+    });
+  }, [selectedServiceIds, selectedPackageId, selectedMethod]);
+
+  // Dynamic Packages dari promotionService (Admin Sync - Jasa)
   const [packages, setPackages] = useState(() => {
-    const list = promotionService.getPackagesByTypeSync("jasa");
-    return list.length > 0 ? list : PROMOTION_PACKAGES;
+    return promotionService.getPackagesByTypeSync("jasa");
   });
 
   useEffect(() => {
+    const loadLive = async () => {
+      try {
+        const live = await promotionService.fetchLivePackages("jasa");
+        if (Array.isArray(live)) {
+          setPackages(live);
+          if (live.length > 0 && !live.some((p) => p.id === selectedPackageId)) {
+            setSelectedPackageId(live[0].id);
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to fetch live packages:", e);
+      }
+    };
+    loadLive();
+
     const handlePackagesUpdate = () => {
       const list = promotionService.getPackagesByTypeSync("jasa");
-      if (list.length > 0) setPackages(list);
+      setPackages(list);
+      if (list.length > 0 && !list.some((p) => p.id === selectedPackageId)) {
+        setSelectedPackageId(list[0].id);
+      }
     };
     window.addEventListener("bantuin_promotion_packages_updated", handlePackagesUpdate);
     return () => window.removeEventListener("bantuin_promotion_packages_updated", handlePackagesUpdate);
-  }, []);
-  const catalog = React.useMemo(() => provider?.catalog || [], [provider?.catalog]);
+  }, [selectedPackageId]);
 
   useEffect(() => {
     if (selectedServiceIds.length === 0 && catalog.length > 0) {
@@ -132,21 +229,17 @@ function BuatPromosiJasaContent() {
     id: "srv-001",
     title: "Desain Logo & Identitas Brand",
     price: 75000,
-    image: "https://images.unsplash.com/photo-1626785774573-4b799315345d?auto=format&fit=crop&w=600&q=80",
+    image: "/logotab.png",
     category: "Desain Grafis"
   };
   const effectiveSelectedServices = selectedServices.length > 0 ? selectedServices : [fallbackService];
 
-  const selectedPkg = packages.find((p) => p.id === selectedPackageId) || packages[0] || {
-    id: "pkg-jasa-7d",
-    name: "Promosi Jasa 7 Hari",
-    price: 35000,
-    durationDays: 7,
-    placements: ["katalog", "search"],
-  };
-  const selectedPlacement = getPlacementSummary(selectedPkg);
+  const selectedPkg = packages.find((p) => p.id === selectedPackageId) || packages[0] || null;
+  const selectedPlacement = selectedPkg
+    ? getPlacementSummary(selectedPkg)
+    : { inBeranda: false, label: "-", note: "Belum ada paket promosi jasa aktif yang dibuat Admin." };
   const serviceCount = effectiveSelectedServices.length;
-  const basePricePerItem = selectedPkg.price;
+  const basePricePerItem = selectedPkg ? Number(selectedPkg.price) : 0;
   const subtotalAmount = basePricePerItem * serviceCount;
 
   // Aturan Diskon Paket Bundling Jasa (bisa pilih lebih dari 1 & dimurahkan):
@@ -154,9 +247,9 @@ function BuatPromosiJasaContent() {
   // 2 layanan: 20% diskon (hemat 20%)
   // 3 layanan: 30% diskon (hemat 30%)
   // 4+ layanan: 35% diskon (hemat 35%)
-  const discountRate = serviceCount >= 4 ? 0.35 : serviceCount === 3 ? 0.30 : serviceCount === 2 ? 0.20 : 0;
+  const discountRate = selectedPkg && serviceCount >= 4 ? 0.35 : selectedPkg && serviceCount === 3 ? 0.30 : selectedPkg && serviceCount === 2 ? 0.20 : 0;
   const discountAmount = Math.round(subtotalAmount * discountRate);
-  const totalAmount = subtotalAmount - discountAmount;
+  const totalAmount = Math.max(0, subtotalAmount - discountAmount);
 
   // Nomor Virtual Account sesuai standar sistem pembayaran Bantuin
   const vaNumbers = {
@@ -229,8 +322,12 @@ function BuatPromosiJasaContent() {
     }
   };
 
-  // Konfirmasi Pembayaran Selesai & Tampilkan Screen Sukses
+  // Konfirmasi Pembayaran & Buka Midtrans Payment Gateway
   const handleConfirmPayment = async () => {
+    if (!selectedPkg) {
+      if (addToast) addToast("Paket Belum Tersedia", "Belum ada paket promosi jasa yang dibuat oleh Admin.", "error");
+      return;
+    }
     if (effectiveSelectedServices.length === 0) {
       addToast?.("Layanan Belum Dipilih", "Silakan pilih minimal satu layanan yang ingin dipromosikan.", "error");
       return;
@@ -238,81 +335,172 @@ function BuatPromosiJasaContent() {
 
     setIsProcessing(true);
     try {
-      const targetIds = effectiveSelectedServices.map((s) => s.id).join(",");
       const targetTitles = effectiveSelectedServices.map((s) => s.title).join(", ");
+      const promoTitle = effectiveSelectedServices.length === 1 
+        ? effectiveSelectedServices[0].title 
+        : `Paket Promosi ${effectiveSelectedServices.length} Jasa: ${targetTitles}`;
 
-      const payment = await paymentService.createPromotionPayment({
-        ownerId: provider.id || "fajar-ramadhan-desain",
-        ownerName: provider.name || "Fajar Ramadhan",
-        ownerType: "provider",
-        targetType: "service",
-        targetId: targetIds,
-        targetTitle: effectiveSelectedServices.length === 1 
-          ? effectiveSelectedServices[0].title 
-          : `Paket Promosi ${effectiveSelectedServices.length} Jasa: ${targetTitles}`,
-        packageId: selectedPkg.id,
-        durationDays: selectedPkg.durationDays,
-        amount: totalAmount,
-        channel: selectedMethod,
-      });
+      const token = await authService.getValidAccessToken();
+      const createdPromoIds = [];
+      let snapToken = null;
+      let redirectUrl = null;
 
-      // Konfirmasi pembayaran menjadi status 'paid'
-      if (payment?.id) {
-        await paymentService.confirmPayment(payment.id);
-      }
-
-      // Aktifkan promosi untuk seluruh layanan jasa yang dipilih di promotionService
-      for (const srv of effectiveSelectedServices) {
-        try {
-          const promoItem = await promotionService.createPromotionOrder({
-            ownerId: provider.id || "fajar-ramadhan-desain",
-            ownerName: provider.name || "Fajar Ramadhan",
-            ownerType: "provider",
-            targetType: "service",
-            targetId: srv.id,
-            targetTitle: srv.title,
-            targetCategory: srv.category,
-            targetPrice: srv.price,
-            targetImage: srv.image,
-            // Jasa online dapat direkomendasikan lintas wilayah; jasa fisik
-            // mengikuti domisili/alamat penyedia agar sama dengan Navbar.
-            reachType: srv.locationType === "online" ? "all" : "city",
-            targetLocation: srv.locationType === "online" ? "all" : (srv.address || provider.location || "all"),
-            packageId: selectedPkg.id,
-            paymentId: payment?.id || `PAY-${Date.now()}`,
-            amount: Math.round(totalAmount / effectiveSelectedServices.length),
-            paymentMethod: selectedMethod,
-          });
-          if (promoItem?.id) {
-            await promotionService.activatePromotion(promoItem.id, payment?.id);
+      // 1. Simpan order promosi ke PostgreSQL melalui API
+      if (token) {
+        for (const srv of effectiveSelectedServices) {
+          try {
+            const res = await fetch("/api/promotions/order", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                serviceId: srv.id,
+                targetId: srv.id,
+                targetType: "service",
+                packageId: selectedPkg.id,
+                reachType: srv.locationType === "online" ? "all" : "city",
+                amount: Math.round(totalAmount / effectiveSelectedServices.length),
+                paymentMethod: selectedMethod,
+                isPaid: false,
+              }),
+            });
+            const json = await res.json().catch(() => ({}));
+            if (json.success && json.data) {
+              if (json.data.id || json.data.promotionId) {
+                createdPromoIds.push(json.data.id || json.data.promotionId);
+              }
+              if (json.data.snapToken) snapToken = json.data.snapToken;
+              if (json.data.redirectUrl) redirectUrl = json.data.redirectUrl;
+            }
+          } catch (postErr) {
+            console.warn("[promosi] DB Order API error:", postErr);
           }
-        } catch (innerErr) {
-          console.warn("[promosi] Gagal aktivasi sub-item promosi:", innerErr);
         }
       }
 
-      setIsProcessing(false);
-      setIsSuccess(true);
-      window.scrollTo({ top: 0, behavior: "smooth" });
-      if (addToast) {
-        addToast(
-          "Pembayaran Berhasil!", 
-          `Promosi untuk ${effectiveSelectedServices.length} layanan jasa kini telah aktif tayang.`
-        );
+      // 2. Helper aktivasi data setelah pembayaran berhasil
+      const onPaymentSuccess = async () => {
+        // Aktifkan langsung di database PostgreSQL
+        if (token && createdPromoIds.length > 0) {
+          for (const pid of createdPromoIds) {
+            try {
+              await fetch("/api/promotions/order", {
+                method: "PATCH",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ promotionId: pid }),
+              });
+            } catch (patchErr) {
+              console.warn("[promosi jasa] PATCH error:", patchErr);
+            }
+          }
+        }
+
+        for (const srv of effectiveSelectedServices) {
+          try {
+            const promoItem = await promotionService.createPromotionOrder({
+              ownerId: provider.id || currentUser?.id || "",
+              ownerName: provider.name || currentUser?.fullName || "Penyedia Jasa",
+              ownerType: "provider",
+              targetType: "service",
+              targetId: srv.id,
+              targetTitle: srv.title,
+              targetCategory: srv.category,
+              targetPrice: srv.price,
+              targetImage: srv.image,
+              reachType: srv.locationType === "online" ? "all" : "city",
+              targetLocation: srv.locationType === "online" ? "all" : (srv.address || provider.location || "all"),
+              packageId: selectedPkg.id,
+              paymentId: `PAY-${Date.now()}`,
+              amount: Math.round(totalAmount / effectiveSelectedServices.length),
+              paymentMethod: selectedMethod,
+            });
+            if (promoItem?.id) {
+              await promotionService.activatePromotion(promoItem.id);
+            }
+          } catch (innerErr) {
+            console.warn("[promosi] Gagal aktivasi sub-item promosi:", innerErr);
+          }
+        }
+
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("bantuin_promotions_updated"));
+          window.dispatchEvent(new Event("bantuin_admin_update"));
+          window.dispatchEvent(new Event("bantuin_payments_updated"));
+        }
+
+        clearFormDraft(DRAFT_KEY);
+        setIsProcessing(false);
+        setIsSuccess(true);
+        if (addToast) {
+          addToast(
+            "Pembayaran Berhasil!", 
+            `Promosi untuk ${effectiveSelectedServices.length} layanan jasa kini telah aktif tayang.`
+          );
+        }
+        router.push(`/pembayaran/berhasil?type=promosi&title=${encodeURIComponent(promoTitle)}&amount=${totalAmount}&next=${encodeURIComponent("/jasa/dashboard")}`);
+      };
+
+      // 4. Buka Midtrans Snap Payment Gateway
+      let snapObj = typeof window !== "undefined" ? window.snap : null;
+      if (!snapObj && snapToken) {
+        snapObj = await paymentService.loadSnap();
       }
-      router.push(`/pembayaran/berhasil?type=promosi&title=${encodeURIComponent(`Promosi ${effectiveSelectedServices.length} layanan jasa`)}&amount=${totalAmount}&next=${encodeURIComponent("/")}`);
+
+      if (snapObj && snapToken) {
+        snapObj.pay(snapToken, {
+          onSuccess: async function () {
+            await onPaymentSuccess();
+          },
+          onPending: function () {
+            setIsProcessing(false);
+            if (addToast) {
+              addToast(
+                "Menunggu Pembayaran",
+                "Silakan selesaikan pembayaran di kanal yang Anda pilih.",
+                "warning"
+              );
+            }
+          },
+          onError: function (err) {
+            setIsProcessing(false);
+            if (addToast) {
+              addToast(
+                "Pembayaran Gagal",
+                err?.status_message || "Transaksi pembayaran dibatalkan atau ditolak.",
+                "error"
+              );
+            }
+          },
+          onClose: function () {
+            setIsProcessing(false);
+            if (addToast) {
+              addToast(
+                "Pembayaran Belum Diselesaikan",
+                "Jendela pembayaran ditutup sebelum transaksi diselesaikan.",
+                "warning"
+              );
+            }
+          },
+        });
+        return;
+      } else if (redirectUrl) {
+        window.location.href = redirectUrl;
+        return;
+      }
+
+      // Fallback lokal jika gateway belum dikonfigurasi di env
+      await onPaymentSuccess();
     } catch (err) {
-      console.warn("[promosi] Fallback aktivasi:", err);
+      console.warn("[promosi] Payment gateway error, fallback:", err);
       setIsProcessing(false);
-      setIsSuccess(true);
-      window.scrollTo({ top: 0, behavior: "smooth" });
       if (addToast) {
-        addToast(
-          "Pembayaran Berhasil!", 
-          `Promosi untuk ${effectiveSelectedServices.length} layanan jasa kini telah aktif tayang.`
-        );
+        addToast("Kendala Pembayaran", err?.message || "Gagal memproses transaksi gateway.", "error");
       }
-      router.push(`/pembayaran/berhasil?type=promosi&title=${encodeURIComponent(`Promosi ${effectiveSelectedServices.length} layanan jasa`)}&amount=${totalAmount}&next=${encodeURIComponent("/")}`);
     }
   };
 
@@ -543,60 +731,76 @@ function BuatPromosiJasaContent() {
                     <p className="text-xs text-slate-500">Setiap paket menampilkan lokasi tayang yang benar sebelum Anda memilih.</p>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-                    {packages.map((pkg) => {
-                      const isSelected = selectedPackageId === pkg.id;
-                      const placement = getPlacementSummary(pkg);
-                      return (
-                        <div
-                          key={pkg.id}
-                          onClick={() => setSelectedPackageId(pkg.id)}
-                          className={`rounded-2xl p-4 sm:p-5 border-2 cursor-pointer transition flex flex-col relative min-h-[270px] ${
-                            isSelected
-                              ? "border-[#1683FF] bg-white ring-1 ring-[#1683FF]/20 shadow-[0_8px_24px_rgba(22,131,255,0.10)]"
-                              : "border-slate-200 hover:border-blue-200 bg-white hover:shadow-xs"
-                          }`}
-                        >
-                          {pkg.isPopular && (
-                            <div className="absolute -top-2.5 right-3 bg-[#1683FF] text-white text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full shadow-xs flex items-center gap-1">
-                              <Star className="w-2.5 h-2.5 fill-white" />
-                              <span>Populer</span>
-                            </div>
-                          )}
+                  {packages.length === 0 ? (
+                    <div className="p-8 sm:p-10 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/60 text-center flex flex-col items-center justify-center space-y-3">
+                      <div className="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center text-[#1683FF]">
+                        <Package className="w-7 h-7" />
+                      </div>
+                      <div className="max-w-md">
+                        <h4 className="text-sm sm:text-base font-bold text-slate-900">
+                          Belum Ada Paket Promosi Jasa Aktif
+                        </h4>
+                        <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                          Paket promosi saat ini belum dibuat oleh Admin di panel Admin &gt; Manajemen Sistem Promosi. Paket akan otomatis muncul di sini setelah Admin menambahkannya.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                      {packages.map((pkg) => {
+                        const isSelected = selectedPackageId === pkg.id;
+                        const placement = getPlacementSummary(pkg);
+                        return (
+                          <div
+                            key={pkg.id}
+                            onClick={() => setSelectedPackageId(pkg.id)}
+                            className={`rounded-2xl p-4 sm:p-5 border-2 cursor-pointer transition flex flex-col relative min-h-[270px] ${
+                              isSelected
+                                ? "border-[#1683FF] bg-white ring-1 ring-[#1683FF]/20 shadow-[0_8px_24px_rgba(22,131,255,0.10)]"
+                                : "border-slate-200 hover:border-blue-200 bg-white hover:shadow-xs"
+                            }`}
+                          >
+                            {pkg.isPopular && (
+                              <div className="absolute -top-2.5 right-3 bg-[#1683FF] text-white text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full shadow-xs flex items-center gap-1">
+                                <Star className="w-2.5 h-2.5 fill-white" />
+                                <span>Populer</span>
+                              </div>
+                            )}
 
-                          <div className="space-y-3">
-                            <div>
-                              <h4 className="font-extrabold text-sm sm:text-base text-slate-900 leading-snug">{pkg.name}</h4>
-                              <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-1">
-                              <Clock className="w-3 h-3 text-slate-400" />
-                              <span><strong>{pkg.durationDays} Hari</strong> Tayang</span>
+                            <div className="space-y-3">
+                              <div>
+                                <h4 className="font-extrabold text-sm sm:text-base text-slate-900 leading-snug">{pkg.name}</h4>
+                                <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-1">
+                                <Clock className="w-3 h-3 text-slate-400" />
+                                <span><strong>{pkg.durationDays} Hari</strong> Tayang</span>
+                                </div>
+                              </div>
+
+                              <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-100">
+                                <div className="text-base sm:text-lg font-black text-[#1683FF]">{formatIDR(pkg.price)}</div>
+                                <div className="text-[9px] text-slate-400">Bebas biaya admin</div>
+                              </div>
+                              <div className={`rounded-xl border px-3 py-2 text-[11px] leading-snug ${placement.inBeranda ? "border-blue-100 bg-blue-50/70 text-blue-800" : "border-slate-200 bg-slate-50/70 text-slate-600"}`}>
+                                <strong className="block text-[#1683FF]">{placement.inBeranda ? "Termasuk Beranda" : "Tanpa slot Beranda"}</strong>
+                                <span>{placement.inBeranda ? "Beranda + katalog + pencarian" : "Katalog + pencarian"}</span>
                               </div>
                             </div>
 
-                            <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-100">
-                              <div className="text-base sm:text-lg font-black text-[#1683FF]">{formatIDR(pkg.price)}</div>
-                              <div className="text-[9px] text-slate-400">Bebas biaya admin</div>
-                            </div>
-                            <div className={`rounded-xl border px-3 py-2 text-[11px] leading-snug ${placement.inBeranda ? "border-blue-100 bg-blue-50/70 text-blue-800" : "border-slate-200 bg-slate-50/70 text-slate-600"}`}>
-                              <strong className="block text-[#1683FF]">{placement.inBeranda ? "Termasuk Beranda" : "Tanpa slot Beranda"}</strong>
-                              <span>{placement.inBeranda ? "Beranda + katalog + pencarian" : "Katalog + pencarian"}</span>
-                            </div>
+                            <button
+                              type="button"
+                              className={`w-full py-2.5 rounded-xl text-xs font-bold transition mt-auto ${
+                                isSelected
+                                  ? "bg-[#1683FF] text-white shadow-sm"
+                                  : "bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-[#1683FF]"
+                              }`}
+                            >
+                              {isSelected ? "✓ Paket terpilih" : "Pilih paket ini"}
+                            </button>
                           </div>
-
-                          <button
-                            type="button"
-                            className={`w-full py-2.5 rounded-xl text-xs font-bold transition mt-auto ${
-                              isSelected
-                                ? "bg-[#1683FF] text-white shadow-sm"
-                                : "bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-[#1683FF]"
-                            }`}
-                          >
-                            {isSelected ? "✓ Paket terpilih" : "Pilih paket ini"}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {/* 3. Kanal Pembayaran Resmi (DENGAN QRIS & NO VA LANGSUNG MUNCUL) */}
@@ -671,25 +875,17 @@ function BuatPromosiJasaContent() {
                         <div className="p-3.5 sm:p-5 bg-slate-50/80 rounded-2xl border border-slate-200/80 space-y-3 sm:space-y-3.5">
                           <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs sm:text-sm">
                             <span className="text-slate-700 font-semibold min-w-0">
-                              Nomor Virtual Account {selectedMethod.split("_")[0].toUpperCase()}:
+                              Virtual Account {selectedMethod.split("_")[0].toUpperCase()}:
                             </span>
                             <span className="text-[10px] sm:text-xs font-bold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100 shrink-0">
-                              Otomatis Terverifikasi
+                              Midtrans Otomatis
                             </span>
                           </div>
 
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 p-3 sm:p-4 bg-white rounded-xl border border-slate-200 shadow-2xs">
-                            <span className="font-mono text-base sm:text-2xl font-black text-slate-900 tracking-wider select-all break-all text-center sm:text-left">
-                              {vaNumbers[selectedMethod] || "8802918291028371"}
+                            <span className="text-xs sm:text-sm text-slate-600 font-medium text-center sm:text-left">
+                              Nomor Virtual Account resmi akan otomatis diterbitkan oleh Midtrans saat Anda menekan tombol <strong>Bayar Sekarang</strong>.
                             </span>
-                            <button
-                              type="button"
-                              onClick={() => handleCopy(vaNumbers[selectedMethod] || "8802918291028371", "va")}
-                              className="w-full sm:w-auto px-4 py-2 bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs sm:text-sm font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
-                            >
-                              <Copy className="w-4 h-4" />
-                              <span>{isCopiedVA ? "Tersalin" : "Salin No VA"}</span>
-                            </button>
                           </div>
 
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs text-slate-500 pt-1">
@@ -797,7 +993,7 @@ function BuatPromosiJasaContent() {
                         <span>Durasi Tayang:</span>
                       </span>
                       <span className="font-bold text-slate-900 text-right">
-                        {selectedPkg.durationDays} Hari Penuh
+                        {selectedPkg ? `${selectedPkg.durationDays} Hari Penuh` : "-"}
                       </span>
                     </div>
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
@@ -814,8 +1010,10 @@ function BuatPromosiJasaContent() {
                   {/* Price Breakdown Calculation */}
                   <div className="space-y-2 pt-2 border-t border-slate-100 text-xs">
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 text-slate-600">
-                      <span className="min-w-0 break-words">Harga Paket ({selectedPkg.name})</span>
-                      <span className="font-semibold text-slate-900 text-right max-w-[150px] sm:max-w-none">{formatIDR(selectedPkg.price)} / layanan</span>
+                      <span className="min-w-0 break-words">Harga Paket ({selectedPkg?.name || "-"})</span>
+                      <span className="font-semibold text-slate-900 text-right max-w-[150px] sm:max-w-none">
+                        {selectedPkg ? `${formatIDR(selectedPkg.price)} / layanan` : "Rp 0"}
+                      </span>
                     </div>
 
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 text-slate-600">
@@ -868,14 +1066,20 @@ function BuatPromosiJasaContent() {
                   <button
                     type="button"
                     onClick={handleConfirmPayment}
-                    disabled={isProcessing}
-                    className="w-full py-3.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm transition shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-75"
+                    disabled={isProcessing || !selectedPkg}
+                    className={`w-full py-3.5 rounded-xl font-bold text-xs sm:text-sm transition shadow-xs flex items-center justify-center gap-2 cursor-pointer ${
+                      !selectedPkg
+                        ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                        : "bg-[#1683FF] hover:bg-[#0F6FE5] text-white disabled:opacity-75"
+                    }`}
                   >
                     {isProcessing ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
                         <span>Memverifikasi Pembayaran...</span>
                       </>
+                    ) : !selectedPkg ? (
+                      <span>Paket Belum Tersedia</span>
                     ) : (
                       <>
                         <ShieldCheck className="w-4 h-4" />

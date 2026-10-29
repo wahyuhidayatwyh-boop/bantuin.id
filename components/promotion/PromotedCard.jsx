@@ -41,7 +41,7 @@ export default function PromotedCard({
     item.targetImage ??
     item.image ??
     item.avatar ??
-    "https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=800&auto=format&fit=crop&q=80";
+    "/logotab.png";
   const category = item.targetCategory ?? item.category ?? item.categoryName ?? "";
   const location =
     item.targetLocation ??
@@ -51,20 +51,38 @@ export default function PromotedCard({
     "Banyumas";
   const ownerName =
     item.ownerName ??
+    item.storeName ??
+    item.provider?.partnerBusinessName ??
     item.provider?.name ??
     item.store?.name ??
     item.sellerName ??
     "";
   const rating =
     item.rating ??
+    item.ratingAvg ??
+    item.provider?.ratingAvg ??
     item.provider?.rating ??
     item.store?.rating ??
     5.0;
 
-  const reviewCount =
-    item.reviewCount ??
-    (Array.isArray(item.reviews) ? item.reviews.length : null) ??
-    (rating ? Math.floor(rating * 8 + 14) : 28);
+  const reviewCount = Math.max(
+    Number(item.reviewCount ?? 0),
+    Number(item.ratingCount ?? 0),
+    Number(item.reviewsCount ?? 0),
+    Number(item.owner?.ratingCount ?? 0),
+    Number(item.provider?.ratingCount ?? 0),
+    Number(item.provider?.reviewsCount ?? 0),
+    Array.isArray(item.reviews) ? item.reviews.length : (typeof item.reviews === "number" ? item.reviews : 0)
+  );
+
+  const completedCount =
+    item.totalRentedCount ??
+    item.completedRentals ??
+    item.completedOrders ??
+    item.completedJobs ??
+    item.completedCount ??
+    item.provider?.completedJobs ??
+    0;
 
   const targetHref =
     href ||
@@ -106,6 +124,7 @@ export default function PromotedCard({
             src={image}
             alt={title}
             loading="lazy"
+            decoding="async"
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
           />
 
@@ -133,18 +152,22 @@ export default function PromotedCard({
               {ownerName && <span className="text-slate-600">{ownerName}</span>}
             </p>
 
-            {/* Rating & Lokasi */}
-            <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] text-slate-500 mt-1">
+            {/* Rating, Jumlah Selesai/Tersewa & Lokasi */}
+            <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] text-slate-500 mt-1 flex-wrap">
               <span className="flex items-center gap-0.5 font-bold text-amber-500 shrink-0">
                 <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
                 <span>{Number(rating).toFixed(1)}</span>
               </span>
               <span className="text-slate-400">({reviewCount})</span>
+              <span className="text-slate-300">·</span>
+              <span className="font-semibold text-slate-600 shrink-0">
+                {isRental ? `${completedCount} tersewa` : `${completedCount} selesai`}
+              </span>
               {location && location !== "all" && (
                 <>
                   <span className="text-slate-300">·</span>
-                  <span className="flex items-center gap-0.5 truncate text-slate-500">
-                    <MapPin className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                  <span className="flex items-center gap-1 truncate text-slate-600 font-medium">
+                    <MapPin className="w-3 h-3 text-[#1683FF] shrink-0" />
                     <span className="truncate">{location}</span>
                   </span>
                 </>
@@ -160,8 +183,18 @@ export default function PromotedCard({
               </span>
               <div className="text-xs sm:text-sm font-black text-[#1683FF] leading-tight truncate mt-0.5">
                 {price ? formatIDR(price) : "Tanya Tarif"}
-                {isRental && price && (
-                  <span className="text-[9px] sm:text-[10px] font-normal text-slate-500 ml-0.5">/hari</span>
+                {isRental ? (
+                  price && (
+                    <span className="text-[9px] sm:text-[10px] font-normal text-slate-500 ml-0.5">
+                      {item.unit || "/hari"}
+                    </span>
+                  )
+                ) : (
+                  item.unit && price && (
+                    <span className="text-[9px] sm:text-[10px] font-normal text-slate-500 ml-0.5">
+                      {item.unit}
+                    </span>
+                  )
                 )}
               </div>
             </div>
@@ -207,6 +240,7 @@ export default function PromotedCard({
           src={image}
           alt={title}
           loading="lazy"
+            decoding="async"
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out"
         />
 
@@ -245,13 +279,18 @@ export default function PromotedCard({
         </h4>
 
         {/* Owner + Location */}
-        <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-auto pt-2 border-t border-slate-100">
+        <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-auto pt-2 border-t border-slate-100 flex-wrap">
           {rating !== null && (
             <span className="flex items-center gap-0.5 font-bold text-amber-500 shrink-0">
               <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
               {Number(rating).toFixed(1)}
             </span>
           )}
+          <span className="text-slate-400 shrink-0">({reviewCount})</span>
+          <span className="text-slate-300 shrink-0">·</span>
+          <span className="font-semibold text-slate-600 shrink-0">
+            {isRental ? `${completedCount} tersewa` : `${completedCount} selesai`}
+          </span>
           {rating !== null && (ownerName || location) && (
             <span className="text-slate-300 shrink-0">·</span>
           )}
@@ -261,8 +300,8 @@ export default function PromotedCard({
           {location && location !== "all" && (
             <>
               {ownerName && <span className="text-slate-300 shrink-0">·</span>}
-              <span className="flex items-center gap-0.5 shrink-0">
-                <MapPin className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+              <span className="flex items-center gap-1 shrink-0 text-slate-600 font-medium">
+                <MapPin className="w-3 h-3 text-[#1683FF] shrink-0" />
                 <span className="truncate">{location}</span>
               </span>
             </>
@@ -282,10 +321,18 @@ export default function PromotedCard({
               <div className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide">
                 {isRental ? "Mulai Sewa" : "Mulai"}
               </div>
-              <div className="font-black text-sm sm:text-[15px] text-[#1683FF] truncate leading-tight">
-                {formatIDR(price)}
-                {isRental && (
-                  <span className="text-[10px] font-normal text-slate-500 ml-0.5">/hari</span>
+              <div className="font-black text-xs sm:text-sm md:text-[15px] text-[#1683FF] leading-tight flex items-baseline flex-wrap gap-0.5">
+                <span>{formatIDR(price)}</span>
+                {isRental ? (
+                  <span className="text-[9px] sm:text-[10px] font-normal text-slate-500">
+                    {item.unit || "/hari"}
+                  </span>
+                ) : (
+                  item.unit && (
+                    <span className="text-[9px] sm:text-[10px] font-normal text-slate-500">
+                      {item.unit}
+                    </span>
+                  )
                 )}
               </div>
             </>

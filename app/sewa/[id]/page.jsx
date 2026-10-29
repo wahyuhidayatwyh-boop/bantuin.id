@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
-import { useParams, useRouter } from "next/navigation";
+import React, { useState, useEffect, useMemo, Suspense } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
@@ -20,42 +20,130 @@ import {
   MapPin, 
   Store, 
   ExternalLink,
+  Check,
+  Layers,
+  Package,
   ChevronRight as BreadcrumbSeparator
 } from "lucide-react";
 import { getNavigationUrl } from "@/lib/services/gpsService";
 import { getMitraStoreById, getAllMitraStores } from "@/lib/mock/mitraData";
 import CategoryIcon from "@/components/common/CategoryIcon";
+import ProductProfileCard from "@/components/cards/ProductProfileCard";
+import { authService } from "@/lib/services/authService";
 
-export default function RentalDetailPage() {
+function parsePackageDurationDays(durationStr) {
+  if (!durationStr) return 1;
+  const match = String(durationStr).match(/(\d+)\s*hari/i);
+  if (match && match[1]) {
+    const days = parseInt(match[1], 10);
+    return days > 0 ? days : 1;
+  }
+  const matchNum = String(durationStr).match(/(\d+)/);
+  if (matchNum && matchNum[1]) {
+    const num = parseInt(matchNum[1], 10);
+    return num > 0 ? num : 1;
+  }
+  return 1;
+}
+
+function addDaysToDateStr(dateStr, days) {
+  try {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const dateObj = new Date(y, m - 1, d);
+    dateObj.setDate(dateObj.getDate() + Number(days));
+    const yy = dateObj.getFullYear();
+    const mm = String(dateObj.getMonth() + 1).padStart(2, "0");
+    const dd = String(dateObj.getDate()).padStart(2, "0");
+    return `${yy}-${mm}-${dd}`;
+  } catch {
+    return dateStr;
+  }
+}
+
+function RentalDetailContent() {
   const { id } = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const queryPkgId = searchParams?.get("pkg") || searchParams?.get("packageId");
+
   const { 
     rentals, 
+    currentUser,
+    addToast,
     startRentalInquiry,
     getDistanceToUser, 
     userCoordinates 
-  } = useApp();
+  } = useApp() || {};
 
-  const todayStr = new Date().toISOString().split("T")[0];
-  const nextTwoDaysStr = new Date(Date.now() + 86400000 * 2).toISOString().split("T")[0];
+  const todayStr = useMemo(() => {
+    const d = new Date();
+    const yy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yy}-${mm}-${dd}`;
+  }, []);
 
   const [startDate, setStartDate] = useState(todayStr);
-  const [endDate, setEndDate] = useState(nextTwoDaysStr);
-  const [totalDays, setTotalDays] = useState(2);
+  const [endDate, setEndDate] = useState(() => addDaysToDateStr(todayStr, 1));
+  const [totalDays, setTotalDays] = useState(1);
+  const [selectedPackage, setSelectedPackage] = useState(null);
 
-  // Recalculate duration automatically whenever startDate or endDate changes
+  const [dbRental, setDbRental] = useState(null);
+
   useEffect(() => {
-    if (startDate && endDate) {
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-      const diffMs = end.getTime() - start.getTime();
-      const calculatedDays = Math.max(1, Math.round(diffMs / (1000 * 60 * 60 * 24)));
-      setTotalDays(calculatedDays);
-    }
-  }, [startDate, endDate]);
+    if (!id) return;
+    fetch(`/api/rentals/${id}`)
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.success && json.data) {
+          const r = json.data;
+          const photosList = Array.isArray(r.photoUrls) && r.photoUrls.length > 0
+            ? r.photoUrls
+            : (Array.isArray(r.photos) && r.photos.length > 0 ? r.photos : [r.coverImageUrl || "/logotab.png"]);
+
+          setDbRental({
+            id: r.id,
+            title: r.title,
+            category: r.category,
+            dailyPrice: Number(r.dailyPrice),
+            depositAmount: Number(r.depositAmount || 0),
+            photoUrl: photosList[0] || "/logotab.png",
+            photos: photosList,
+            stock: r.stockCount !== undefined ? Number(r.stockCount) : 1,
+            stockCount: r.stockCount !== undefined ? Number(r.stockCount) : 1,
+            stockStatus: r.stockStatus || (r.isAvailable ? "Siap Sewa" : "Sedang Disewa"),
+            tag: r.tag,
+            includedItems: r.includedItems || "",
+            securityDeposit: r.securityDeposit || "",
+            description: r.description,
+            condition: r.description,
+            ratingAvg: Number(r.ratingAvg) || 5.0,
+            ratingCount: Number(r.ratingCount) || 0,
+            totalRentedCount: 0,
+            isVerifiedPartner: r.owner?.verificationStatus === "verified" || r.isVerifiedPartner,
+            isSafeEscrow: true,
+            storeId: r.ownerId || "mitra-rental",
+            ownerName: r.owner?.partnerBusinessName || r.owner?.fullName || "Mitra Sewa Resmi",
+            owner: {
+              id: r.owner?.id,
+              name: r.owner?.partnerBusinessName || r.owner?.fullName || "Mitra Sewa Resmi",
+              avatar: r.owner?.avatarUrl || "/logotab.png",
+              rating: Number(r.owner?.ratingAvg) || 5.0,
+              completedOrders: 0,
+            },
+            location: r.pickupLocation || r.owner?.campusName || "Indonesia",
+            address: r.pickupLocation || r.owner?.campusName || "Indonesia",
+            packages: r.packages || [],
+            pricingMode: r.pricingMode || "single",
+          });
+        }
+      })
+      .catch(() => {});
+  }, [id]);
 
   // Cari unit dari AppContext rentals atau dari katalog seluruh toko mitra
   const rental = useMemo(() => {
+    if (dbRental) return dbRental;
     const found = rentals.find((r) => r.id === id);
     if (found) return found;
 
@@ -67,15 +155,20 @@ export default function RentalDetailPage() {
           id: catItem.id,
           title: catItem.name,
           category: catItem.category,
-          dailyPrice: catItem.price,
-          depositAmount: catItem.depositAmount || 200000,
-          photoUrl: catItem.image,
-          photos: (catItem.photos && catItem.photos.length > 0) ? catItem.photos : [catItem.image],
-          stock: catItem.stockCount || 3,
+          dailyPrice: Number(catItem.price),
+          depositAmount: Number(catItem.depositAmount || 200000),
+          photoUrl: catItem.image || "/logotab.png",
+          photos: (catItem.photos && catItem.photos.length > 0) ? catItem.photos : [catItem.image || "/logotab.png"],
+          stock: catItem.stockCount ?? catItem.stock ?? 1,
+          stockCount: catItem.stockCount ?? catItem.stock ?? 1,
+          stockStatus: catItem.stockStatus || "Siap Sewa",
+          tag: catItem.tag || undefined,
+          includedItems: catItem.includedItems || "",
+          securityDeposit: catItem.securityDeposit || st.securityDepositPolicy || "",
           description: catItem.desc,
-          ratingAvg: catItem.rating || 4.95,
-          ratingCount: catItem.reviews || 38,
-          totalRentedCount: 52,
+          ratingAvg: catItem.rating || 5.0,
+          ratingCount: catItem.reviews || 0,
+          totalRentedCount: 0,
           isVerifiedPartner: true,
           isSafeEscrow: true,
           storeId: st.id,
@@ -83,33 +176,123 @@ export default function RentalDetailPage() {
           owner: {
             id: st.id,
             name: st.name,
-            avatar: st.avatar,
-            rating: st.rating,
-            completedOrders: st.completedOrders,
+            avatar: st.avatar || "/logotab.png",
+            rating: st.rating || 5.0,
+            completedOrders: st.completedOrders || 0,
           },
-          location: st.address,
-          address: st.address,
+          location: st.address || "Indonesia",
+          address: st.address || "Indonesia",
+          packages: catItem.packages || [],
+          pricingMode: catItem.pricingMode || "single",
         };
       }
     }
     return rentals[0];
-  }, [rentals, id]);
+  }, [rentals, id, dbRental]);
 
-  // Resolve store data from mock mitra
-  const storeId = rental?.storeId || 
-    (rental?.owner?.id?.startsWith("mitra-") ? rental.owner.id : "mitra-kamera");
-  const storeData = getMitraStoreById(storeId);
+  // Resolve store data cleanly
+  const storeId = rental?.storeId || rental?.owner?.id || null;
+  const storeData = storeId ? getMitraStoreById(storeId) : null;
 
-  // Photos gallery (mendukung multi-foto dari form katalog mitra)
+  // Photos gallery (mendukung multi-foto tanpa gambar dummy unsplash)
   const productPhotos = (rental?.photos && rental.photos.length > 0)
     ? rental.photos
-    : [
-        rental?.photoUrl || "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=800&q=80",
-        "https://images.unsplash.com/photo-1502920917128-1aa500764cbd?auto=format&fit=crop&w=800&q=80",
-        "https://images.unsplash.com/photo-1617005082133-548c4dd27f35?auto=format&fit=crop&w=800&q=80",
-        "https://images.unsplash.com/photo-1512790182412-b19e6d62bc39?auto=format&fit=crop&w=800&q=80"
-      ];
+    : [rental?.photoUrl || "/logotab.png"];
   const [activePhotoIndex, setActivePhotoIndex] = useState(0);
+
+  // Available packages for this rental unit
+  const availablePackages = useMemo(() => {
+    if (Array.isArray(rental?.packages) && rental.packages.length > 0) {
+      return rental.packages;
+    }
+    return [];
+  }, [rental?.packages]);
+
+  // Pricing Mode: Tiered (Paketan) vs Single (Tarif Harian Biasa)
+  // Dipisahkan secara tegas: jika ada paket maka mode paketan aktif
+  const isTieredMode = rental?.pricingMode === "tiered" || availablePackages.length > 0;
+
+  // Sinkronisasi paket terpilih (HANYA untuk mode paketan)
+  useEffect(() => {
+    if (isTieredMode && availablePackages.length > 0) {
+      const pkgFromUrl = queryPkgId ? availablePackages.find((p) => p.id === queryPkgId) : null;
+      const target = pkgFromUrl || (selectedPackage && availablePackages.some((p) => p.id === selectedPackage.id) ? selectedPackage : availablePackages[0]);
+      
+      if (!selectedPackage || selectedPackage.id !== target.id) {
+        setSelectedPackage(target);
+        const pkgDays = parsePackageDurationDays(target.duration);
+        setTotalDays(pkgDays);
+        setEndDate(addDaysToDateStr(startDate, pkgDays));
+      }
+    } else if (!isTieredMode && selectedPackage !== null) {
+      setSelectedPackage(null);
+    }
+  }, [isTieredMode, availablePackages, queryPkgId]);
+
+  // Handler memilih paket dari card kiri
+  const handleSelectPackage = (pkg) => {
+    setSelectedPackage(pkg);
+    const pkgDays = parsePackageDurationDays(pkg.duration);
+    setTotalDays(pkgDays);
+    setEndDate(addDaysToDateStr(startDate, pkgDays));
+  };
+
+  // Handler perubahan tanggal mulai
+  const handleStartDateChange = (newStart) => {
+    setStartDate(newStart);
+    if (isTieredMode && selectedPackage) {
+      const pkgDays = parsePackageDurationDays(selectedPackage.duration);
+      setEndDate(addDaysToDateStr(newStart, pkgDays));
+    } else if (endDate) {
+      try {
+        const [sy, sm, sd] = newStart.split("-").map(Number);
+        const [ey, em, ed] = endDate.split("-").map(Number);
+        const s = new Date(sy, sm - 1, sd);
+        const e = new Date(ey, em - 1, ed);
+        const diff = Math.max(1, Math.round((e - s) / 86400000));
+        setTotalDays(diff);
+      } catch {
+        setTotalDays(1);
+      }
+    }
+  };
+
+  // Handler perubahan tanggal selesai (hanya aktif pada mode harian biasa)
+  const handleEndDateChange = (newEnd) => {
+    setEndDate(newEnd);
+    if (!isTieredMode && startDate) {
+      try {
+        const [sy, sm, sd] = startDate.split("-").map(Number);
+        const [ey, em, ed] = newEnd.split("-").map(Number);
+        const s = new Date(sy, sm - 1, sd);
+        const e = new Date(ey, em - 1, ed);
+        const diff = Math.max(1, Math.round((e - s) / 86400000));
+        setTotalDays(diff);
+      } catch {
+        setTotalDays(1);
+      }
+    }
+  };
+
+  // Recalculate duration & active prices
+  const activeDailyPrice = isTieredMode && selectedPackage
+    ? Number(selectedPackage.price)
+    : Number(rental?.dailyPrice || 0);
+
+  const activeDepositAmount = isTieredMode && selectedPackage?.depositAmount !== undefined && selectedPackage?.depositAmount !== null && Number(selectedPackage.depositAmount) >= 0
+    ? Number(selectedPackage.depositAmount)
+    : Number(rental?.depositAmount || 200000);
+
+  // KETENTUAN HARGA:
+  // - Mode Paketan: Biaya sewa adalah harga paket tetap (fixed package price), BUKAN dikalikan hari!
+  // - Mode Harian: Biaya sewa dihitung per hari (dailyPrice * totalDays).
+  const rentalFee = isTieredMode && selectedPackage
+    ? Number(selectedPackage.price)
+    : activeDailyPrice * totalDays;
+
+  const depositFee = activeDepositAmount;
+  const platformFee = Math.round(rentalFee * 0.08);
+  const totalAmount = rentalFee + depositFee;
 
   // Reset active photo index if it exceeds available photos
   useEffect(() => {
@@ -118,13 +301,13 @@ export default function RentalDetailPage() {
     }
   }, [productPhotos.length, activePhotoIndex]);
 
-  const availableStock = typeof rental?.stock === "number" ? rental.stock : 3;
-  const isOutOfStock = availableStock <= 0;
+  const availableStock = typeof rental?.stockCount === "number" ? rental.stockCount : (typeof rental?.stock === "number" ? rental.stock : 1);
+  const isOutOfStock = availableStock <= 0 || (rental?.stockStatus && (rental.stockStatus.toLowerCase().includes("habis") || rental.stockStatus.toLowerCase().includes("perawatan") || rental.stockStatus.toLowerCase().includes("sedang disewa")));
 
   // Dynamic social proof numbers calculated from app state
-  const totalRentedCount = rental?.totalRentedCount ?? rental?.owner?.completedOrders ?? 86;
-  const ratingAvg = rental?.ratingAvg ? Number(rental.ratingAvg) : 4.95;
-  const reviewCount = rental?.ratingCount ? Number(rental.ratingCount) : (rental?.reviews?.length ?? 38);
+  const totalRentedCount = rental?.totalRentedCount ?? rental?.owner?.completedOrders ?? 0;
+  const ratingAvg = rental?.ratingAvg ? Number(rental.ratingAvg) : 5.0;
+  const reviewCount = rental?.ratingCount ? Number(rental.ratingCount) : (rental?.reviews?.length ?? 0);
 
   // Related rental items (other than current item)
   const relatedRentals = rentals
@@ -136,39 +319,58 @@ export default function RentalDetailPage() {
     ? rental.reviews
     : (storeData?.reviews && storeData.reviews.length > 0
         ? storeData.reviews
-        : [
-            {
-              id: "rev-1",
-              userName: "Dimas Anggoro",
-              avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80",
-              rating: 5,
-              date: "2 hari yang lalu",
-              item: rental?.title || "Unit Kamera & Lensa",
-              comment: "Kamera bersih banget, sensor kinclong no debu. Baterai dikasih 2 buah awet seharian buat hunting wisuda. Pelayanan ramah dan tempatnya gampang dicari!",
-            },
-            {
-              id: "rev-2",
-              userName: "Natasha Caroline",
-              avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=120&q=80",
-              rating: 5,
-              date: "1 minggu yang lalu",
-              item: rental?.title || "Unit Kamera & Lensa",
-              comment: "Sangat terbantu buat sewa kamera wisuda teman seangkatan. Sistem pembayaran Bantuin bikin tenang gak takut uang hilang. Tokonya amanah dan tepat waktu!",
-            },
-            {
-              id: "rev-3",
-              userName: "Rifky Fauzi",
-              avatar: "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=120&q=80",
-              rating: 5,
-              date: "2 minggu yang lalu",
-              item: rental?.title || "Unit Kamera & Lensa",
-              comment: "Unit dalam kondisi sangat prima. Dipandu cara penggunaan dan pengecekan fisik bersama mas-mas tokonya. Top rekomen buat vendor sewa di sini.",
-            }
-          ]
+        : []
       );
 
-  const handleStartInquiry = () => {
-    if (startRentalInquiry && rental) {
+  const [isInquiring, setIsInquiring] = useState(false);
+
+  const handleStartInquiry = async () => {
+    if (!rental) return;
+
+    if (!currentUser) {
+      router.push(`/auth/login?redirect=/sewa/${rental.id}`);
+      return;
+    }
+
+    setIsInquiring(true);
+    const initialQuestion = `Halo ${rental.owner?.name || storeData?.name || "Toko Mitra"}, saya ingin menanyakan ketersediaan ${rental.title} untuk tanggal ${startDate} s/d ${endDate} (${totalDays} hari). Apakah unit ready?`;
+
+    try {
+      const token = await authService.getValidAccessToken();
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
+
+      // Panggil POST /api/chat/rooms agar langsung tersimpan di PostgreSQL & mengirim notifikasi ke pemilik sewa
+      const res = await fetch("/api/chat/rooms", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          rentalId: rental.id,
+          initialMessage: initialQuestion,
+        }),
+      });
+
+      const json = await res.json();
+      if (json.success && json.data?.id) {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("bantuin_chat_update"));
+          window.dispatchEvent(new Event("bantuin_notification_updated"));
+        }
+        addToast?.("Obrolan Terhubung", `Pesan telah dikirim ke ${rental.owner?.name || storeData?.name || "pemilik sewa"}.`, "success");
+        router.push(`/chat?room=${json.data.id}&role=requester&category=sewa`);
+        return;
+      } else if (json.error) {
+        addToast?.("Tidak Dapat Membuka Chat", json.error, "warning");
+        return;
+      }
+    } catch (err) {
+      console.warn("Failed to create rental chat room via API:", err);
+    } finally {
+      setIsInquiring(false);
+    }
+
+    // Fallback darurat jika koneksi API terputus
+    if (startRentalInquiry) {
       const inqRoom = startRentalInquiry({
         rentalId: rental.id,
         rentalTitle: rental.title,
@@ -176,18 +378,19 @@ export default function RentalDetailPage() {
         storeId: storeId,
         storeName: rental.owner?.name || storeData?.name || "Mitra Rental Resmi",
         storeAvatar: rental.owner?.avatar || storeData?.avatar || rental.photoUrl,
-        storePhone: rental.owner?.phone || storeData?.phone || "081234567890",
+        storePhone: rental.owner?.phone || storeData?.phone || "-",
         startDate,
         endDate,
         totalDays,
         dailyPrice: rental.dailyPrice,
         depositFee: rental.depositAmount,
         pickupLocation: rental.address || rental.location || "Alamat Toko Mitra",
-        initialQuestion: `Halo ${rental.owner?.name || storeData?.name || "Toko Mitra"}, saya ingin menanyakan ketersediaan ${rental.title} untuk tanggal ${startDate} s/d ${endDate} (${totalDays} hari). Apakah unit ready?`
+        initialQuestion
       });
-      router.push(`/chat?room=${inqRoom?.id || "order-room-rental-kamera"}`);
+      const roomId = inqRoom?.id || `order-room-rental-${Date.now()}`;
+      router.push(`/chat?room=${roomId}&role=requester&category=sewa`);
     } else {
-      router.push("/chat");
+      router.push(`/chat?partnerId=${storeId || rental.ownerId}&category=sewa`);
     }
   };
 
@@ -206,11 +409,7 @@ export default function RentalDetailPage() {
     );
   }
 
-  const rentalFee = rental.dailyPrice * totalDays;
-  const depositFee = rental.depositAmount;
-  const platformFee = Math.round(rentalFee * 0.08); // Potongan platform Bantuin 8% dari biaya sewa
   const storeNetPayout = rentalFee - platformFee;
-  const totalAmount = rentalFee + depositFee;
 
   const distanceInfo = getDistanceToUser
     ? getDistanceToUser(rental.latitude, rental.longitude, rental.distanceMeters)
@@ -278,32 +477,35 @@ export default function RentalDetailPage() {
 
               {/* Header Judul, Kategori & Social Proof */}
               <div className="space-y-2.5 pt-1">
-                {/* Badges Bar: Konsisten Slate & Brand Blue */}
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 bg-slate-100 text-slate-700 rounded-md">
-                      <CategoryIcon category={rental.category} className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
+                {/* Badges Bar: Bersih, Rapi & Ringkas di Layar Mobile */}
+                <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                    <span className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-semibold px-2 sm:px-2.5 py-0.5 sm:py-1 bg-slate-100 text-slate-700 rounded-md">
+                      <CategoryIcon category={rental.category} className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#1683FF] shrink-0" />
                       <span>{rental.category}</span>
                     </span>
-                    {rental.isVerifiedPartner && (
-                      <span className="text-xs font-semibold text-[#1683FF] bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-md flex items-center gap-1">
-                        <ShieldCheck className="w-3.5 h-3.5 text-[#1683FF]" />
-                        Mitra Resmi
+                    {rental.tag && (
+                      <span className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold text-white bg-amber-500 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-md shadow-2xs">
+                        {rental.tag}
                       </span>
                     )}
-                    <span className="text-xs font-medium text-slate-400">
-                      ID #{rental.id}
-                    </span>
+                    {rental.isVerifiedPartner && (
+                      <span className="text-[11px] sm:text-xs font-semibold text-[#1683FF] bg-blue-50 border border-blue-100 px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-md flex items-center gap-1">
+                        <ShieldCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#1683FF]" />
+                        <span>Mitra Resmi</span>
+                      </span>
+                    )}
                   </div>
 
                   {/* Status Ketersediaan Stok */}
                   {isOutOfStock ? (
-                    <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-rose-50 text-rose-600 border border-rose-200">
-                      Stok Habis
+                    <span className="inline-flex items-center px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-md text-[11px] sm:text-xs font-semibold bg-rose-50 text-rose-600 border border-rose-200">
+                      {rental.stockStatus && rental.stockStatus !== "Siap Sewa" ? rental.stockStatus : "Stok Habis"}
                     </span>
                   ) : (
-                    <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-slate-100 text-slate-700">
-                      Tersedia {availableStock} Unit Ready
+                    <span className="inline-flex items-center px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-md text-[11px] sm:text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80">
+                      <CheckCircle2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-600 mr-1 shrink-0" />
+                      <span>Ready {availableStock} Unit</span>
                     </span>
                   )}
                 </div>
@@ -343,29 +545,33 @@ export default function RentalDetailPage() {
                   {rental.description}
                 </p>
 
-                {/* Kelengkapan unit - Senada dengan brand blue #1683FF, tanpa warna-warni */}
+                {/* Kelengkapan unit */}
                 <div className="space-y-2 pt-1">
                   <span className="font-bold text-slate-900 text-xs sm:text-sm block">
-                    Kelengkapan unit saat serah terima:
+                    Kelengkapan Bawaan Standar Unit:
                   </span>
-                  <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-700 text-xs sm:text-sm">
-                    <li className="flex items-start gap-2">
+                  {rental.includedItems ? (
+                    <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs sm:text-sm text-slate-700 font-medium flex items-start gap-2">
+                      <Package className="w-4 h-4 text-[#1683FF] shrink-0 mt-0.5" />
+                      <span>{rental.includedItems}</span>
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs sm:text-sm text-slate-700 font-medium flex items-start gap-2">
                       <CheckCircle2 className="w-4 h-4 text-[#1683FF] shrink-0 mt-0.5" />
-                      <span>Unit utama ({rental.title}) siap pakai</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-[#1683FF] shrink-0 mt-0.5" />
-                      <span>2x Baterai original sehat + Dual Slot Charger</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-[#1683FF] shrink-0 mt-0.5" />
-                      <span>1x SD Card 64GB High Speed + Hard Case</span>
-                    </li>
-                    <li className="flex items-start gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-[#1683FF] shrink-0 mt-0.5" />
-                      <span>Tas pelindung empuk &amp; neck strap</span>
-                    </li>
-                  </ul>
+                      <span>1x Unit utama ({rental.title}) beserta kelengkapan bawaan standar pabrikan.</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Syarat & Jaminan Unit */}
+                <div className="space-y-2 pt-2 border-t border-slate-100">
+                  <span className="font-bold text-slate-900 text-xs sm:text-sm block flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                    <span>3. Syarat &amp; Jaminan Unit:</span>
+                  </span>
+                  <div className="p-3 bg-emerald-50/70 border border-emerald-100/90 rounded-xl text-xs sm:text-sm text-emerald-900 font-medium">
+                    {rental.securityDeposit || storeData?.securityDepositPolicy || "Wajib menunjukkan identitas fisik asli (KTP/KTM) dan menyelesaikan verifikasi pemesanan Bantuin."}
+                  </div>
                 </div>
 
                 {/* Kondisi Fisik Unit */}
@@ -374,7 +580,7 @@ export default function RentalDetailPage() {
                     Laporan Kondisi Fisik Unit
                   </h3>
                   <p className="text-slate-700 leading-relaxed text-xs sm:text-sm">
-                    {rental.condition || "Body 98% sangat mulus terawat, optik & sensor bersih bebas jamur/debu, semua tombol dan fungsi responsif normal, baterai sehat siap pakai."}
+                    {rental.description || "Unit dalam kondisi prima, terawat dan telah melewati pengecekan fungsi sebelum disewakan."}
                   </p>
                 </div>
               </div>
@@ -394,8 +600,9 @@ export default function RentalDetailPage() {
               {/* Info Mitra & Action Buttons */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <Link 
-                  href={`/mitra/${storeId}`}
+                  href={`/mitra/${rental.owner?.id || rental.ownerId || storeId}`}
                   className="group flex items-center gap-3.5 min-w-0"
+                  title={`Lihat profil ${rental.owner?.name || storeData?.name || "Mitra"}`}
                 >
                   <img
                     src={rental.owner?.avatar || storeData?.avatar || rental.photoUrl}
@@ -413,10 +620,10 @@ export default function RentalDetailPage() {
                   </div>
                 </Link>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-wrap items-center gap-2 shrink-0 w-full sm:w-auto">
                   <Link
-                    href={`/mitra/${storeId}`}
-                    className="px-3.5 py-2 rounded-xl border border-slate-200 hover:border-[#1683FF] hover:bg-blue-50/50 text-slate-700 hover:text-[#1683FF] font-semibold text-xs transition flex items-center gap-1.5"
+                    href={`/mitra/${rental.owner?.id || rental.ownerId || storeId}`}
+                    className="flex-1 sm:flex-none justify-center px-3.5 py-2 rounded-xl border border-slate-200 hover:border-[#1683FF] hover:bg-blue-50/50 text-slate-700 hover:text-[#1683FF] font-semibold text-xs transition flex items-center gap-1.5"
                   >
                     <Store className="w-3.5 h-3.5" />
                     <span>Kunjungi Toko</span>
@@ -425,32 +632,33 @@ export default function RentalDetailPage() {
                   <button
                     type="button"
                     onClick={handleStartInquiry}
-                    className="px-3.5 py-2 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-semibold text-xs transition shadow-2xs flex items-center gap-1.5 cursor-pointer"
+                    disabled={isInquiring}
+                    className="flex-1 sm:flex-none justify-center px-3.5 py-2 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-semibold text-xs transition shadow-2xs flex items-center gap-1.5 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     <MessageSquare className="w-3.5 h-3.5" />
-                    <span>Chat Toko</span>
+                    <span>{isInquiring ? "Menghubungi..." : "Chat Toko"}</span>
                   </button>
                 </div>
               </div>
 
               {/* 4 Statistik Toko dalam 1 Baris Bersih & Konsisten */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center py-2.5 px-3 rounded-xl bg-slate-50 border border-slate-100">
-                <div className="py-1">
+                <div className="py-1 flex flex-col items-center justify-center text-center">
                   <span className="text-[11px] text-slate-400 block font-medium">Penyelesaian</span>
                   <div className="text-sm font-bold text-slate-900 mt-0.5">100%</div>
                 </div>
-                <div className="py-1 sm:border-l border-slate-200">
+                <div className="py-1 sm:border-l border-slate-200 flex flex-col items-center justify-center text-center">
                   <span className="text-[11px] text-slate-400 block font-medium">Tersewa</span>
                   <div className="text-sm font-bold text-[#1683FF] mt-0.5">{totalRentedCount} kali</div>
                 </div>
-                <div className="py-1 border-t sm:border-t-0 sm:border-l border-slate-200">
+                <div className="py-1 border-t sm:border-t-0 sm:border-l border-slate-200 flex flex-col items-center justify-center text-center">
                   <span className="text-[11px] text-slate-400 block font-medium">Balas Chat</span>
                   <div className="text-sm font-bold text-slate-900 mt-0.5">&lt; 15 mnt</div>
                 </div>
-                <div className="py-1 border-t sm:border-t-0 sm:border-l border-slate-200">
+                <div className="py-1 border-t sm:border-t-0 sm:border-l border-slate-200 flex flex-col items-center justify-center text-center">
                   <span className="text-[11px] text-slate-400 block font-medium">Rating Toko</span>
-                  <div className="text-sm font-bold text-slate-800 mt-0.5 flex items-center gap-1">
-                    <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                  <div className="text-sm font-bold text-slate-800 mt-0.5 flex items-center justify-center gap-1.5">
+                    <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400 shrink-0" />
                     <span>{storeData?.rating || ratingAvg}</span>
                   </div>
                 </div>
@@ -460,7 +668,7 @@ export default function RentalDetailPage() {
               <div className="space-y-1 text-xs pt-1">
                 <div className="font-bold text-slate-900 flex items-center gap-1.5">
                   <MapPin className="w-4 h-4 text-[#1683FF]" />
-                  <span>Lokasi Pengambilan &amp; Serah Terima:</span>
+                  <span>Lokasi:</span>
                 </div>
                 <p className="text-slate-700 pl-5.5 leading-relaxed">
                   {rental.address || rental.location}
@@ -529,7 +737,97 @@ export default function RentalDetailPage() {
               </div>
             </div>
 
-            {/* CARD 3: Ulasan dari Penyewa */}
+            {/* CARD 3: PILIHAN PAKET SEWA & BORONGAN (KHUSUS MODE PAKETAN) */}
+            {isTieredMode && availablePackages.length > 0 && (
+              <div className="bg-white rounded-3xl border border-slate-200/90 p-5 sm:p-7 shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 className="text-base sm:text-lg font-black text-slate-900 tracking-tight flex items-center gap-2">
+                      <Layers className="w-5 h-5 text-[#1683FF]" />
+                      <span>Pilihan Paket Sewa &amp; Borongan</span>
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Pilih salah satu paket sewa di bawah. Rincian durasi dan tarif di panel pemesanan akan otomatis menyesuaikan.
+                    </p>
+                  </div>
+                  <span className="text-xs font-bold text-slate-400 shrink-0">
+                    {availablePackages.length} Paket Tersedia
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 pt-1">
+                  {/* List Paket Tersedia (HANYA PAKET - TIDAK MENGGABUNGKAN TARIF HARIAN STANDAR) */}
+                  {availablePackages.map((pkg) => {
+                    const isSelected = selectedPackage?.id === pkg.id;
+                    return (
+                      <div
+                        key={pkg.id}
+                        onClick={() => handleSelectPackage(pkg)}
+                        className={`p-4 rounded-2xl border-2 transition-all duration-200 cursor-pointer flex flex-col justify-between relative ${
+                          isSelected
+                            ? "border-[#1683FF] bg-blue-50/40 shadow-xs ring-1 ring-[#1683FF]/30"
+                            : "border-slate-200/80 bg-white hover:border-slate-300 hover:bg-slate-50/50"
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <div>
+                              <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                                <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md ${
+                                  isSelected ? "bg-[#1683FF] text-white" : "bg-slate-100 text-slate-700"
+                                } block w-fit`}>
+                                  {pkg.tier || "Paket"}
+                                </span>
+                                {pkg.isPopular && (
+                                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-400 text-amber-950">
+                                    PALING LARIS
+                                  </span>
+                                )}
+                              </div>
+                              <h4 className="font-bold text-sm text-slate-900 leading-snug">
+                                {pkg.name}
+                              </h4>
+                            </div>
+
+                            <div
+                              className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 transition ${
+                                isSelected
+                                  ? "bg-[#1683FF] text-white"
+                                  : "border-2 border-slate-300 text-transparent"
+                              }`}
+                            >
+                              <Check className="w-3 h-3 stroke-[3]" />
+                            </div>
+                          </div>
+
+                          <p className="text-xs text-slate-500 leading-relaxed mb-2.5">
+                            {pkg.description}
+                          </p>
+
+                          {Array.isArray(pkg.features) && pkg.features.length > 0 && (
+                            <ul className="space-y-1 pt-2 border-t border-slate-100">
+                              {pkg.features.map((feat, fIdx) => (
+                                <li key={fIdx} className="text-[11px] text-slate-700 flex items-center gap-1.5">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                                  <span>{feat}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+
+                        <div className="pt-3 mt-3 border-t border-slate-100 flex items-baseline justify-between">
+                          <span className="text-xs text-slate-400">{pkg.duration || "1 Hari"}</span>
+                          <span className="text-base font-black text-[#1683FF]">{formatIDR(pkg.price)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* CARD 4: Ulasan dari Penyewa */}
             <div className="bg-white rounded-2xl border border-slate-200/90 p-5 sm:p-6 shadow-2xs space-y-5">
               <div className="flex items-center justify-between">
                 <h2 className="text-base font-bold text-slate-900">
@@ -608,14 +906,21 @@ export default function RentalDetailPage() {
 
               {/* List Ulasan Riil Penyewa - Konsisten warna & tipografi */}
               <div className="space-y-4 divide-y divide-slate-100">
-                {reviewsList.map((rev) => {
+                {reviewsList.length === 0 ? (
+                  <div className="py-8 text-center text-slate-500 text-xs bg-slate-50/60 rounded-2xl border border-slate-100">
+                    <Star className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                    <p className="font-semibold text-slate-700">Belum Ada Ulasan Pelanggan</p>
+                    <p className="text-slate-400 text-[11px] mt-0.5">Unit sewa ini belum memiliki ulasan dari penyewa.</p>
+                  </div>
+                ) : (
+                  reviewsList.map((rev) => {
                   const starCount = Math.max(1, Math.min(5, Math.round(Number(rev.rating) || 5)));
                   return (
                     <div key={rev.id} className="pt-4 first:pt-0 space-y-2">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2.5">
                           <img
-                            src={rev.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80"}
+                            src={rev.avatar || "/logotab.png"}
                             alt={rev.userName}
                             className="w-9 h-9 rounded-full object-cover border border-slate-200"
                           />
@@ -652,7 +957,7 @@ export default function RentalDetailPage() {
                       </p>
                     </div>
                   );
-                })}
+                }))}
               </div>
             </div>
 
@@ -665,23 +970,52 @@ export default function RentalDetailPage() {
               {/* Tarif & Uang Jaminan */}
               <div className="flex flex-wrap items-baseline justify-between gap-2.5 pb-3 sm:pb-4 border-b border-slate-100">
                 <div className="min-w-0">
-                  <span className="text-xs text-slate-400 font-semibold block uppercase tracking-wider">Tarif Sewa</span>
+                  <span className="text-xs text-slate-400 font-semibold block uppercase tracking-wider">
+                    {isTieredMode && selectedPackage ? `Tarif ${selectedPackage.name}` : "Tarif Sewa"}
+                  </span>
                   <div className="text-2xl sm:text-3xl font-black text-[#1683FF] tracking-tight mt-0.5">
-                    {formatIDR(rental.dailyPrice)}
-                    <span className="text-xs font-normal text-slate-500"> / hari</span>
+                    {formatIDR(activeDailyPrice)}
+                    <span className="text-xs font-normal text-slate-500">{isTieredMode ? "" : " / hari"}</span>
                   </div>
                 </div>
 
                 <div className="text-left sm:text-right shrink-0">
                   <span className="text-xs text-slate-400 font-semibold block uppercase tracking-wider">Deposit Jaminan</span>
                   <div className="text-base sm:text-lg font-bold text-slate-900 mt-0.5">
-                    {formatIDR(rental.depositAmount)}
+                    {formatIDR(depositFee)}
                   </div>
                   <span className="text-[10px] sm:text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200 inline-block mt-0.5">
                     100% Kembali Utuh
                   </span>
                 </div>
               </div>
+
+              {/* Ringkasan Paket Terpilih (Khusus Mode Paketan - HANYA Informasi, Tanpa Dobel Pilihan) */}
+              {isTieredMode && selectedPackage && (
+                <div className="p-3.5 bg-blue-50/60 border border-blue-200/80 rounded-2xl space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-[#1683FF]" />
+                      <span>Paket Terpilih</span>
+                    </span>
+                    <span className="text-[10px] font-extrabold text-[#1683FF] bg-blue-100/90 px-2 py-0.5 rounded-md uppercase">
+                      {selectedPackage.tier || "Paket"}
+                    </span>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-2 pt-0.5">
+                    <h4 className="font-extrabold text-sm text-slate-900 truncate">
+                      {selectedPackage.name}
+                    </h4>
+                    <span className="font-black text-sm text-[#1683FF] shrink-0">
+                      {formatIDR(selectedPackage.price)}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 flex items-center justify-between pt-1.5 border-t border-blue-100/80">
+                    <span>Durasi: <strong className="text-slate-700">{selectedPackage.duration || `${totalDays} Hari`}</strong></span>
+                    <span className="text-[10px] text-slate-400 italic">Pilih paket di panel kiri</span>
+                  </div>
+                </div>
+              )}
 
               {/* Pemilih Tanggal Sewa */}
               <div className="space-y-2.5">
@@ -697,7 +1031,7 @@ export default function RentalDetailPage() {
                     <input
                       type="date"
                       value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
+                      onChange={(e) => handleStartDateChange(e.target.value)}
                       className="w-full p-2.5 rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 text-xs focus:border-[#1683FF] focus:ring-2 focus:ring-blue-50 focus:outline-none transition min-w-0"
                     />
                   </div>
@@ -705,14 +1039,30 @@ export default function RentalDetailPage() {
                     <label className="block font-semibold text-slate-600 mb-1">
                       Tanggal Selesai:
                     </label>
-                    <input
-                      type="date"
-                      value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      className="w-full p-2.5 rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 text-xs focus:border-[#1683FF] focus:ring-2 focus:ring-blue-50 focus:outline-none transition min-w-0"
-                    />
+                    {isTieredMode ? (
+                      <input
+                        type="date"
+                        value={endDate}
+                        disabled
+                        className="w-full p-2.5 rounded-xl border border-slate-200 bg-slate-100 font-semibold text-slate-500 text-xs cursor-not-allowed min-w-0"
+                      />
+                    ) : (
+                      <input
+                        type="date"
+                        value={endDate}
+                        onChange={(e) => handleEndDateChange(e.target.value)}
+                        className="w-full p-2.5 rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 text-xs focus:border-[#1683FF] focus:ring-2 focus:ring-blue-50 focus:outline-none transition min-w-0"
+                      />
+                    )}
                   </div>
                 </div>
+
+                {/* Catatan penguncian durasi otomatis untuk mode paketan */}
+                {isTieredMode && selectedPackage && (
+                  <p className="text-[11px] text-[#1683FF] font-medium leading-relaxed">
+                    Durasi sewa terkunci otomatis {totalDays} hari sesuai spesifikasi paket yang dipilih.
+                  </p>
+                )}
 
                 {/* Durasi Sewa */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs font-semibold text-slate-600 pt-1 px-0.5">
@@ -720,14 +1070,20 @@ export default function RentalDetailPage() {
                     <Clock className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
                     <span>Durasi Sewa:</span>
                   </span>
-                  <span className="text-[#1683FF] font-black text-sm text-left sm:text-right">{totalDays} Hari</span>
+                  <span className="text-[#1683FF] font-black text-sm text-left sm:text-right">
+                    {totalDays} Hari {isTieredMode && selectedPackage ? `(${selectedPackage.duration || `${totalDays} Hari`})` : ""}
+                  </span>
                 </div>
               </div>
 
               {/* Rincian Transparansi Biaya */}
               <div className="space-y-1.5 pt-3 text-xs border-t border-slate-100">
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 text-slate-600">
-                  <span className="min-w-0 break-words">Biaya Sewa ({totalDays} hari × {formatIDR(rental.dailyPrice)})</span>
+                  <span className="min-w-0 break-words">
+                    {isTieredMode && selectedPackage
+                      ? `Biaya Paket (${selectedPackage.name} - ${totalDays} hari)`
+                      : `Biaya Sewa (${totalDays} hari × ${formatIDR(rental.dailyPrice)})`}
+                  </span>
                   <span className="text-slate-900 font-semibold text-right whitespace-nowrap">{formatIDR(rentalFee)}</span>
                 </div>
 
@@ -762,11 +1118,11 @@ export default function RentalDetailPage() {
                     className="w-full py-3.5 rounded-xl bg-slate-200 text-slate-500 font-bold text-sm cursor-not-allowed flex items-center justify-center gap-2 text-center"
                   >
                     <Lock className="w-4 h-4 shrink-0" />
-                    <span>Stok Unit Sedang Habis</span>
+                    <span>{rental.stockStatus && rental.stockStatus !== "Siap Sewa" ? `Unit ${rental.stockStatus}` : "Stok Unit Sedang Habis"}</span>
                   </button>
                 ) : (
                   <Link
-                    href={`/sewa/${rental.id}/pembayaran?start=${startDate}&end=${endDate}&days=${totalDays}`}
+                    href={`/sewa/${rental.id}/pembayaran?start=${startDate}&end=${endDate}&days=${totalDays}${isTieredMode && selectedPackage ? `&pkg=${encodeURIComponent(selectedPackage.id)}` : ""}`}
                     className="w-full py-3.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm md:text-base shadow-2xs hover:shadow-xs transition active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer text-center"
                   >
                     <Lock className="w-4 h-4 shrink-0" />
@@ -777,10 +1133,11 @@ export default function RentalDetailPage() {
                 <button
                   type="button"
                   onClick={handleStartInquiry}
-                  className="w-full py-2.5 rounded-xl bg-white border border-slate-200 hover:border-[#1683FF] hover:bg-blue-50/60 text-slate-700 hover:text-[#1683FF] font-semibold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer text-center"
+                  disabled={isInquiring}
+                  className="w-full py-2.5 rounded-xl bg-white border border-slate-200 hover:border-[#1683FF] hover:bg-blue-50/60 text-slate-700 hover:text-[#1683FF] font-semibold text-xs sm:text-sm transition flex items-center justify-center gap-2 cursor-pointer text-center disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   <MessageSquare className="w-4 h-4 text-[#1683FF] shrink-0" />
-                  <span>Chat Toko Dulu (Tanya Ketersediaan)</span>
+                  <span>{isInquiring ? "Menghubungi Toko..." : "Chat Toko Dulu (Tanya Ketersediaan)"}</span>
                 </button>
               </div>
 
@@ -827,52 +1184,7 @@ export default function RentalDetailPage() {
 
           <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4 md:gap-5">
             {relatedRentals.map((item) => (
-              <Link
-                key={item.id}
-                href={`/sewa/${item.id}`}
-                className="group bg-white rounded-xl sm:rounded-2xl border border-slate-200/90 overflow-hidden hover:shadow-md hover:border-blue-200 transition flex flex-col justify-between"
-              >
-                <div>
-                  <div className="relative aspect-[16/10] sm:aspect-[4/3] w-full overflow-hidden bg-slate-100">
-                    <img
-                      src={item.photoUrl}
-                      alt={item.title}
-                      className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                    />
-                    <span className="absolute top-2 left-2 sm:top-2.5 sm:left-2.5 px-2 sm:px-2.5 py-0.5 sm:py-1 bg-white/95 backdrop-blur-md text-[9px] sm:text-[10px] font-bold rounded-md sm:rounded-full text-slate-800 border border-slate-200/60 shadow-2xs">
-                      {item.category}
-                    </span>
-                  </div>
-
-                  <div className="p-2.5 sm:p-4 space-y-1 sm:space-y-2">
-                    <h3 className="font-bold text-slate-900 text-xs sm:text-sm line-clamp-2 group-hover:text-[#1683FF] transition leading-tight sm:leading-snug min-h-[32px] sm:min-h-[40px]">
-                      {item.title}
-                    </h3>
-                    
-                    <div className="flex items-center justify-between text-[10px] sm:text-[11px] text-slate-500 pt-1">
-                      <span className="truncate max-w-[80px] xs:max-w-[110px] sm:max-w-[130px] font-medium">{item.ownerName || "Mitra Resmi"}</span>
-                      <span className="font-bold text-slate-700 flex items-center gap-1 shrink-0">
-                        <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
-                        <span>{item.ratingAvg}</span>
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-2.5 sm:p-4 pt-0 border-t border-slate-50 flex items-center justify-between mt-1 sm:mt-2">
-                  <div>
-                    <span className="text-[9px] sm:text-[10px] text-slate-400 block">Tarif</span>
-                    <span className="text-xs sm:text-sm font-black text-[#1683FF]">
-                      {formatIDR(item.dailyPrice)}
-                      <span className="text-[9px] sm:text-[10px] font-medium text-slate-400">/hari</span>
-                    </span>
-                  </div>
-
-                  <span className="text-[10px] sm:text-xs font-bold text-[#1683FF] group-hover:translate-x-0.5 transition-transform">
-                    Detail &rarr;
-                  </span>
-                </div>
-              </Link>
+              <ProductProfileCard key={item.id} item={item} type="rental" />
             ))}
           </div>
         </section>
@@ -881,5 +1193,13 @@ export default function RentalDetailPage() {
 
       <Footer />
     </div>
+  );
+}
+
+export default function RentalDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <RentalDetailContent />
+    </Suspense>
   );
 }

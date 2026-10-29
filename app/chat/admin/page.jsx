@@ -15,6 +15,9 @@ import {
   X,
 } from "lucide-react";
 
+import { useApp } from "@/lib/context/AppContext";
+import { authService } from "@/lib/services/authService";
+
 // ─── Konstanta ─────────────────────────────────────────────────────────────
 const QUICK_MESSAGES = [
   "Saya ingin melaporkan kecurangan",
@@ -23,25 +26,6 @@ const QUICK_MESSAGES = [
   "Cek status laporan saya",
   "Ada pengguna mencurigakan",
 ];
-
-function getAdminReply(text, hasImage) {
-  if (hasImage)
-    return "Terima kasih sudah mengirimkan foto bukti. Tim kami akan segera meninjau gambar tersebut. Apakah ada keterangan tambahan yang ingin kamu sampaikan?";
-  const t = text.toLowerCase();
-  if (t.includes("lapor") || t.includes("kecurangan") || t.includes("penipuan"))
-    return "Terima kasih sudah menghubungi kami. Untuk laporan resmi beserta bukti foto, silakan gunakan halaman Laporkan Masalah agar kami bisa menindaklanjuti lebih cepat. Apakah ada detail yang bisa kamu ceritakan di sini?";
-  if (t.includes("bayar") || t.includes("escrow") || t.includes("dana") || t.includes("refund"))
-    return "Pembayaran kamu diamankan melalui Payment Gateway resmi dan sistem pencatatan resmi Bantuin. Hak bayar hanya diteruskan ke mitra setelah kedua pihak konfirmasi selesai. Jika ada kendala, tim kami siap membantu mediasi atau memproses refund. Bisa ceritakan lebih detail situasinya?";
-  if (t.includes("status") || t.includes("laporan"))
-    return "Untuk mengecek status laporan, bisa sebutkan ID laporan kamu? Format: rep-XXXXXXXX. Saya akan cek langsung untuk kamu.";
-  if (t.includes("pesanan") || t.includes("order") || t.includes("transaksi"))
-    return "Saya akan bantu cek pesananmu. Bisa berikan ID pesanan atau nama mitra/helper yang terlibat?";
-  if (t.includes("mencurigakan") || t.includes("bypass") || t.includes("wa") || t.includes("whatsapp"))
-    return "Terima kasih sudah melaporkan. Meminta transaksi di luar platform (disintermediasi) adalah pelanggaran serius. Silakan laporkan lewat halaman Laporkan Masalah dengan bukti screenshot chat.";
-  if (t.match(/^(halo|hai|hello|hi|selamat)/))
-    return "Halo! Saya dari tim Trust & Safety Bantuin. Ada yang bisa saya bantu hari ini?";
-  return "Pesan kamu sudah kami terima. Bisa ceritakan lebih detail masalah yang kamu alami? Semakin lengkap informasinya, semakin cepat kami bisa membantu.";
-}
 
 function formatTime(d) {
   if (!d) return "";
@@ -63,6 +47,7 @@ function AdminAvatar({ size = "md" }) {
 }
 
 function renderText(text) {
+  if (!text) return null;
   return text.split("\n").map((line, i, arr) => (
     <span key={i}>
       {line.split(/(\*\*.*?\*\*)/).map((p, j) =>
@@ -74,8 +59,6 @@ function renderText(text) {
     </span>
   ));
 }
-
-import { useApp } from "@/lib/context/AppContext";
 
 // ─── Shared Storage Helper ──────────────────────────────────────────────────
 const CHAT_STORAGE_KEY = "bantuin_admin_chat_threads";
@@ -102,59 +85,93 @@ function saveStoredThreads(threads) {
 export default function AdminChatPage() {
   const { currentUser, selectedLocation } = useApp();
   const currentUserId = currentUser?.id || "usr-001";
-  const currentUserName = currentUser?.fullName || "Rian Prasetya";
-  const currentUserAvatar = currentUser?.avatarUrl || "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=120&q=80";
+  const currentUserName = currentUser?.fullName || "Pengguna";
+  const currentUserAvatar = currentUser?.avatarUrl || null;
   const userLoc = selectedLocation || "Jakarta Selatan";
 
   const initialGreeting = {
-    id: 1,
+    id: "greet-1",
     from: "admin",
-    text: "Halo! Selamat datang di layanan Chat Admin Bantuin 👋\n\nSaya dari tim **Trust & Safety**. Saya siap membantu kamu dengan:\n• Pelaporan kecurangan atau penipuan\n• Pertanyaan seputar sistem pembayaran & keamanan\n• Status laporan yang sudah dibuat\n• Masalah transaksi lainnya\n\nSilakan ceritakan apa yang bisa saya bantu.",
+    text: "Halo! Selamat datang di layanan Chat Admin Bantuin 👋\n\nSaya dari tim **Trust & Safety & Customer Support**. Saya siap membantu kamu langsung dengan:\n• Pelaporan kendala, kecurangan, atau penipuan\n• Bantuan sistem pembayaran resmi\n• Status pesanan dan mediasi\n\nSilakan ceritakan kendala yang kamu alami, tim admin kami akan segera merespons.",
     time: new Date().toISOString(),
   };
 
-  const [messages, setMessages] = useState(() => {
-    if (typeof window !== "undefined") {
-      const allThreads = getStoredThreads();
-      if (allThreads && Array.isArray(allThreads)) {
-        const myThread = allThreads.find((t) => t.userId === currentUserId || t.id === "chat-001");
-        if (myThread?.messages && myThread.messages.length > 0) {
-          return myThread.messages;
-        }
-      }
-    }
-    return [initialGreeting];
-  });
-
+  const [messages, setMessages] = useState([initialGreeting]);
+  const [activeTicketId, setActiveTicketId] = useState(null);
+  const [isSending, setIsSending] = useState(false);
   const [input, setInput] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
   const [imagePreview, setImagePreview] = useState(null);
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // Sync incoming updates from admin dashboard
+  // Ambil riwayat percakapan riil dari database (Zero Fake Bot)
+  const loadDbMessages = React.useCallback(async () => {
+    try {
+      const token = await authService.getValidAccessToken();
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await fetch("/api/chat/admin", { credentials: "include", headers });
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+        const latestTicket = json.data[0];
+        if (latestTicket?.id) {
+          setActiveTicketId(latestTicket.id);
+        }
+
+        const allCombinedMsgs = [];
+        for (const t of [...json.data].reverse()) {
+          if (Array.isArray(t.messages) && t.messages.length > 0) {
+            allCombinedMsgs.push(...t.messages);
+          }
+        }
+
+        if (allCombinedMsgs.length > 0) {
+          const seen = new Set();
+          const clean = [];
+          for (const m of allCombinedMsgs) {
+            const key = String(m.id || `${m.from}-${m.text}-${m.time}`);
+            if (!seen.has(key)) {
+              seen.add(key);
+              clean.push(m);
+            }
+          }
+          setMessages([initialGreeting, ...clean]);
+        }
+      }
+    } catch (err) {
+      console.warn("[AdminChatPage] loadDbMessages error:", err);
+    }
+  }, []);
+
+  // Sync incoming updates from admin dashboard and database
   useEffect(() => {
+    loadDbMessages();
+    const interval = setInterval(loadDbMessages, 3500);
+
     const handleSync = () => {
+      loadDbMessages();
       const allThreads = getStoredThreads();
       if (allThreads && Array.isArray(allThreads)) {
-        const myThread = allThreads.find((t) => t.userId === currentUserId || t.id === "chat-001");
-        if (myThread?.messages) {
+        const myThread = allThreads.find((t) => t.userId === currentUserId || (currentUser?.id && t.userId === currentUser.id));
+        if (myThread?.messages && myThread.messages.length > 0) {
           setMessages(myThread.messages);
         }
       }
     };
+
     window.addEventListener("bantuin_admin_chat_updated", handleSync);
     window.addEventListener("storage", handleSync);
     return () => {
+      clearInterval(interval);
       window.removeEventListener("bantuin_admin_chat_updated", handleSync);
       window.removeEventListener("storage", handleSync);
     };
-  }, [currentUserId]);
+  }, [loadDbMessages, currentUserId, currentUser?.id]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isTyping]);
+  }, [messages, isSending]);
 
   const handleImageChange = (e) => {
     const file = e.target.files?.[0];
@@ -171,11 +188,11 @@ export default function AdminChatPage() {
 
   const removeImage = () => setImagePreview(null);
 
-  const sendMessage = (quickText) => {
+  const sendMessage = async (quickText) => {
     const trimmed = (quickText ?? input).trim();
     const hasImg = !!imagePreview;
     if (!trimmed && !hasImg) return;
-    if (isTyping) return;
+    if (isSending) return;
 
     const userMsg = {
       id: Date.now(),
@@ -185,61 +202,68 @@ export default function AdminChatPage() {
       time: new Date().toISOString(),
     };
 
-    const updatedMessages = [...messages, userMsg];
-    setMessages(updatedMessages);
+    const nextMessages = [...messages, userMsg];
+    setMessages(nextMessages);
     setInput("");
     setImagePreview(null);
+    setIsSending(true);
 
-    // Save to shared threads so admin sees it immediately
-    const allThreads = getStoredThreads() || [];
-    const threadIndex = allThreads.findIndex((t) => t.userId === currentUserId || t.id === "chat-001");
-    const threadData = {
-      id: threadIndex >= 0 ? allThreads[threadIndex].id : `chat-${Date.now()}`,
-      userId: currentUserId,
-      userName: currentUserName,
-      userAvatar: currentUserAvatar,
-      location: userLoc,
-      lastMessage: trimmed || "📷 Lampiran Foto",
-      time: new Date().toISOString(),
-      unread: true, // mark unread for Admin
-      messages: updatedMessages,
-    };
+    try {
+      const token = await authService.getValidAccessToken();
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
 
-    let nextThreads;
-    if (threadIndex >= 0) {
-      nextThreads = allThreads.map((t, idx) => (idx === threadIndex ? { ...t, ...threadData } : t));
-    } else {
-      nextThreads = [threadData, ...allThreads];
-    }
-    saveStoredThreads(nextThreads);
-
-    setIsTyping(true);
-
-    setTimeout(() => {
-      setIsTyping(false);
-      const replyMsg = {
-        id: Date.now() + 1,
-        from: "admin",
-        text: getAdminReply(trimmed, hasImg),
-        time: new Date().toISOString(),
-      };
-      setMessages((prev) => {
-        const withReply = [...prev, replyMsg];
-        // update storage
-        const currentStored = getStoredThreads() || [];
-        const idx = currentStored.findIndex((t) => t.userId === currentUserId || t.id === "chat-001");
-        if (idx >= 0) {
-          const updated = currentStored.map((t, i) =>
-            i === idx ? { ...t, messages: withReply, lastMessage: replyMsg.text.slice(0, 60), time: new Date().toISOString() } : t
-          );
-          saveStoredThreads(updated);
-        }
-        return withReply;
+      const res = await fetch("/api/chat/admin/message", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          message: trimmed,
+          image: userMsg.image,
+          ticketId: activeTicketId,
+        }),
       });
-    }, 1200 + Math.random() * 600);
+
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data?.ticketId) {
+          setActiveTicketId(json.data.ticketId);
+        }
+      }
+
+      // Save to shared threads so admin sees it immediately in local state
+      const allThreads = getStoredThreads() || [];
+      const threadIndex = allThreads.findIndex(
+        (t) => t.userId === currentUserId || (currentUser?.id && t.userId === currentUser.id)
+      );
+      const threadData = {
+        id: activeTicketId || (threadIndex >= 0 ? allThreads[threadIndex].id : `chat-${Date.now()}`),
+        ticketId: activeTicketId,
+        userId: currentUserId,
+        userName: currentUserName,
+        userAvatar: currentUserAvatar,
+        location: userLoc,
+        lastMessage: trimmed || "📷 Lampiran Foto",
+        time: new Date().toISOString(),
+        unread: true, // mark unread for Admin
+        messages: nextMessages,
+      };
+
+      let nextThreads;
+      if (threadIndex >= 0) {
+        nextThreads = allThreads.map((t, idx) => (idx === threadIndex ? { ...t, ...threadData } : t));
+      } else {
+        nextThreads = [threadData, ...allThreads];
+      }
+      saveStoredThreads(nextThreads);
+    } catch (err) {
+      console.warn("[AdminChatPage] sendMessage error:", err);
+    } finally {
+      setIsSending(false);
+      loadDbMessages();
+    }
   };
 
-  const canSend = (input.trim() || imagePreview) && !isTyping;
+  const canSend = (input.trim() || imagePreview) && !isSending;
 
   return (
     /* Full-screen: navbar + chat memenuhi layar */
@@ -384,21 +408,6 @@ export default function AdminChatPage() {
               );
             })}
 
-            {/* Typing indicator */}
-            {isTyping && (
-              <div className="flex items-end gap-2.5">
-                <AdminAvatar size="sm" />
-                <div className="bg-white border border-[#DCEAF7] rounded-2xl rounded-bl-none px-4 py-3.5 shadow-sm">
-                  <div className="flex items-center gap-1">
-                    {[0, 150, 300].map((delay) => (
-                      <span key={delay} className="w-2 h-2 rounded-full bg-[#DCEAF7] animate-bounce"
-                        style={{ animationDelay: `${delay}ms` }} />
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
             <div ref={bottomRef} />
           </div>
 
@@ -472,7 +481,7 @@ export default function AdminChatPage() {
                 disabled={!canSend}
                 className="w-10 h-10 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] disabled:bg-[#DCEAF7] text-white flex items-center justify-center transition active:scale-95 cursor-pointer disabled:cursor-not-allowed shrink-0"
               >
-                {isTyping
+                {isSending
                   ? <Loader2 className="w-4 h-4 animate-spin" />
                   : <Send className="w-4 h-4" />
                 }

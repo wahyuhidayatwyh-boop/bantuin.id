@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import RoleGuard from "@/components/auth/RoleGuard";
 import { useApp } from "@/lib/context/AppContext";
 import { getProviderById, saveProviderData } from "@/lib/mock/providersData";
+import { authService } from "@/lib/services/authService";
 import { 
   ArrowLeft, 
   Image as ImageIcon, 
@@ -21,30 +22,88 @@ import {
 export default function DetailPortofolioPage() {
   const { id } = useParams();
   const router = useRouter();
-  const { addToast } = useApp() || {};
+  const { currentUser, setCurrentUser, addToast } = useApp() || {};
 
   const [provider, setProvider] = useState(() => {
-    return getProviderById("fajar-ramadhan-desain") || {};
+    return currentUser || {};
   });
 
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
-    const p = getProviderById("fajar-ramadhan-desain");
-    if (p) setProvider(p);
-  }, []);
+    let isMounted = true;
+    async function loadLiveProfile() {
+      try {
+        const token = await authService.getValidAccessToken();
+        if (token) {
+          const res = await fetch("/api/user/profile", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const json = await res.json();
+          if (isMounted && res.ok && json.success && json.data) {
+            setProvider((prev) => ({
+              ...prev,
+              ...json.data,
+              portfolioPhotos: Array.isArray(json.data.portfolioPhotos) ? json.data.portfolioPhotos : [],
+            }));
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Could not load live portfolio in detail portofolio:", err);
+      }
+      if (isMounted && currentUser) {
+        const p = currentUser.id ? (getProviderById(currentUser.id) || currentUser) : currentUser;
+        setProvider(p);
+      }
+    }
+    loadLiveProfile();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser]);
 
-  const photos = provider.portfolioPhotos || [];
+  const photos = Array.isArray(provider.portfolioPhotos) ? provider.portfolioPhotos : [];
   // id can match photo.id or photo index
   const photo = photos.find((p, idx) => p.id === id || String(idx) === String(id));
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     setIsDeleting(true);
     const updatedPhotos = photos.filter((p, idx) => p.id !== id && String(idx) !== String(id));
     const updatedProvider = { ...provider, portfolioPhotos: updatedPhotos };
     saveProviderData(updatedProvider);
+    if (typeof window !== "undefined" && provider.id) {
+      localStorage.setItem(`bantuin_provider_portfolio_${provider.id}`, JSON.stringify(updatedPhotos));
+    }
     setProvider(updatedProvider);
+
+    // Hapus dari PostgreSQL database
+    try {
+      const token = await authService.getValidAccessToken();
+      if (token) {
+        await fetch("/api/user/profile", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ portfolioPhotos: updatedPhotos }),
+        });
+      }
+    } catch (err) {
+      console.error("Gagal hapus portofolio dari database:", err);
+    }
+
+    if (typeof setCurrentUser === "function") {
+      setCurrentUser((prev) => ({ ...(prev || {}), portfolioPhotos: updatedPhotos }));
+    }
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("bantuin_provider_updated"));
+      window.dispatchEvent(new Event("bantuin_service_updated"));
+    }
+
     setIsDeleting(false);
     setIsDeleteModalOpen(false);
     addToast?.("Foto Dihapus", "Foto karya berhasil dihapus dari portofolio.");

@@ -7,7 +7,11 @@ import RequestCard from "@/components/cards/RequestCard";
 import { ArrowRight, Zap, MapPin, Plus } from "lucide-react";
 
 export default function SedangDibutuhkan() {
-  const { requests, activeKabupaten, isItemInCurrentKabupaten } = useApp();
+  const { requests, activeKabupaten, isItemInCurrentKabupaten, refreshRequests } = useApp();
+
+  React.useEffect(() => {
+    refreshRequests?.();
+  }, [refreshRequests]);
 
   // Exclude finished tasks and STRICTLY filter to activeKabupaten
   const localRequests = requests.filter(

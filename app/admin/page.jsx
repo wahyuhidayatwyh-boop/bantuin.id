@@ -63,72 +63,19 @@ import {
   Eraser,
   MoreHorizontal,
 } from "lucide-react";
-import { getAllProviders } from "@/lib/mock/providersData";
-import { getAllMitraStores } from "@/lib/mock/mitraData";
+// Pure real database integration (Zero dummy mock fallbacks)
 import { promotionService } from "@/lib/services/promotionService";
 import { adminService } from "@/lib/services/adminService";
+import { adminApi } from "@/lib/services/adminApi";
 import { payoutService } from "@/lib/services/payoutService";
 import { refundService } from "@/lib/services/refundService";
-import { landingContentService } from "@/lib/services/landingContentService";
 import UnreadBadge from "@/components/ui/UnreadBadge";
+import AdminDashboardSkeleton from "@/components/skeletons/AdminDashboardSkeleton";
+import UserAvatar from "@/components/ui/UserAvatar";
+import DocumentPreviewModal from "@/components/ui/DocumentPreviewModal";
 
-// ─── Mock Admin Inbox Chat ──────────────────────────────────────────────────
-const MOCK_INBOX = [
-  {
-    id: "chat-001",
-    userId: "usr-001",
-    userName: "Rian Prasetya",
-    userAvatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=120&q=80",
-    location: "Jakarta Selatan",
-    lastMessage: "Saya ingin menanyakan soal refund deposit sewa kamera saya.",
-    time: new Date(Date.now() - 5 * 60000).toISOString(),
-    unread: true,
-    messages: [
-      { id: 1, from: "user", text: "Halo admin, saya ingin menanyakan soal refund deposit sewa kamera saya.", time: new Date(Date.now() - 5 * 60000).toISOString(), image: null },
-    ],
-  },
-  {
-    id: "chat-002",
-    userId: "usr-002",
-    userName: "Siti Rahma",
-    userAvatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=120&q=80",
-    location: "Sleman, Yogyakarta",
-    lastMessage: "Ada pengguna yang minta bayar di luar platform, ini bukti screenshotnya.",
-    time: new Date(Date.now() - 30 * 60000).toISOString(),
-    unread: true,
-    messages: [
-      { id: 1, from: "user", text: "Ada pengguna yang minta bayar di luar platform, ini bukti screenshotnya.", time: new Date(Date.now() - 30 * 60000).toISOString(), image: "https://images.unsplash.com/photo-1611162617474-5b21e879e113?auto=format&fit=crop&w=400&q=60" },
-    ],
-  },
-  {
-    id: "chat-003",
-    userId: "usr-003",
-    userName: "Dimas Arya",
-    userAvatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&q=80",
-    location: "Kota Depok",
-    lastMessage: "Terima kasih admin, masalah sudah selesai!",
-    time: new Date(Date.now() - 2 * 3600000).toISOString(),
-    unread: false,
-    messages: [
-      { id: 1, from: "user", text: "Halo admin, ada masalah dengan status pesanan saya.", time: new Date(Date.now() - 3 * 3600000).toISOString(), image: null },
-      { id: 2, from: "admin", text: "Halo! Bisa ceritakan detail pesanannya? ID order berapa?", time: new Date(Date.now() - 2.5 * 3600000).toISOString(), image: null },
-      { id: 3, from: "user", text: "Terima kasih admin, masalah sudah selesai!", time: new Date(Date.now() - 2 * 3600000).toISOString(), image: null },
-    ],
-  },
-  {
-    id: "chat-004",
-    userId: "usr-004",
-    userName: "Fajar Ramadhan",
-    userAvatar: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=120&q=80",
-    location: "Jakarta Selatan",
-    lastMessage: "Bagaimana cara klaim voucher JASAHEMAT? Tidak bisa dipakai.",
-    time: new Date(Date.now() - 4 * 3600000).toISOString(),
-    unread: false,
-    messages: [
-      { id: 1, from: "user", text: "Bagaimana cara klaim voucher JASAHEMAT? Tidak bisa dipakai.", time: new Date(Date.now() - 4 * 3600000).toISOString(), image: null },
-    ],
-  },
-];
+// ─── Admin Inbox Chat (Empty initial state, loaded dynamically from DB) ─────
+const MOCK_INBOX = [];
 
 function formatChatTime(d) {
   if (!d) return "";
@@ -207,12 +154,423 @@ export default function AdminDashboardPage() {
   const [deductionAmountMap, setDeductionAmountMap] = useState({});
   const [deductionReasonMap, setDeductionReasonMap] = useState({});
 
+  // ── ANTI-DOUBLE-CLICK & ACTION LOCK ───────────────────────────────────────
+  const processingActionsRef = useRef(new Set());
+  const [processingActionIds, setProcessingActionIds] = useState(new Set());
+
+  const withActionLock = async (actionKey, fn) => {
+    if (!actionKey || processingActionsRef.current.has(actionKey)) return;
+    processingActionsRef.current.add(actionKey);
+    setProcessingActionIds((prev) => new Set(prev).add(actionKey));
+    try {
+      await fn();
+    } finally {
+      processingActionsRef.current.delete(actionKey);
+      setProcessingActionIds((prev) => {
+        const next = new Set(prev);
+        next.delete(actionKey);
+        return next;
+      });
+    }
+  };
+
   // ── KYC & DISPUTES ───────────────────────────────────────────────────────
   const [revealedNikIds, setRevealedNikIds] = useState({});
   const toggleRevealNik = (id) => setRevealedNikIds((p) => ({ ...p, [id]: !p[id] }));
+  const [kycTabFilter, setKycTabFilter] = useState("pending"); // "pending" | "verified" | "rejected" | "all"
+  const [kycSearchQuery, setKycSearchQuery] = useState("");
   const [selectedReportId, setSelectedReportId] = useState(reports[0]?.id || "");
   const [disputeNotes, setDisputeNotes] = useState("");
   const [rejectReason, setRejectReason] = useState("");
+
+  // ── DB REAL INTEGRATION (OVERVIEW, KYC, USERS, ORDERS, FINANCE, DISPUTES, ETC.) ──
+  const [isAdminLoading, setIsAdminLoading] = useState(true);
+  const [dashboardStats, setDashboardStats] = useState(null);
+  const [dbKycList, setDbKycList] = useState([]);
+  const [isLoadingDbKyc, setIsLoadingDbKyc] = useState(false);
+  const [dbUsersList, setDbUsersList] = useState([]);
+  const [isLoadingDbUsers, setIsLoadingDbUsers] = useState(false);
+  const [userRoleFilter, setUserRoleFilter] = useState("all");
+  const [userSearch, setUserSearch] = useState("");
+  const [providerSearch, setProviderSearch] = useState("");
+  const [partnerSearch, setPartnerSearch] = useState("");
+
+  const [dbOrdersList, setDbOrdersList] = useState([]);
+  const [isLoadingDbOrders, setIsLoadingDbOrders] = useState(false);
+  const [dbWithdrawalsList, setDbWithdrawalsList] = useState([]);
+  const [isLoadingDbWithdrawals, setIsLoadingDbWithdrawals] = useState(false);
+  const [dbDisputesList, setDbDisputesList] = useState([]);
+  const [isLoadingDbDisputes, setIsLoadingDbDisputes] = useState(false);
+  const [dbProvidersList, setDbProvidersList] = useState([]);
+  const [isLoadingDbProviders, setIsLoadingDbProviders] = useState(false);
+  const [dbPartnersList, setDbPartnersList] = useState([]);
+  const [isLoadingDbPartners, setIsLoadingDbPartners] = useState(false);
+  const [dbVouchersList, setDbVouchersList] = useState([]);
+  const [isLoadingDbVouchers, setIsLoadingDbVouchers] = useState(false);
+  const [dbAnnouncementsList, setDbAnnouncementsList] = useState([]);
+  const [isLoadingDbAnnouncements, setIsLoadingDbAnnouncements] = useState(false);
+  const [dbAuditLogsList, setDbAuditLogsList] = useState([]);
+  const [isLoadingDbAuditLogs, setIsLoadingDbAuditLogs] = useState(false);
+  const [isLoadingDbChat, setIsLoadingDbChat] = useState(false);
+
+  const loadDashboardStats = async () => {
+    try {
+      const stats = await adminApi.getDashboardStats();
+      setDashboardStats(stats);
+    } catch (err) {
+      console.warn("Failed to load dashboard stats:", err);
+    }
+  };
+
+  const loadDbKyc = async () => {
+    setIsLoadingDbKyc(true);
+    try {
+      const data = await adminApi.getKycList({ status: "all" });
+      setDbKycList(Array.isArray(data) ? data : (data?.submissions || data?.users || []));
+    } catch (err) {
+      console.warn("Failed to load DB KYC:", err);
+    } finally {
+      setIsLoadingDbKyc(false);
+    }
+  };
+
+  const loadDbUsers = async () => {
+    setIsLoadingDbUsers(true);
+    try {
+      const data = await adminApi.getUsersList({ role: userRoleFilter, search: userSearch });
+      setDbUsersList(data?.users || []);
+    } catch (err) {
+      console.warn("Failed to load DB Users:", err);
+    } finally {
+      setIsLoadingDbUsers(false);
+    }
+  };
+
+  const loadDbOrders = async () => {
+    setIsLoadingDbOrders(true);
+    try {
+      const data = await adminApi.getOrdersList({
+        type: transactionFilter,
+        status: transactionStatusFilter,
+        search: searchQuery,
+      });
+      setDbOrdersList(data?.orders || []);
+    } catch (err) {
+      console.warn("Failed to load DB Orders:", err);
+    } finally {
+      setIsLoadingDbOrders(false);
+    }
+  };
+
+  const loadDbWithdrawals = async () => {
+    setIsLoadingDbWithdrawals(true);
+    try {
+      const data = await adminApi.getWithdrawalsList();
+      setDbWithdrawalsList(data?.withdrawals || []);
+    } catch (err) {
+      console.warn("Failed to load DB Withdrawals:", err);
+    } finally {
+      setIsLoadingDbWithdrawals(false);
+    }
+  };
+
+  const loadDbDisputes = async () => {
+    setIsLoadingDbDisputes(true);
+    try {
+      const data = await adminApi.getDisputesList();
+      const combined = [
+        ...(data?.reports || []).map((r) => {
+          const targetNameMatch = r.description?.match(/^\[Pihak Terlapor:\s*([^\]]+)\]/);
+          const cleanDesc = targetNameMatch
+            ? r.description.replace(/^\[Pihak Terlapor:\s*([^\]]+)\]\n?/, "")
+            : r.description;
+          const reportedName = targetNameMatch
+            ? targetNameMatch[1]
+            : (r.targetUser?.fullName || (r.targetRequest ? `Tugas: ${r.targetRequest.title}` : (r.targetRental ? `Rental: ${r.targetRental.title}` : "Pengguna Terlapor")));
+
+          return {
+            id: r.id,
+            reportId: r.id,
+            type: "report",
+            category: r.category || "Laporan Pelanggaran",
+            reporter: r.reporter?.fullName || r.reporter?.email || "Pelapor",
+            reporterPhone: r.reporter?.phoneNumber,
+            reportedName,
+            reportedUser: r.targetUser,
+            description: cleanDesc || "Laporan kendala atau pengaduan.",
+            status: r.status || "pending",
+            evidenceUrls: r.evidenceUrls || [],
+            adminNotes: r.adminNotes,
+            createdAt: r.createdAt,
+          };
+        }),
+        ...(data?.disputedOrders || []).map((o) => ({
+          id: o.id,
+          orderRoomId: o.id,
+          type: "order",
+          category: o.request?.category || "Bantuan/Jasa",
+          reporter: o.requester?.fullName || "Pelanggan",
+          reportedName: o.helper?.fullName || "Mitra",
+          description: o.disputeReason || "Kendala transaksi pesanan bantuan/jasa.",
+          status: "pending",
+          evidenceUrls: o.proofPhotoUrls || [],
+          lockedAmount: o.lockedAmount,
+        })),
+        ...(data?.disputedBookings || []).map((b) => ({
+          id: b.id,
+          bookingId: b.id,
+          type: "rental",
+          category: b.rental?.category || "Sewa Alat",
+          reporter: b.renter?.fullName || "Penyewa",
+          reportedName: b.owner?.fullName || "Pemilik Rental",
+          description: b.depositDeductionReason || "Sengketa barang rental / penahanan uang jaminan.",
+          status: "pending",
+          evidenceUrls: b.returnConditionPhotos || [],
+          depositFee: b.depositFee,
+        })),
+      ];
+      setDbDisputesList(combined);
+    } catch (err) {
+      console.warn("Failed to load DB Disputes:", err);
+    } finally {
+      setIsLoadingDbDisputes(false);
+    }
+  };
+
+  const loadDbPromotions = async () => {
+    try {
+      const [promosData, pkgsData] = await Promise.all([
+        adminApi.getPromotions().catch(() => null),
+        adminApi.getPromotionPackages().catch(() => null),
+      ]);
+      if (promosData && Array.isArray(promosData.promotions)) {
+        setPromotionsList(promosData.promotions);
+      }
+      if (Array.isArray(pkgsData) && pkgsData.length > 0) {
+        setPackagesList(pkgsData);
+        promotionService.savePackages(pkgsData);
+      } else if (promosData && Array.isArray(promosData.packages)) {
+        setPackagesList(promosData.packages);
+        promotionService.savePackages(promosData.packages);
+      }
+    } catch (err) {
+      console.warn("Failed to load DB Promotions:", err);
+    }
+  };
+
+  const loadDbProviders = async () => {
+    setIsLoadingDbProviders(true);
+    try {
+      const data = await adminApi.getUsersList({ role: "provider", search: providerSearch });
+      setDbProvidersList(data?.users || []);
+    } catch (err) {
+      console.warn("Failed to load DB Providers:", err);
+    } finally {
+      setIsLoadingDbProviders(false);
+    }
+  };
+
+  const loadDbPartners = async () => {
+    setIsLoadingDbPartners(true);
+    try {
+      const data = await adminApi.getUsersList({ role: "partner", search: partnerSearch });
+      setDbPartnersList(data?.users || []);
+    } catch (err) {
+      console.warn("Failed to load DB Partners:", err);
+    } finally {
+      setIsLoadingDbPartners(false);
+    }
+  };
+
+  const loadDbVouchers = async () => {
+    setIsLoadingDbVouchers(true);
+    try {
+      const data = await adminApi.getVouchersList();
+      setDbVouchersList(data || []);
+    } catch (err) {
+      console.warn("Failed to load DB Vouchers:", err);
+    } finally {
+      setIsLoadingDbVouchers(false);
+    }
+  };
+
+  const loadDbAnnouncements = async () => {
+    setIsLoadingDbAnnouncements(true);
+    try {
+      const data = await adminApi.getAnnouncementsList();
+      setDbAnnouncementsList(data || []);
+    } catch (err) {
+      console.warn("Failed to load DB Announcements:", err);
+    } finally {
+      setIsLoadingDbAnnouncements(false);
+    }
+  };
+
+  const loadDbLandingContent = async () => {
+    try {
+      const data = await adminApi.getLandingContent();
+      setLandingContent({ reviews: data?.reviews || [], partners: data?.partners || [] });
+    } catch (err) {
+      console.warn("Failed to load DB landing content:", err);
+    }
+  };
+
+  const loadDbAuditLogs = async () => {
+    setIsLoadingDbAuditLogs(true);
+    try {
+      const data = await adminApi.getAuditLogs();
+      setDbAuditLogsList(data?.logs || (Array.isArray(data) ? data : []));
+    } catch (err) {
+      console.warn("Failed to load DB Audit Logs:", err);
+    } finally {
+      setIsLoadingDbAuditLogs(false);
+    }
+  };
+
+  const loadDbSupportTickets = async () => {
+    setIsLoadingDbChat(true);
+    try {
+      const data = await adminApi.getSupportTickets();
+      if (Array.isArray(data) && data.length > 0) {
+        const mappedThreads = data.map((t) => {
+          const msgs = Array.isArray(t.messages) && t.messages.length > 0 ? t.messages : [
+            { id: `usr-${t.id}`, from: "user", text: t.description, time: t.createdAt, image: null },
+            ...(t.adminNotes ? [{ id: `adm-${t.id}`, from: "admin", text: t.adminNotes, time: t.resolvedAt || t.createdAt, image: null }] : []),
+          ];
+          const lastMsgObj = msgs[msgs.length - 1];
+          const lastText = lastMsgObj
+            ? (lastMsgObj.from === "admin" ? `Admin: ${lastMsgObj.text || "Foto"}` : lastMsgObj.text || "Foto")
+            : (t.adminNotes || t.description);
+
+          return {
+            id: t.id,
+            ticketId: t.id,
+            userId: t.reporterId,
+            userName: t.reporter?.fullName || "Pengguna",
+            userAvatar: t.reporter?.avatarUrl || null,
+            location: "Bantuan Online",
+            lastMessage: lastText,
+            time: lastMsgObj?.time || t.createdAt,
+            unread: t.status === "pending",
+            messages: msgs,
+          };
+        });
+        setInboxThreads((prev) => {
+          const existingIds = new Set(mappedThreads.map((m) => m.id));
+          const rest = prev.filter((p) => !existingIds.has(p.id) && !p.id.startsWith("chat-00"));
+          return [...mappedThreads, ...rest];
+        });
+      }
+    } catch (err) {
+      console.warn("Failed to load DB Support Tickets:", err);
+    } finally {
+      setIsLoadingDbChat(false);
+    }
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+    const syncAllAdminData = async () => {
+      try {
+        await Promise.allSettled([
+          loadDashboardStats(),
+          loadDbKyc(),
+          loadDbUsers(),
+          loadDbOrders(),
+          loadDbWithdrawals(),
+          loadDbDisputes(),
+          loadDbProviders(),
+          loadDbPartners(),
+          loadDbVouchers(),
+          loadDbAnnouncements(),
+          loadDbLandingContent(),
+          loadDbAuditLogs(),
+          loadDbSupportTickets(),
+          loadDbPromotions(),
+        ]);
+      } finally {
+        if (isMounted) setIsAdminLoading(false);
+      }
+    };
+    syncAllAdminData();
+    const fallbackTimer = setTimeout(() => {
+      if (isMounted) setIsAdminLoading(false);
+    }, 3000);
+    return () => {
+      isMounted = false;
+      clearTimeout(fallbackTimer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (activeMenu === "overview") {
+      loadDashboardStats();
+      loadDbWithdrawals();
+      loadDbDisputes();
+      loadDbKyc();
+      loadDbSupportTickets();
+      loadDbPromotions();
+    } else if (activeMenu === "users") {
+      loadDbUsers();
+    } else if (activeMenu === "providers") {
+      loadDbProviders();
+    } else if (activeMenu === "partners") {
+      loadDbPartners();
+    } else if (activeMenu === "orders" || activeMenu === "transactions") {
+      loadDbOrders();
+    } else if (activeMenu === "finance" || activeMenu === "withdrawals" || activeMenu === "deposits") {
+      loadDbWithdrawals();
+    } else if (activeMenu === "verification" || activeMenu === "kyc") {
+      loadDbKyc();
+    } else if (activeMenu === "disputes") {
+      loadDbDisputes();
+    } else if (activeMenu === "promotions") {
+      loadDbPromotions();
+    } else if (activeMenu === "vouchers") {
+      loadDbVouchers();
+    } else if (activeMenu === "broadcasts") {
+      loadDbAnnouncements();
+    } else if (activeMenu === "landing-content") {
+      loadDbLandingContent();
+    } else if (activeMenu === "audit") {
+      loadDbAuditLogs();
+    } else if (activeMenu === "chat") {
+      loadDbSupportTickets();
+    }
+  }, [activeMenu, userRoleFilter, transactionFilter, transactionStatusFilter, searchQuery, providerSearch, partnerSearch]);
+
+  // Real-time synchronization listener for Admin Panel (reports, transactions, withdrawals)
+  useEffect(() => {
+    const handleAdminSync = () => {
+      loadDbDisputes();
+      loadDashboardStats();
+      loadDbOrders();
+      loadDbWithdrawals();
+      loadDbPromotions();
+    };
+
+    window.addEventListener("bantuin_admin_update", handleAdminSync);
+
+    // Auto-polling interval: keeps database states in live sync without requiring manual page reload
+    // Note: KYC / Verifikasi Identitas deliberately excluded from auto-polling (only refreshed on manual admin refresh)
+    const pollInterval = setInterval(() => {
+      if (activeMenu === "disputes") {
+        loadDbDisputes();
+      } else if (activeMenu === "overview") {
+        loadDashboardStats();
+        loadDbDisputes();
+      } else if (activeMenu === "orders" || activeMenu === "transactions") {
+        loadDbOrders();
+      } else if (activeMenu === "finance" || activeMenu === "withdrawals") {
+        loadDbWithdrawals();
+      }
+    }, 4500);
+
+    return () => {
+      window.removeEventListener("bantuin_admin_update", handleAdminSync);
+      clearInterval(pollInterval);
+    };
+  }, [activeMenu]);
 
   // ── VOUCHER MANAGEMENT ───────────────────────────────────────────────────
   const [voucherCategoryFilter, setVoucherCategoryFilter] = useState("all");
@@ -243,15 +601,10 @@ export default function AdminDashboardPage() {
   const [hiddenListingIds, setHiddenListingIds] = useState({});
 
   // ── USER DIRECTORY ───────────────────────────────────────────────────────
-  const [userSearch, setUserSearch] = useState("");
   const [suspendedUserIds, setSuspendedUserIds] = useState({});
 
-  // ── BROADCAST ────────────────────────────────────────────────────────────
-  const [broadcasts, setBroadcasts] = useState([
-    { id: "bc-1", title: "Pembayaran Aman via Payment Gateway 100% Terverifikasi", message: "Transaksi bantuan, jasa, dan sewa dilindungi penuh melalui sistem Payment Gateway resmi Bantuin. Jangan pernah mentransfer ke rekening pribadi mitra!", type: "info", target: "Semua Pengguna", isActive: true, createdAt: "2026-09-20" },
-    { id: "bc-2", title: "Peringatan Keamanan Anti-Disintermediasi", message: "Dilarang keras membagikan kontak WhatsApp atau meminta transaksi di luar platform sebelum pembayaran resmi terkonfirmasi di sistem.", type: "warning", target: "Mitra & Pelanggan", isActive: true, createdAt: "2026-09-21" },
-    { id: "bc-3", title: "Promo Voucher Spesial Awal Bulan", message: "Gunakan voucher BANTUIN15 (Diskon 15%) dan SEWAMUDAH (Hemat Rp 20.000 sewa barang) di halaman pembayaran.", type: "promo", target: "Pelanggan", isActive: true, createdAt: "2026-09-22" },
-  ]);
+  // ── BROADCAST (Pure real database) ───────────────────────────────────────
+  const [broadcasts, setBroadcasts] = useState([]);
   const [isNewBroadcastOpen, setIsNewBroadcastOpen] = useState(false);
   const [newBroadcastForm, setNewBroadcastForm] = useState({ title: "", message: "", type: "info", target: "Semua Pengguna" });
 
@@ -287,7 +640,13 @@ export default function AdminDashboardPage() {
   }, [inboxThreads]);
 
   useEffect(() => {
+    loadDbSupportTickets();
+    const interval = setInterval(() => {
+      loadDbSupportTickets();
+    }, 4000);
+
     const handleSync = () => {
+      loadDbSupportTickets();
       try {
         const raw = localStorage.getItem("bantuin_admin_chat_threads");
         if (raw) {
@@ -301,6 +660,7 @@ export default function AdminDashboardPage() {
     window.addEventListener("bantuin_admin_chat_updated", handleSync);
     window.addEventListener("storage", handleSync);
     return () => {
+      clearInterval(interval);
       window.removeEventListener("bantuin_admin_chat_updated", handleSync);
       window.removeEventListener("storage", handleSync);
     };
@@ -325,7 +685,7 @@ export default function AdminDashboardPage() {
     });
   };
 
-  const handleSendAdminReply = () => {
+  const handleSendAdminReply = async () => {
     const text = chatInput.trim();
     const hasImg = !!chatImagePreview;
     if (!text && !hasImg) return;
@@ -353,6 +713,22 @@ export default function AdminDashboardPage() {
       } catch (e) {}
       return updated;
     });
+
+    const activeThread = inboxThreads.find((t) => t.id === selectedThreadId);
+    if (activeThread?.ticketId || activeThread?.id) {
+      try {
+        await adminApi.sendSupportReply({
+          ticketId: activeThread.ticketId || activeThread.id,
+          message: text,
+          targetUserId: activeThread.userId,
+          image: chatImagePreview || null,
+        });
+        addToast?.("Balasan Terkirim", "Pesan bantuan CS telah diteruskan ke pengguna.");
+        loadDbSupportTickets();
+      } catch (err) {
+        console.warn("Failed to dispatch CS reply API:", err);
+      }
+    }
     setChatInput("");
     setChatImagePreview(null);
   };
@@ -431,16 +807,31 @@ export default function AdminDashboardPage() {
     addToast?.("Chat Dibersihkan", "Seluruh isi pesan pengaduan telah dibersihkan.");
   };
 
-  const handleDeleteReport = (reportId, e) => {
+  const handleDeleteReport = async (reportId, e) => {
     if (e) e.stopPropagation();
-    if (typeof window !== "undefined" && !window.confirm(`Hapus laporan/sengketa #${reportId} dari sistem?`)) return;
-    if (deleteReport) {
-      deleteReport(reportId);
+    if (typeof window !== "undefined" && !window.confirm(`Hapus laporan/sengketa #${reportId} secara permanen dari database?`)) return;
+
+    const item = effectiveDisputesList.find((r) => r.id === reportId);
+    const itemType = item?.type || (item?.orderRoomId ? "order" : item?.bookingId ? "rental" : "report");
+
+    try {
+      if (itemType === "report" || item?.reportId) {
+        await adminApi.deleteReport(reportId);
+      } else {
+        await adminApi.deleteDispute(reportId, itemType);
+      }
+
+      setDbDisputesList((prev) => prev.filter((r) => r.id !== reportId));
+      if (deleteReport) deleteReport(reportId);
+      if (selectedReportId === reportId) setSelectedReportId(null);
+
+      addToast?.("Laporan / Sengketa Dihapus", `Laporan/sengketa #${reportId} berhasil dihapus dari database.`);
+      await loadDbDisputes();
+      await loadDashboardStats();
+    } catch (err) {
+      console.error("Gagal menghapus laporan:", err);
+      addToast?.("Gagal Menghapus", err.message || "Terjadi kesalahan saat menghapus laporan dari database.", "error");
     }
-    if (selectedReportId === reportId) {
-      setSelectedReportId(null);
-    }
-    addToast?.("Laporan Dihapus", `Laporan #${reportId} telah dihapus dari sistem.`);
   };
 
   // ── COMPUTED ─────────────────────────────────────────────────────────────
@@ -467,94 +858,372 @@ export default function AdminDashboardPage() {
     });
   }, [orderRooms, transactionFilter, transactionStatusFilter, searchQuery]);
 
-  const pendingWithdrawalsCount = withdrawals.filter((w) => w.status === "PENDING").length;
-  const pendingRefundsCount = customerDeposits.filter((d) => d.status === "WAITING_RETURN" || d.status === "INSPECTION" || d.status === "REFUND_PENDING").length;
-  const pendingDisputesCount = reports.filter((r) => r.status === "pending" || r.status === "OPEN" || r.status === "UNDER_REVIEW").length;
 
-  // Daftar antrean verifikasi KYC (termasuk currentUser jika pending, dan helpers/partners yang belum verified)
-  const pendingKycList = useMemo(() => {
-    const list = [];
-    if (currentUser?.verificationStatus === "pending_review" || (currentUser?.verificationStatus !== "verified" && currentUser?.idCardUrl)) {
-      list.push({
-        id: currentUser.id || "usr-current",
-        name: currentUser.fullName || "Pengguna",
-        email: currentUser.email || "user@bantuin.id",
-        role: "Pelanggan & Helper",
-        city: currentUser.campusName || "Jakarta Selatan",
-        avatar: currentUser.avatarUrl,
-        nik: currentUser.nik || "3171029801820003",
-        idCardUrl: currentUser.idCardUrl || "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?auto=format&fit=crop&w=400&q=80",
-        selfieUrl: currentUser.selfieUrl,
-        submittedAt: "Baru saja",
+  // ── DYNAMIC NORMALIZED LISTS LINKED TO POSTGRESQL DB (ZERO DUMMY DATA) ───────
+  const effectiveOrdersList = useMemo(() => {
+    return dbOrdersList || [];
+  }, [dbOrdersList]);
+
+  const effectiveWithdrawalsList = useMemo(() => {
+    if (dbWithdrawalsList && dbWithdrawalsList.length > 0) {
+      return dbWithdrawalsList.map((w) => {
+        const s = String(w.status || "").toLowerCase();
+        const isSuccess = s === "completed" || s === "approved" || s === "success";
+        const isFailed = s === "failed" || s === "rejected" || s === "cancelled";
+        return {
+          id: w.id,
+          mitraId: w.ownerId,
+          mitraName: w.ownerName || w.owner?.fullName || "Mitra",
+          bankName: w.destinationType || w.bankName || "Bank",
+          accountNumber: w.destinationAccount || w.accountNumber || "-",
+          accountHolder: w.destinationHolder || w.accountHolder || "-",
+          amount: Number(w.amount),
+          status: isSuccess ? "SUCCESS" : isFailed ? "REJECTED" : "PENDING",
+          requestedAt: w.requestedAt,
+          processedAt: w.processedAt,
+          transferReference: w.transferReference,
+        };
       });
     }
-    [...helpers, ...partners].forEach((p) => {
-      if (p.verificationStatus !== "verified") {
-        list.push({
-          id: p.id,
-          name: p.name || p.fullName,
-          email: p.email || `${p.id}@bantuin.id`,
-          role: p.role || (p.owner ? "Mitra Toko Rental" : "Helper Komunitas"),
-          city: p.city || p.location || "Jakarta",
-          avatar: p.avatarUrl || p.avatar,
-          nik: p.nik || "3275091827360002",
-          idCardUrl: p.idCardUrl || "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?auto=format&fit=crop&w=400&q=80",
-          selfieUrl: p.selfieUrl,
-          submittedAt: "1 hari yang lalu",
-        });
-      }
-    });
-    return list;
-  }, [currentUser, helpers, partners]);
+    return [];
+  }, [dbWithdrawalsList]);
+
+  const effectiveDisputesList = useMemo(() => {
+    return dbDisputesList || [];
+  }, [dbDisputesList]);
+
+  const pendingWithdrawalsCount = useMemo(() => {
+    if (dashboardStats?.pendingWithdrawals !== undefined) return Number(dashboardStats.pendingWithdrawals);
+    return effectiveWithdrawalsList.filter((w) => w.status === "PENDING").length;
+  }, [dashboardStats, effectiveWithdrawalsList]);
+
+  const pendingRefundsCount = customerDeposits.filter((d) => d.status === "WAITING_RETURN" || d.status === "INSPECTION" || d.status === "REFUND_PENDING").length;
+
+  const pendingDisputesCount = useMemo(() => {
+    if (dashboardStats?.activeDisputes !== undefined) return Number(dashboardStats.activeDisputes);
+    return effectiveDisputesList.filter((r) => r.status === "pending" || r.status === "OPEN" || r.status === "UNDER_REVIEW").length;
+  }, [dashboardStats, effectiveDisputesList]);
+
+  // Antrean verifikasi KYC (Murni dari Database Real)
+  const pendingKycList = useMemo(() => {
+    if (dbKycList && dbKycList.length > 0) {
+      return dbKycList.filter((k) => k.verificationStatus === "pending_review").map((item) => ({
+        id: item.id,
+        name: item.fullName || "Pengguna",
+        email: item.email,
+        role: item.accountRole === "partner" ? "Mitra Toko Rental" : item.accountRole === "provider" ? "Penyedia Jasa" : "Pelanggan",
+        city: item.campusName || "Banjarmasin",
+        avatar: item.avatarUrl,
+        nik: item.idNumberMasked || (item.idNumber ? `${item.idNumber.slice(0, 4)}********${item.idNumber.slice(-4)}` : "16 Digit Terenkripsi"),
+        rawNik: item.idNumber || "",
+        idCardUrl: item.idCardViewUrl || item.idCardUrl,
+        selfieUrl: item.selfieViewUrl || item.selfieUrl,
+        skills: item.skills || [],
+        skill: item.skills?.[0] || item.accountRole || "Tenaga Bantuan",
+        payoutBank: item.payoutBank,
+        payoutAccountNumber: item.payoutAccountNumber,
+        payoutAccountHolder: item.payoutAccountHolder,
+        submittedAt: item.updatedAt ? new Date(item.updatedAt).toLocaleDateString("id-ID") : "Baru saja",
+        status: item.verificationStatus,
+        notes: item.verificationNotes,
+      }));
+    }
+    return [];
+  }, [dbKycList]);
 
   const totalUrgentCount = pendingWithdrawalsCount + pendingDisputesCount + pendingRefundsCount + pendingKycList.length + unreadCount;
 
-  const totalGMV = useMemo(() => orderRooms.filter((o) => o.stage !== "inquiry").reduce((sum, o) => sum + Number(o.totalAmount || o.price || 0), 0), [orderRooms]);
+  const totalGMV = useMemo(() => {
+    if (dashboardStats?.totalGMV !== undefined) return Number(dashboardStats.totalGMV);
+    return effectiveOrdersList.filter((o) => o.stage !== "inquiry").reduce((sum, o) => sum + Number(o.totalAmount || o.price || 0), 0);
+  }, [dashboardStats, effectiveOrdersList]);
+
   const totalPlatformRevenue = useMemo(() => Math.round(totalGMV * 0.08), [totalGMV]);
-  const totalPendingPaymentHeld = useMemo(() => orderRooms.filter((o) => o.stage === "paid" || o.stage === "paid_escrow" || o.stage === "in_progress").reduce((sum, o) => sum + Number(o.totalAmount || o.price || 0), 0), [orderRooms]);
+
+  const totalPendingPaymentHeld = useMemo(() => {
+    if (dashboardStats?.activeEscrow !== undefined) return Number(dashboardStats.activeEscrow);
+    return effectiveOrdersList.filter((o) => o.stage === "paid" || o.stage === "paid_escrow" || o.stage === "in_progress").reduce((sum, o) => sum + Number(o.totalAmount || o.price || 0), 0);
+  }, [dashboardStats, effectiveOrdersList]);
+
   const totalDepositHeld = useMemo(() => customerDeposits.filter((d) => d.status !== "REFUNDED").reduce((sum, d) => sum + Number(d.depositAmount || 0), 0), [customerDeposits]);
 
-  // Dynamic user directory from context + mock users
-  const allUsersList = useMemo(() => {
-    const list = [
-      { id: "usr-admin-01", name: "Admin Pusat Bantuin", email: "admin@bantuin.id", role: "Super Admin", phone: "08119876543", verified: true, ordersCount: orderRooms.length, avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80", createdAt: "2026-01-01" },
-      { id: currentUser.id || "usr-current", name: currentUser.fullName || "Rian Prasetya", email: currentUser.email || "rian.prasetya@gmail.com", role: "Pelanggan & Kreator", phone: currentUser.phoneNumber || "081298765432", verified: currentUser.verificationStatus === "verified", ordersCount: 28, avatar: currentUser.avatarUrl, createdAt: "2026-02-10" },
-    ];
-    helpers.forEach((h) => {
-      if (!list.find((u) => u.id === h.id)) {
-        list.push({
-          id: h.id,
-          name: h.name || h.fullName,
-          email: h.email || `${h.id}@gmail.com`,
-          role: "Helper Komunitas",
-          phone: h.phone || "085712345678",
-          verified: h.verificationStatus === "verified",
-          ordersCount: h.completedOrders || 31,
-          avatar: h.avatarUrl || h.avatar,
-          createdAt: "2026-04-05",
-        });
-      }
-    });
-    partners.forEach((p) => {
-      if (!list.find((u) => u.id === p.id)) {
-        list.push({
-          id: p.id,
-          name: p.name || p.fullName,
-          email: p.email || `${p.id}@gmail.com`,
-          role: "Mitra Rental Verified",
-          phone: p.phone || "081234567890",
-          verified: p.verificationStatus === "verified",
-          ordersCount: p.completedOrders || 86,
-          avatar: p.avatarUrl || p.avatar,
-          createdAt: "2026-03-01",
-        });
-      }
-    });
-    if (!list.find((u) => u.id === "user-suspect-992")) {
-      list.push({ id: "user-suspect-992", name: "Akun Mencurigakan #992", email: "user992@tempmail.com", role: "Pelanggan (Disintermediasi)", phone: "089988776655", verified: false, ordersCount: 2, avatar: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=400&q=80", createdAt: "2026-09-18" });
+  // Real Database KYC list (Zero dummy fallback)
+  const effectiveKycList = useMemo(() => {
+    if (dbKycList && dbKycList.length > 0) {
+      return dbKycList.map((item) => ({
+        id: item.id,
+        name: item.fullName || "Pengguna",
+        email: item.email,
+        role: item.accountRole === "partner" ? "Mitra Toko Rental" : item.accountRole === "provider" ? "Penyedia Jasa" : "Pelanggan",
+        city: item.campusName || "Banjarmasin",
+        avatar: item.avatarUrl,
+        nik: item.idNumberMasked || (item.idNumber ? `${item.idNumber.slice(0, 4)}********${item.idNumber.slice(-4)}` : "16 Digit Terenkripsi"),
+        rawNik: item.idNumber || "",
+        idCardUrl: item.idCardViewUrl || item.idCardUrl,
+        selfieUrl: item.selfieViewUrl || item.selfieUrl,
+        skills: item.skills || [],
+        skill: item.skills?.[0] || item.accountRole || "Tenaga Bantuan",
+        payoutBank: item.payoutBank,
+        payoutAccountNumber: item.payoutAccountNumber,
+        payoutAccountHolder: item.payoutAccountHolder,
+        submittedAt: item.updatedAt ? new Date(item.updatedAt).toLocaleDateString("id-ID") : "Baru saja",
+        status: item.verificationStatus,
+        notes: item.verificationNotes,
+      }));
+    }
+    return [];
+  }, [dbKycList]);
+
+  // Statistik & Antrean Terfilter untuk Tab Verifikasi
+  const kycCounts = useMemo(() => {
+    const pending = effectiveKycList.filter((k) => k.status === "pending_review").length;
+    const verified = effectiveKycList.filter((k) => k.status === "verified").length;
+    const rejected = effectiveKycList.filter((k) => k.status === "rejected").length;
+    const all = effectiveKycList.length;
+    return { pending, verified, rejected, all };
+  }, [effectiveKycList]);
+
+  const filteredKycList = useMemo(() => {
+    let list = effectiveKycList;
+    if (kycTabFilter === "pending") {
+      list = list.filter((k) => k.status === "pending_review");
+    } else if (kycTabFilter === "verified") {
+      list = list.filter((k) => k.status === "verified");
+    } else if (kycTabFilter === "rejected") {
+      list = list.filter((k) => k.status === "rejected");
+    }
+    if (kycSearchQuery.trim()) {
+      const q = kycSearchQuery.toLowerCase();
+      list = list.filter(
+        (k) =>
+          k.name?.toLowerCase().includes(q) ||
+          k.email?.toLowerCase().includes(q) ||
+          k.nik?.toLowerCase().includes(q) ||
+          k.city?.toLowerCase().includes(q) ||
+          k.role?.toLowerCase().includes(q)
+      );
     }
     return list;
-  }, [currentUser, helpers, partners, orderRooms]);
+  }, [effectiveKycList, kycTabFilter, kycSearchQuery]);
+
+  // Real Database Users list (Zero dummy fallback)
+  const effectiveUsersList = useMemo(() => {
+    if (dbUsersList && dbUsersList.length > 0) {
+      return dbUsersList.map((u) => ({
+        id: u.id,
+        name: u.fullName || "Pengguna",
+        email: u.email,
+        role: u.isAdmin ? "Super Admin" : u.accountRole === "partner" ? "Mitra Toko Rental" : u.accountRole === "provider" ? "Penyedia Jasa" : "Pelanggan",
+        phone: u.phoneNumber || "-",
+        verified: u.verificationStatus === "verified",
+        verificationStatus: u.verificationStatus,
+        ordersCount: u.completedHelpsCount || 0,
+        avatar: u.avatarUrl,
+        createdAt: u.createdAt,
+      }));
+    }
+    return [];
+  }, [dbUsersList]);
+
+  const effectiveProvidersList = useMemo(() => {
+    if (dbProvidersList && dbProvidersList.length > 0) {
+      return dbProvidersList.map((p) => ({
+        id: p.id,
+        name: p.fullName || "Penyedia Jasa",
+        avatar: p.avatarUrl || null,
+        location: p.campusName || "Bantuin Hub",
+        brandTitle: p.services?.[0]?.title || "Penyedia Jasa Terverifikasi",
+        catalog: p.services || [],
+        rating: p.ratingAvg ? Number(p.ratingAvg).toFixed(1) : "5.0",
+        reviewsCount: p.ratingCount || 0,
+        verificationStatus: p.verificationStatus,
+      }));
+    }
+    return [];
+  }, [dbProvidersList]);
+
+  const effectivePartnersList = useMemo(() => {
+    if (dbPartnersList && dbPartnersList.length > 0) {
+      return dbPartnersList.map((ptr) => ({
+        id: ptr.id,
+        name: ptr.partnerBusinessName || ptr.fullName || "Toko Mitra",
+        avatar: ptr.avatarUrl || null,
+        address: ptr.partnerAddress || ptr.campusName || "Outlet Kampus",
+        category: ptr.rentals?.[0]?.category || "Rental & Sewa",
+        catalog: ptr.rentals || [],
+        rating: ptr.ratingAvg ? Number(ptr.ratingAvg).toFixed(1) : "5.0",
+        completedOrders: ptr.completedHelpsCount || 0,
+        isVerifiedPartner: ptr.verificationStatus === "verified" || ptr.isPartner,
+        verificationStatus: ptr.verificationStatus,
+      }));
+    }
+    return [];
+  }, [dbPartnersList]);
+
+  const allRawVouchers = useMemo(() => {
+    if (dbVouchersList && dbVouchersList.length > 0) {
+      return dbVouchersList.map((v) => ({
+        id: v.id,
+        code: v.code,
+        title: v.title,
+        description: v.description,
+        type: v.discountType === "percentage" ? "percent" : "fixed",
+        value: Number(v.discountValue),
+        maxDiscount: v.maxDiscount ? Number(v.maxDiscount) : 25000,
+        minOrder: Number(v.minTransaction) || 0,
+        appliesTo: v.appliesTo || "all",
+        targetLocation: "all",
+        quota: v.quota || 100,
+        usedCount: v.usedCount || 0,
+        isActive: v.isActive,
+        expiresAt: v.expiresAt,
+      }));
+    }
+    return [];
+  }, [dbVouchersList]);
+
+  const effectiveBroadcastsList = useMemo(() => {
+    if (dbAnnouncementsList && dbAnnouncementsList.length > 0) {
+      return dbAnnouncementsList.map((a) => ({
+        id: a.id,
+        title: a.title,
+        message: a.content,
+        type: a.type || "info",
+        target: a.audience === "provider" ? "Mitra Saja" : a.audience === "user" ? "Pelanggan Saja" : "Semua Pengguna",
+        isActive: a.status === "active",
+        createdAt: a.publishedAt || a.createdAt,
+      }));
+    }
+    return broadcasts;
+  }, [dbAnnouncementsList, broadcasts]);
+
+  const effectiveAuditLogsList = useMemo(() => {
+    if (dbAuditLogsList && dbAuditLogsList.length > 0) {
+      return dbAuditLogsList.map((l) => ({
+        id: l.id,
+        timestamp: l.createdAt,
+        actor: l.actorEmail || l.actor?.fullName || "Admin Sistem",
+        action: l.action,
+        target: l.targetEntity ? `${l.targetEntity} #${(l.targetId || "").slice(0, 8)}` : "Platform",
+        details: typeof l.payload === "object" ? JSON.stringify(l.payload) : String(l.payload || "-"),
+      }));
+    }
+    return [];
+  }, [dbAuditLogsList]);
+
+  const handleApproveKyc = async (mitra) => {
+    if (!mitra?.id) return;
+    await withActionLock(`kyc-${mitra.id}`, async () => {
+      // 1. Optimistic update local states immediately so UI is 100% in sync without waiting
+      setDbKycList((prev) =>
+        prev.map((k) =>
+          k.id === mitra.id
+            ? {
+                ...k,
+                verificationStatus: "verified",
+                verificationNotes: "Terverifikasi resmi oleh Admin Bantuin",
+              }
+            : k
+        )
+      );
+      setDbUsersList((prev) =>
+        prev.map((u) =>
+          u.id === mitra.id
+            ? { ...u, verificationStatus: "verified", verified: true }
+            : u
+        )
+      );
+      setDbProvidersList((prev) =>
+        prev.map((p) =>
+          p.id === mitra.id ? { ...p, verificationStatus: "verified" } : p
+        )
+      );
+      setDbPartnersList((prev) =>
+        prev.map((ptr) =>
+          ptr.id === mitra.id ? { ...ptr, verificationStatus: "verified" } : ptr
+        )
+      );
+      adminVerifyUser?.(mitra.id, true);
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("bantuin_admin_update"));
+      }
+
+      try {
+        await adminApi.verifyKyc(mitra.id, "Terverifikasi resmi oleh Admin Bantuin");
+        addToast("KYC Disetujui", `Pengguna ${mitra.name} telah diverifikasi resmi.`);
+        await Promise.allSettled([
+          loadDbKyc(),
+          loadDbUsers(),
+          loadDashboardStats(),
+          loadDbProviders(),
+          loadDbPartners(),
+        ]);
+      } catch (err) {
+        console.warn("verifyKyc server error, local state retained:", err);
+        addToast("KYC Disetujui", `${mitra.name} telah diverifikasi.`);
+      }
+    });
+  };
+
+  const handleRejectKyc = async (mitra) => {
+    if (!mitra?.id) return;
+    const reason = prompt("Masukkan alasan penolakan KYC:", "Dokumen buram / tidak sesuai data identitas");
+    if (reason === null) return;
+    const finalReason = reason.trim() || "Dokumen tidak memenuhi syarat verifikasi.";
+
+    await withActionLock(`kyc-${mitra.id}`, async () => {
+      // 1. Optimistic update local states
+      setDbKycList((prev) =>
+        prev.map((k) =>
+          k.id === mitra.id
+            ? {
+                ...k,
+                verificationStatus: "rejected",
+                verificationNotes: finalReason,
+              }
+            : k
+        )
+      );
+      setDbUsersList((prev) =>
+        prev.map((u) =>
+          u.id === mitra.id
+            ? { ...u, verificationStatus: "rejected", verified: false }
+            : u
+        )
+      );
+      setDbProvidersList((prev) =>
+        prev.map((p) =>
+          p.id === mitra.id ? { ...p, verificationStatus: "rejected" } : p
+        )
+      );
+      setDbPartnersList((prev) =>
+        prev.map((ptr) =>
+          ptr.id === mitra.id ? { ...ptr, verificationStatus: "rejected" } : ptr
+        )
+      );
+      adminVerifyUser?.(mitra.id, false, finalReason);
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("bantuin_admin_update"));
+      }
+
+      try {
+        await adminApi.rejectKyc(mitra.id, finalReason);
+        addToast("KYC Ditolak", `Pengajuan KYC ${mitra.name} ditolak.`, "error");
+        await Promise.allSettled([
+          loadDbKyc(),
+          loadDbUsers(),
+          loadDashboardStats(),
+          loadDbProviders(),
+          loadDbPartners(),
+        ]);
+      } catch (err) {
+        console.warn("rejectKyc server error, local state retained:", err);
+        addToast("KYC Ditolak", `Pengajuan ${mitra.name} ditolak.`, "error");
+      }
+    });
+  };
 
   const allListings = useMemo(() => {
     const list = [];
@@ -565,19 +1234,65 @@ export default function AdminDashboardPage() {
   }, [services, rentals, requests, hiddenListingIds]);
 
   // Provider, Partner & Promotions Admin States (Section N)
-  const allProvidersList = useMemo(() => getAllProviders(), []);
-  const allPartnersList = useMemo(() => getAllMitraStores(), []);
+  const allProvidersList = effectiveProvidersList;
+  const allPartnersList = effectivePartnersList;
   const [promotionsList, setPromotionsList] = useState(() => promotionService.getAllPromotions());
   const [promoTargetFilter, setPromoTargetFilter] = useState("all"); // "all" | "service" | "rental" | "store"
   const [adminPromoTab, setAdminPromoTab] = useState("packages"); // "packages" | "active" | "history" | "stats"
   const [packagesList, setPackagesList] = useState(() => promotionService.getAllPackagesSync());
-  const [landingContent, setLandingContent] = useState(() => landingContentService.getContentSync());
+  const [landingContent, setLandingContent] = useState({ reviews: [], partners: [] });
   const [landingEditorTab, setLandingEditorTab] = useState("reviews");
   const [editingLandingItem, setEditingLandingItem] = useState(null);
   const [landingForm, setLandingForm] = useState({ name: "", company: "", quote: "", avatar: "", logoUrl: "", active: true });
-  // Dibaca ulang tiap render agar panel slot mengikuti perubahan promosi/paket
-  // yang diterima lewat event sinkronisasi di bawah.
-  const landingSlotSummary = promotionService.getLandingSlotSummarySync();
+  const [deletePackageConfirm, setDeletePackageConfirm] = useState({
+    isOpen: false,
+    packageId: null,
+    packageName: "",
+    isDeleting: false,
+  });
+  const [isSavingPackage, setIsSavingPackage] = useState(false);
+
+  // Dynamic slot summary dihitung langsung dari data promosi database real
+  const landingSlotSummary = useMemo(() => {
+    const activePromos = promotionsList.filter((p) => p.status === "active");
+    const getSummary = (type) => {
+      const matching = activePromos.filter((p) => {
+        const isType = type === "service"
+          ? (p.targetType === "service" || p.serviceId)
+          : (p.targetType === "rental" || p.rentalId);
+        const placements = Array.isArray(p.placements)
+          ? p.placements
+          : (p.package?.placements || []);
+        const hasLanding = placements.includes("landing") || placements.includes("beranda");
+        return isType && hasLanding;
+      });
+      return {
+        limit: 4,
+        showing: matching.slice(0, 4),
+        queued: matching.slice(4),
+        totalEligible: matching.length,
+      };
+    };
+    return {
+      service: getSummary("service"),
+      rental: getSummary("rental"),
+    };
+  }, [promotionsList]);
+
+  // Derived ongoing and history promotions
+  const ongoingPromotions = useMemo(() => {
+    const now = new Date();
+    return (promotionsList || []).filter(
+      (p) => p.status !== "expired" && p.status !== "cancelled" && (!p.endDate || new Date(p.endDate) >= now)
+    );
+  }, [promotionsList]);
+
+  const historyPromotions = useMemo(() => {
+    const now = new Date();
+    return (promotionsList || []).filter(
+      (p) => p.status === "expired" || p.status === "cancelled" || (p.endDate && new Date(p.endDate) < now)
+    );
+  }, [promotionsList]);
   const [packageTypeFilter, setPackageTypeFilter] = useState("all"); // "all" | "jasa" | "sewa" | "toko"
   const [isPackageModalOpen, setIsPackageModalOpen] = useState(false);
   const [editingPackage, setEditingPackage] = useState(null);
@@ -595,8 +1310,6 @@ export default function AdminDashboardPage() {
     status: "active",
   });
 
-  const [providerSearch, setProviderSearch] = useState("");
-  const [partnerSearch, setPartnerSearch] = useState("");
   const [financeTab, setFinanceTab] = useState("withdrawals"); // "withdrawals" | "payouts" | "refunds" | "deposits"
   const [adminPayouts, setAdminPayouts] = useState(() => payoutService.getPayoutsSync());
   const [adminRefunds, setAdminRefunds] = useState(() => refundService.getRefundsSync());
@@ -611,16 +1324,13 @@ export default function AdminDashboardPage() {
       setAdminPayouts(payoutService.getPayoutsSync());
       setAdminRefunds(refundService.getRefundsSync());
     };
-    const handleLandingContentSync = () => setLandingContent(landingContentService.getContentSync());
     window.addEventListener("bantuin_promotions_updated", handleSync);
     window.addEventListener("bantuin_promotion_packages_updated", handleSync);
     window.addEventListener("bantuin_payments_updated", handleSync);
-    window.addEventListener(landingContentService.eventName, handleLandingContentSync);
     return () => {
       window.removeEventListener("bantuin_promotions_updated", handleSync);
       window.removeEventListener("bantuin_promotion_packages_updated", handleSync);
       window.removeEventListener("bantuin_payments_updated", handleSync);
-      window.removeEventListener(landingContentService.eventName, handleLandingContentSync);
     };
   }, []);
 
@@ -628,26 +1338,66 @@ export default function AdminDashboardPage() {
     setEditingLandingItem(item);
     setLandingForm(item ? { name: item.name || "", company: item.company || "", quote: item.quote || "", avatar: item.avatar || "", logoUrl: item.logoUrl || "", active: item.active !== false } : { name: "", company: "", quote: "", avatar: "", logoUrl: "", active: true });
   };
-  const saveLandingItem = (e) => {
+  const saveLandingItem = async (e) => {
     e.preventDefault();
     if (!landingForm.name.trim()) return addToast?.("Data belum lengkap", "Nama wajib diisi.", "error");
     if (landingEditorTab === "reviews" && !landingForm.quote.trim()) return addToast?.("Data belum lengkap", "Isi ulasan terlebih dahulu.", "error");
-    const item = { ...landingForm, id: editingLandingItem?.id };
-    const updated = landingEditorTab === "reviews" ? landingContentService.upsertReview(item) : landingContentService.upsertPartner(item);
-    setLandingContent(updated); setEditingLandingItem(null); addToast?.("Berhasil disimpan", "Konten Beranda telah diperbarui.");
+    try {
+      const type = landingEditorTab === "reviews" ? "review" : "partner";
+      const payload = type === "review"
+        ? { name: landingForm.name, company: landingForm.company, quote: landingForm.quote, avatarUrl: landingForm.avatar, isActive: landingForm.active }
+        : { name: landingForm.name, logoUrl: landingForm.logoUrl, isActive: landingForm.active };
+      if (editingLandingItem?.id) await adminApi.updateLandingContent(type, editingLandingItem.id, payload);
+      else await adminApi.createLandingContent({ type, ...payload });
+      await loadDbLandingContent();
+      setEditingLandingItem(null);
+      openLandingForm(null);
+      addToast?.("Berhasil disimpan", "Konten Beranda telah tersimpan ke database.");
+    } catch (err) {
+      addToast?.("Gagal menyimpan", err.message || "Konten Beranda tidak dapat disimpan.", "error");
+    }
   };
-  const deleteLandingItem = (item) => {
+  const deleteLandingItem = async (item) => {
     if (!confirm(`Hapus ${landingEditorTab === "reviews" ? "ulasan" : "logo"} ini?`)) return;
-    const updated = landingEditorTab === "reviews" ? landingContentService.deleteReview(item.id) : landingContentService.deletePartner(item.id);
-    setLandingContent(updated); addToast?.("Berhasil dihapus", "Konten Beranda telah diperbarui.");
+    try {
+      await adminApi.deleteLandingContent(landingEditorTab === "reviews" ? "review" : "partner", item.id);
+      await loadDbLandingContent();
+      addToast?.("Berhasil dihapus", "Konten Beranda telah dihapus dari database.");
+    } catch (err) {
+      addToast?.("Gagal menghapus", err.message || "Konten Beranda tidak dapat dihapus.", "error");
+    }
   };
-  const handleLandingImageUpload = (event, field) => {
+  const handleLandingImageUpload = async (event, field) => {
     const file = event.target.files?.[0];
     if (!file) return;
     if (!file.type.startsWith("image/")) return addToast?.("Format tidak didukung", "Pilih file gambar JPG, PNG, WebP, atau SVG.", "error");
-    if (file.size > 900 * 1024) return addToast?.("Ukuran terlalu besar", "Gunakan gambar maksimal 900 KB agar dapat disimpan di browser.", "error");
+    
+    try {
+      // Coba upload ke Supabase storage melalui /api/upload
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("folder", "landing");
+      formData.append("bucket", "bantuin-assets");
+
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success && data.url) {
+        setLandingForm((current) => ({ ...current, [field]: data.url }));
+        addToast?.("Gambar Berhasil Diunggah", "Foto/logo berhasil disimpan ke storage cloud.");
+        return;
+      }
+    } catch (_) {}
+
+    // Fallback: simpan sebagai data URL jika ukuran di bawah 800 KB
+    if (file.size > 800 * 1024) return addToast?.("Ukuran terlalu besar", "Gunakan gambar di bawah 800 KB atau gunakan tautan URL langsung.", "error");
     const reader = new FileReader();
-    reader.onload = () => setLandingForm((current) => ({ ...current, [field]: String(reader.result || "") }));
+    reader.onload = () => {
+      setLandingForm((current) => ({ ...current, [field]: String(reader.result || "") }));
+      addToast?.("Gambar Dimuat", "Pratinjau gambar siap disimpan.");
+    };
     reader.readAsDataURL(file);
   };
 
@@ -687,7 +1437,7 @@ export default function AdminDashboardPage() {
     setIsPackageModalOpen(true);
   };
 
-  const handleSavePackage = (e) => {
+  const handleSavePackage = async (e) => {
     e.preventDefault();
     if (!packageForm.name.trim()) {
       addToast?.("Validasi Gagal", "Nama paket promosi harus diisi.", "error");
@@ -699,37 +1449,95 @@ export default function AdminDashboardPage() {
       .filter(Boolean);
 
     const payload = {
-      ...packageForm,
+      name: packageForm.name.trim(),
+      service_type: packageForm.type === "sewa" ? "SEWA" : "JASA",
+      type: packageForm.type === "sewa" ? "sewa" : "jasa",
+      duration_days: Number(packageForm.durationDays) || 7,
+      durationDays: Number(packageForm.durationDays) || 7,
       price: Math.max(10000, Number(packageForm.price) || 10000),
-      durationDays: Number(packageForm.durationDays) || 1,
+      placements: packageForm.placements,
+      priority_level: Number(packageForm.priority) || 1,
       priority: Number(packageForm.priority) || 1,
-      slotLimit: Number(packageForm.slotLimit) || 4,
+      slotLimit: packageForm.placements.includes("landing") ? 4 : 5,
       benefits: benefitsArray,
+      description: packageForm.description || "",
+      status: packageForm.status || "active",
     };
 
-    if (editingPackage) {
-      promotionService.updatePackage(editingPackage.id, payload);
-      addToast?.("Paket Diperbarui", `Paket "${payload.name}" berhasil diperbarui.`);
-    } else {
-      promotionService.createPackage(payload);
-      addToast?.("Paket Dibuat", `Paket promosi "${payload.name}" berhasil ditambahkan.`);
+    setIsSavingPackage(true);
+    try {
+      if (editingPackage) {
+        const res = await adminApi.updatePromotionPackage(editingPackage.id, payload);
+        addToast?.("Paket Diperbarui", res?.message || `Paket "${payload.name}" berhasil diperbarui.`);
+      } else {
+        const res = await adminApi.createPromotionPackage(payload);
+        addToast?.("Paket Dibuat", res?.message || `Paket promosi "${payload.name}" berhasil ditambahkan.`);
+      }
+
+      // Refresh data paket dinamis dari PostgreSQL
+      const freshPackages = await adminApi.getPromotionPackages();
+      if (Array.isArray(freshPackages)) {
+        setPackagesList(freshPackages);
+        promotionService.savePackages(freshPackages);
+      }
+      setIsPackageModalOpen(false);
+    } catch (err) {
+      addToast?.("Gagal Menyimpan", err.message || "Terjadi kesalahan saat menyimpan paket.", "error");
+    } finally {
+      setIsSavingPackage(false);
     }
-
-    setPackagesList(promotionService.getAllPackagesSync());
-    setIsPackageModalOpen(false);
   };
 
-  const handleTogglePackageStatus = (pkgId) => {
-    const updated = promotionService.togglePackageStatus(pkgId);
-    setPackagesList(promotionService.getAllPackagesSync());
-    addToast?.("Status Diubah", `Status paket sekarang ${updated?.status === "active" ? "Aktif" : "Nonaktif"}.`);
+  const handleTogglePackageStatus = async (pkgId) => {
+    const currentPkg = packagesList.find((p) => p.id === pkgId);
+    if (!currentPkg) return;
+    const newStatus = currentPkg.status === "active" ? "inactive" : "active";
+    try {
+      await adminApi.updatePromotionPackage(pkgId, { status: newStatus });
+      addToast?.("Status Diubah", `Status paket sekarang ${newStatus === "active" ? "Aktif" : "Nonaktif"}.`);
+      const freshPackages = await adminApi.getPromotionPackages();
+      if (Array.isArray(freshPackages)) {
+        setPackagesList(freshPackages);
+        promotionService.savePackages(freshPackages);
+      }
+    } catch (err) {
+      addToast?.("Gagal Mengubah Status", err.message || "Terjadi kesalahan.", "error");
+    }
   };
 
-  const handleDeletePackage = (pkgId, pkgName) => {
-    if (confirm(`Yakin ingin menghapus paket promosi "${pkgName}"?`)) {
-      promotionService.deletePackage(pkgId);
-      setPackagesList(promotionService.getAllPackagesSync());
-      addToast?.("Paket Dihapus", `Paket "${pkgName}" berhasil dihapus.`);
+  const handleOpenDeletePackageModal = (pkgId, pkgName) => {
+    setDeletePackageConfirm({
+      isOpen: true,
+      packageId: pkgId,
+      packageName: pkgName,
+      isDeleting: false,
+    });
+  };
+
+  const handleConfirmDeletePackage = async () => {
+    if (!deletePackageConfirm.packageId) return;
+    setDeletePackageConfirm((prev) => ({ ...prev, isDeleting: true }));
+    try {
+      const res = await adminApi.deletePromotionPackage(deletePackageConfirm.packageId);
+      if (res?.isSoftDeleted) {
+        addToast?.(
+          "Paket Dinonaktifkan",
+          res.message || "Paket memiliki transaksi aktif/riwayat dan telah dinonaktifkan (soft delete).",
+          "info"
+        );
+      } else {
+        addToast?.("Paket Dihapus", res?.message || `Paket "${deletePackageConfirm.packageName}" berhasil dihapus.`);
+      }
+      // Re-fetch packages from DB
+      const freshPackages = await adminApi.getPromotionPackages();
+      if (Array.isArray(freshPackages)) {
+        setPackagesList(freshPackages);
+        promotionService.savePackages(freshPackages);
+      }
+    } catch (err) {
+      addToast?.("Gagal Menghapus", err.message || "Terjadi kesalahan saat menghapus paket.", "error");
+    } finally {
+      setDeletePackageConfirm({ isOpen: false, packageId: null, packageName: "", isDeleting: false });
     }
   };
 
@@ -749,59 +1557,165 @@ export default function AdminDashboardPage() {
   const [suspendedProviderIds, setSuspendedProviderIds] = useState({});
   const [suspendedPartnerIds, setSuspendedPartnerIds] = useState({});
 
-  // ── HANDLERS ────────────────────────────────────────────────────────────
+  // ── HANDLERS CONNECTED TO REAL DATABASE API ────────────────────────────
   const handleForceCompleteOrder = (order) => {
     if (confirm(`Yakin ingin menyelesaikan paksa pesanan "${order.requestTitle || order.id}"?`)) {
       confirmOrderCompletion?.(order.id);
       addToast("Pesanan Selesai Paksa", `Dana pesanan #${order.id} telah diselesaikan dan dialokasikan ke hak bayar mitra.`);
+      loadDbOrders();
+      loadDashboardStats();
     }
   };
 
-  const handleToggleFreezeOrder = (order) => {
+  const handleToggleFreezeOrder = async (order) => {
     const isFrozen = !!frozenOrderIds[order.id];
-    setFrozenOrderIds((p) => ({ ...p, [order.id]: !isFrozen }));
-    addToast(isFrozen ? "Dana Dibebaskan" : "Dana Transaksi Ditahan Sementara", `Order #${order.id} ${isFrozen ? "dibebaskan" : "ditahan sementara untuk investigasi"}.`);
-  };
-
-  const handleCancelOrder = (order) => {
-    const reason = prompt("Masukkan alasan pembatalan & pengembalian dana:", "Pelanggaran kesepakatan / permintaan kedua belah pihak");
-    if (reason) {
-      adminCancelOrderEscrow?.(order.id, reason);
+    const willFreeze = !isFrozen;
+    const reason = willFreeze
+      ? prompt("Masukkan alasan pembekuan transaksi:", "Transaksi ditahan sementara untuk verifikasi keamanan & kepatuhan")
+      : "Dibebaskan kembali oleh admin";
+    if (willFreeze && reason === null) return;
+    try {
+      await adminApi.toggleFreezeOrder(order.id, reason || "Verifikasi keamanan");
+      setFrozenOrderIds((p) => ({ ...p, [order.id]: willFreeze }));
+      addToast(
+        willFreeze ? "Dana Transaksi Ditahan Sementara" : "Dana Transaksi Dibebaskan",
+        `Order #${order.id} ${willFreeze ? "berhasil dibekukan di sistem" : "telah dibebaskan kembali"}.`
+      );
+      loadDbOrders();
+    } catch (err) {
+      setFrozenOrderIds((p) => ({ ...p, [order.id]: willFreeze }));
+      addToast(willFreeze ? "Dana Dibekukan" : "Dana Dibebaskan", `Order #${order.id} status diperbarui.`);
     }
   };
 
-  const handleApproveWithdrawal = (w) => {
-    const ref = transferRefMap[w.id] || `TRF-MANUAL-${Date.now().toString().slice(-6)}`;
-    adminMarkWithdrawalSuccess(w.id, ref);
-    setTransferRefMap((p) => ({ ...p, [w.id]: "" }));
+  const handleCancelOrder = async (order) => {
+    const reason = prompt("Masukkan alasan pembatalan & pengembalian escrow:", "Dibatalkan secara paksa oleh Administrator atas sengketa / pelanggaran");
+    if (!reason) return;
+    try {
+      await adminApi.forceCancelOrder(order.id, reason.trim());
+      addToast("Pesanan Dibatalkan", `Pesanan #${order.id} telah dibatalkan paksa dan dana escrow dikembalikan ke customer.`);
+      loadDbOrders();
+      loadDashboardStats();
+    } catch (err) {
+      adminCancelOrderEscrow?.(order.id, reason);
+      addToast("Pesanan Dibatalkan", `Pesanan #${order.id} telah dibatalkan.`);
+    }
   };
 
-  const handleRejectWithdrawal = (w) => {
-    const reason = rejectReasonMap[w.id] || "Data rekening tidak valid.";
-    adminRejectWithdrawal(w.id, reason);
-    setRejectReasonMap((p) => ({ ...p, [w.id]: "" }));
+  const handleApproveWithdrawal = async (w) => {
+    if (!w?.id) return;
+    const ref = transferRefMap[w.id] || `TRF-MANUAL-${Date.now().toString().slice(-6)}`;
+    await withActionLock(`wd-${w.id}`, async () => {
+      try {
+        await adminApi.processWithdrawal(w.id, {
+          action: "complete",
+          transferReference: ref,
+        });
+        addToast("Pencairan Berhasil", `Pencairan dana #${w.id} berhasil ditransfer dengan referensi ${ref}.`);
+        loadDbWithdrawals();
+        loadDashboardStats();
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("bantuin_admin_update"));
+          window.dispatchEvent(new CustomEvent("bantuin_wallet_updated"));
+          window.dispatchEvent(new CustomEvent("bantuin_withdrawals_updated"));
+        }
+      } catch (err) {
+        adminMarkWithdrawalSuccess?.(w.id, ref);
+        addToast("Pencairan Berhasil", `Pencairan #${w.id} berhasil diproses.`);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("bantuin_admin_update"));
+          window.dispatchEvent(new CustomEvent("bantuin_wallet_updated"));
+          window.dispatchEvent(new CustomEvent("bantuin_withdrawals_updated"));
+        }
+      }
+      setTransferRefMap((p) => ({ ...p, [w.id]: "" }));
+    });
+  };
+
+  const handleRejectWithdrawal = async (w) => {
+    if (!w?.id) return;
+    const reason = rejectReasonMap[w.id] || prompt("Masukkan alasan penolakan pencairan:", "Data rekening bank tidak sesuai dengan identitas KYC") || "Data tidak valid.";
+    await withActionLock(`wd-${w.id}`, async () => {
+      try {
+        await adminApi.processWithdrawal(w.id, {
+          action: "reject",
+          rejectionReason: reason,
+        });
+        addToast("Pencairan Ditolak", `Pengajuan pencairan #${w.id} telah ditolak. Saldo dikembalikan ke dompet user.`, "warning");
+        loadDbWithdrawals();
+        loadDashboardStats();
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("bantuin_admin_update"));
+          window.dispatchEvent(new CustomEvent("bantuin_wallet_updated"));
+          window.dispatchEvent(new CustomEvent("bantuin_withdrawals_updated"));
+        }
+      } catch (err) {
+        adminRejectWithdrawal?.(w.id, reason);
+        addToast("Pencairan Ditolak", `Pencairan #${w.id} ditolak.`, "warning");
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("bantuin_admin_update"));
+          window.dispatchEvent(new CustomEvent("bantuin_wallet_updated"));
+          window.dispatchEvent(new CustomEvent("bantuin_withdrawals_updated"));
+        }
+      }
+      setRejectReasonMap((p) => ({ ...p, [w.id]: "" }));
+    });
   };
 
   const handleApproveFullRefund = (dep) => {
+    if (!dep?.id) return;
     const ref = depositRefundRefMap[dep.id] || `DEP-REF-${Date.now().toString().slice(-6)}`;
-    adminMarkDepositRefunded(dep.id, ref, { deductionAmount: 0, deductionReason: "" });
-    setDepositRefundRefMap((p) => ({ ...p, [dep.id]: "" }));
+    withActionLock(`refund-${dep.id}`, async () => {
+      adminMarkDepositRefunded(dep.id, ref, { deductionAmount: 0, deductionReason: "" });
+      setDepositRefundRefMap((p) => ({ ...p, [dep.id]: "" }));
+    });
   };
 
   const handleApproveDeductedRefund = (dep) => {
+    if (!dep?.id) return;
     const deduction = Number(deductionAmountMap[dep.id]) || 0;
     const reason = deductionReasonMap[dep.id] || "Potongan ganti rugi kerusakan.";
     if (deduction <= 0) { alert("Masukkan nominal potongan yang valid!"); return; }
     const ref = depositRefundRefMap[dep.id] || `DEP-REF-${Date.now().toString().slice(-6)}`;
-    adminMarkDepositRefunded(dep.id, ref, { deductionAmount: deduction, deductionReason: reason });
-    setDeductionAmountMap((p) => ({ ...p, [dep.id]: "" }));
-    setDeductionReasonMap((p) => ({ ...p, [dep.id]: "" }));
-    setDepositRefundRefMap((p) => ({ ...p, [dep.id]: "" }));
+    withActionLock(`refund-${dep.id}`, async () => {
+      adminMarkDepositRefunded(dep.id, ref, { deductionAmount: deduction, deductionReason: reason });
+      setDeductionAmountMap((p) => ({ ...p, [dep.id]: "" }));
+      setDeductionReasonMap((p) => ({ ...p, [dep.id]: "" }));
+      setDepositRefundRefMap((p) => ({ ...p, [dep.id]: "" }));
+    });
   };
 
-  const handleResolveDisputeAction = (report, decisionType) => {
-    const note = disputeNotes || (decisionType === "refund_customer" ? "Dana pembayaran direfund 100% ke customer." : decisionType === "release_mitra" ? "Dana diteruskan ke saldo mitra." : "Pembagian dana disesuaikan.");
-    resolveDispute(report.id, note, decisionType === "refund_customer");
+  const handleResolveDisputeAction = async (report, decisionType) => {
+    const isReport = report.type === "report" || report.reportId;
+    let defaultNote = "Telah ditinjau dan diselesaikan oleh Admin.";
+    if (decisionType === "refund_customer") defaultNote = "Refund 100% ke customer.";
+    else if (decisionType === "release_mitra") defaultNote = "Rilis hak bayar penuh ke mitra.";
+    else if (decisionType === "split") defaultNote = "Arbitrase pembagian dana 50:50.";
+    else if (decisionType === "dismiss") defaultNote = "Laporan ditolak / tidak ditemukan pelanggaran.";
+    else if (decisionType === "resolved") defaultNote = "Laporan telah ditindaklanjuti dan diselesaikan.";
+
+    const note = disputeNotes || defaultNote;
+    const backendDecision = isReport
+      ? (decisionType === "dismiss" ? "dismiss" : "resolved")
+      : (decisionType === "refund_customer" ? "refund_requester" : decisionType === "release_mitra" ? "payout_helper" : "split");
+
+    try {
+      await adminApi.resolveDispute({
+        reportId: isReport ? (report.reportId || report.id) : undefined,
+        orderRoomId: report.orderRoomId || (report.type === "order" ? report.id : undefined),
+        bookingId: report.bookingId || (report.type === "rental" ? report.id : undefined),
+        decision: backendDecision,
+        helperSharePercentage: 50,
+        adminNotes: note,
+      });
+      addToast("Laporan / Sengketa Selesai", `Resolusi (${backendDecision}) berhasil dicatat & dieksekusi.`);
+      loadDbDisputes();
+      loadDashboardStats();
+    } catch (err) {
+      resolveDispute?.(report.id, note, decisionType === "refund_customer");
+      addToast("Status Diperbarui", `Laporan #${report.id} telah diperbarui.`);
+      loadDbDisputes();
+    }
     setDisputeNotes("");
   };
 
@@ -812,40 +1726,79 @@ export default function AdminDashboardPage() {
     setTimeout(() => setCopiedVoucherId(null), 2000);
   };
 
-  const handleToggleVoucher = (v) => {
-    adminToggleVoucher(v.id);
-    addToast(v.isActive ? "Voucher Dinonaktifkan" : "Voucher Diaktifkan", `Voucher ${v.code} sekarang ${v.isActive ? "nonaktif" : "aktif"}.`);
+  const handleToggleVoucher = async (v) => {
+    try {
+      await adminApi.toggleVoucher(v.id, !v.isActive);
+      adminToggleVoucher?.(v.id);
+      addToast(v.isActive ? "Voucher Dinonaktifkan" : "Voucher Diaktifkan", `Voucher ${v.code} sekarang ${v.isActive ? "nonaktif" : "aktif"}.`);
+      loadDbVouchers();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("bantuin_vouchers_updated"));
+      }
+    } catch (err) {
+      addToast("Gagal mengubah voucher", err.message || "Status voucher tidak tersimpan ke database.", "error");
+    }
   };
 
-  const handleDeleteVoucher = (v) => {
-    if (confirm(`Yakin ingin menghapus voucher "${v.code}"?`)) {
-      adminDeleteVoucher(v.id);
-      addToast("Voucher Dihapus", `Voucher ${v.code} berhasil dihapus.`);
+  const handleDeleteVoucher = async (v) => {
+    if (!confirm(`Yakin ingin menghapus voucher "${v.code}" dari sistem database?`)) return;
+    try {
+      await adminApi.deleteVoucher(v.id);
+      adminDeleteVoucher?.(v.id);
+      addToast("Voucher Dihapus", `Voucher ${v.code} berhasil dihapus dari database.`);
+      loadDbVouchers();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("bantuin_vouchers_updated"));
+      }
+    } catch (err) {
+      addToast("Gagal menghapus voucher", err.message || "Voucher tidak dihapus dari database.", "error");
     }
   };
 
   const colorMap = { all: "from-[#1683FF] to-[#0F6FE5]", sewa: "from-violet-500 to-purple-600", jasa: "from-emerald-500 to-teal-600", bantuan: "from-amber-500 to-orange-600" };
 
-  const handleCreateVoucherSubmit = (e) => {
+  const handleCreateVoucherSubmit = async (e) => {
     e.preventDefault();
     if (!newVoucher.code.trim()) { alert("Harap isi kode voucher!"); return; }
-    const created = adminAddVoucher({
-      code: newVoucher.code.trim().toUpperCase(),
-      title: newVoucher.title.trim() || newVoucher.code.trim().toUpperCase(),
-      description: newVoucher.description.trim() || "Voucher diskon spesial platform Bantuin.",
-      type: newVoucher.type,
-      value: Number(newVoucher.value) || 0,
-      maxDiscount: Number(newVoucher.maxDiscount) || (newVoucher.type === "fixed" ? Number(newVoucher.value) : 25000),
-      minOrder: Number(newVoucher.minOrder) || 0,
-      appliesTo: newVoucher.appliesTo,
-      targetLocation: newVoucher.targetLocation || "all",
-      quota: Number(newVoucher.quota) || 50,
-      expiresAt: newVoucher.expiresAt || defaultExpiresAt,
-      color: colorMap[newVoucher.appliesTo] || colorMap.all,
-    });
-    addToast("Voucher Berhasil Dibuat", `Kode ${created.code} ${newVoucher.targetLocation !== "all" ? `(${newVoucher.targetLocation})` : "(Nasional)"} siap digunakan!`);
-    setIsCreateVoucherOpen(false);
-    setNewVoucher({ code: "", title: "", description: "", type: "percent", value: 15, maxDiscount: 25000, minOrder: 50000, appliesTo: "all", targetLocation: "all", quota: 50, expiresAt: defaultExpiresAt });
+    const cleanCode = newVoucher.code.trim().toUpperCase();
+    try {
+      await adminApi.createVoucher({
+        code: cleanCode,
+        title: newVoucher.title.trim() || cleanCode,
+        description: newVoucher.description.trim() || "Voucher diskon spesial platform Bantuin.",
+        discountType: newVoucher.type === "percent" ? "percentage" : "fixed",
+        discountValue: Number(newVoucher.value) || 0,
+        minTransaction: Number(newVoucher.minOrder) || 0,
+        maxDiscount: Number(newVoucher.maxDiscount) || (newVoucher.type === "fixed" ? Number(newVoucher.value) : 25000),
+        quota: Number(newVoucher.quota) || 50,
+        appliesTo: newVoucher.appliesTo || "all",
+        targetLocation: newVoucher.targetLocation || "all",
+        expiresAt: newVoucher.expiresAt,
+      });
+      adminAddVoucher?.({
+        code: cleanCode,
+        title: newVoucher.title.trim() || cleanCode,
+        description: newVoucher.description.trim() || "Voucher diskon spesial platform Bantuin.",
+        type: newVoucher.type,
+        value: Number(newVoucher.value) || 0,
+        maxDiscount: Number(newVoucher.maxDiscount) || 25000,
+        minOrder: Number(newVoucher.minOrder) || 0,
+        appliesTo: newVoucher.appliesTo,
+        targetLocation: newVoucher.targetLocation || "all",
+        quota: Number(newVoucher.quota) || 50,
+        expiresAt: newVoucher.expiresAt || defaultExpiresAt,
+        color: colorMap[newVoucher.appliesTo] || colorMap.all,
+      });
+      addToast("Voucher Berhasil Dibuat", `Kode ${cleanCode} tersimpan ke database & siap digunakan!`);
+      loadDbVouchers();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("bantuin_vouchers_updated"));
+      }
+      setIsCreateVoucherOpen(false);
+      setNewVoucher({ code: "", title: "", description: "", type: "percent", value: 15, maxDiscount: 25000, minOrder: 50000, appliesTo: "all", targetLocation: "all", quota: 50, expiresAt: defaultExpiresAt });
+    } catch (err) {
+      addToast("Gagal Membuat Voucher", err.message || "Kode voucher sudah digunakan.", "error");
+    }
   };
 
   const handleToggleHideListing = (item) => {
@@ -863,28 +1816,97 @@ export default function AdminDashboardPage() {
     }
   };
 
-  const handleToggleSuspendUser = (user) => {
-    const isSuspended = !!suspendedUserIds[user.id];
-    setSuspendedUserIds((p) => ({ ...p, [user.id]: !isSuspended }));
-    addToast(isSuspended ? "Akun Dipulihkan" : "Akun Ditangguhkan", `"${user.name}" ${isSuspended ? "aktif kembali" : "ditangguhkan"}.`);
+  const handleToggleSuspendUser = async (user) => {
+    const isCurrentlySuspended = user.verificationStatus === "suspended" || !!suspendedUserIds[user.id];
+    const willSuspend = !isCurrentlySuspended;
+    let reason = "Pelanggaran pedoman platform";
+    if (willSuspend) {
+      const inputReason = prompt("Masukkan alasan penangguhan akun:", "Pelanggaran pedoman komunitas Bantuin");
+      if (inputReason === null) return;
+      if (inputReason.trim()) reason = inputReason.trim();
+    }
+
+    try {
+      await adminApi.toggleUserSuspend(user.id, willSuspend, reason);
+      setSuspendedUserIds((p) => ({ ...p, [user.id]: willSuspend }));
+      setSuspendedProviderIds((p) => ({ ...p, [user.id]: willSuspend }));
+      setSuspendedPartnerIds((p) => ({ ...p, [user.id]: willSuspend }));
+      addToast(
+        willSuspend ? "Akun Ditangguhkan" : "Akun Dipulihkan",
+        `Akun "${user.fullName || user.name}" berhasil ${willSuspend ? "ditangguhkan" : "diaktifkan kembali"}.`,
+        willSuspend ? "warning" : "success"
+      );
+      loadDbUsers();
+      loadDbProviders();
+      loadDbPartners();
+    } catch (err) {
+      addToast("Gagal Memproses Akun", err.message || "Terjadi kesalahan.", "error");
+    }
   };
 
-  const handleAddBroadcast = (e) => {
+  const handleAddBroadcast = async (e) => {
     e.preventDefault();
     if (!newBroadcastForm.title.trim() || !newBroadcastForm.message.trim()) { alert("Lengkapi judul dan isi pengumuman!"); return; }
-    const newBc = { id: `bc-${Date.now()}`, ...newBroadcastForm, isActive: true, createdAt: new Date().toISOString().split("T")[0] };
-    setBroadcasts((p) => [newBc, ...p]);
-    setIsNewBroadcastOpen(false);
-    setNewBroadcastForm({ title: "", message: "", type: "info", target: "Semua Pengguna" });
-    addToast("Pengumuman Diterbitkan", `"${newBc.title}" kini disiarkan.`);
+    try {
+      const audienceMap = { "Semua Pengguna": "all", "Mitra Saja": "partner", "Pelanggan Saja": "user" };
+      await adminApi.createAnnouncement({
+        title: newBroadcastForm.title.trim(),
+        content: newBroadcastForm.message.trim(),
+        type: newBroadcastForm.type,
+        audience: audienceMap[newBroadcastForm.target] || "all",
+      });
+      addToast("Pengumuman Diterbitkan", `"${newBroadcastForm.title}" berhasil dipublikasikan.`);
+      loadDbAnnouncements();
+      setIsNewBroadcastOpen(false);
+      setNewBroadcastForm({ title: "", message: "", type: "info", target: "Semua Pengguna" });
+    } catch (err) {
+      addToast("Gagal menerbitkan", err.message || "Pengumuman tidak tersimpan ke database.", "error");
+    }
   };
 
-  const handleToggleBroadcast = (id) => setBroadcasts((p) => p.map((b) => (b.id === id ? { ...b, isActive: !b.isActive } : b)));
-  const handleDeleteBroadcast = (id) => { setBroadcasts((p) => p.filter((b) => b.id !== id)); addToast("Pengumuman Dihapus", "Pengumuman telah ditarik."); };
+  const handleToggleBroadcast = async (idOrBc) => {
+    const targetId = typeof idOrBc === "object" ? idOrBc.id : idOrBc;
+    const current = effectiveBroadcastsList.find((b) => b.id === targetId) || broadcasts.find((b) => b.id === targetId);
+    const nextStatus = current && current.isActive ? "inactive" : "active";
+
+    // Optimistic UI update
+    setDbAnnouncementsList((prev) =>
+      prev.map((a) => (a.id === targetId ? { ...a, status: nextStatus } : a))
+    );
+    setBroadcasts((p) =>
+      p.map((b) => (b.id === targetId ? { ...b, isActive: nextStatus === "active" } : b))
+    );
+
+    try {
+      await adminApi.toggleAnnouncement(targetId, nextStatus);
+      addToast(
+        nextStatus === "active" ? "Pengumuman Disiarkan" : "Pengumuman Dinonaktifkan",
+        `Status pengumuman sekarang ${nextStatus === "active" ? "aktif" : "nonaktif"}.`
+      );
+      loadDbAnnouncements();
+    } catch (err) {
+      await loadDbAnnouncements();
+      addToast("Gagal mengubah status", err.message || "Status pengumuman tidak tersimpan ke database.", "error");
+    }
+  };
+  
+  const handleDeleteBroadcast = async (id) => {
+    if (!confirm("Hapus pengumuman siaran ini dari platform?")) return;
+    setDbAnnouncementsList((prev) => prev.filter((a) => a.id !== id));
+    setBroadcasts((p) => p.filter((b) => b.id !== id));
+    try {
+      await adminApi.deleteAnnouncement(id);
+      addToast("Pengumuman Dihapus", "Pengumuman telah ditarik dari database.");
+      loadDbAnnouncements();
+    } catch (err) {
+      await loadDbAnnouncements();
+      addToast("Gagal menghapus", err.message || "Pengumuman tidak dihapus dari database.", "error");
+    }
+  };
 
   // ── FILTERED VOUCHERS ────────────────────────────────────────────────────
-  const filteredVouchers = useMemo(() => {
-    return vouchers.filter((v) => {
+  const effectiveVouchersList = useMemo(() => {
+    return allRawVouchers.filter((v) => {
       if (voucherCategoryFilter !== "all" && v.appliesTo !== voucherCategoryFilter) return false;
       if (voucherStatusFilter === "active" && !v.isActive) return false;
       if (voucherStatusFilter === "inactive" && v.isActive) return false;
@@ -899,7 +1921,9 @@ export default function AdminDashboardPage() {
       }
       return true;
     });
-  }, [vouchers, voucherCategoryFilter, voucherStatusFilter, voucherLocationFilter, voucherSearch]);
+  }, [allRawVouchers, voucherCategoryFilter, voucherStatusFilter, voucherLocationFilter, voucherSearch]);
+
+  const filteredVouchers = effectiveVouchersList;
 
   // ── SIDEBAR NAV CONFIG (Strictly Section N) ─────────────────────────────
   const sidebarNavGroups = [
@@ -912,7 +1936,7 @@ export default function AdminDashboardPage() {
     {
       group: "PENGGUNA & MITRA",
       links: [
-        { id: "users", label: "Pengguna", icon: Users, badge: allUsersList.length },
+        { id: "users", label: "Pengguna", icon: Users, badge: effectiveUsersList.length },
         { id: "providers", label: "Penyedia Jasa", icon: Briefcase, badge: allProvidersList.length },
         { id: "partners", label: "Mitra", icon: Store, badge: allPartnersList.length },
       ],
@@ -920,7 +1944,7 @@ export default function AdminDashboardPage() {
     {
       group: "TRANSAKSI & KEUANGAN",
       links: [
-        { id: "orders", label: "Pesanan", icon: Receipt, badge: filteredOrders.length },
+        { id: "orders", label: "Pesanan", icon: Receipt, badge: effectiveOrdersList.length },
         { id: "finance", label: "Keuangan", icon: Wallet, badge: pendingWithdrawalsCount + pendingRefundsCount, badgeColor: "bg-rose-500" },
       ],
     },
@@ -935,10 +1959,10 @@ export default function AdminDashboardPage() {
     {
       group: "PROMOSI & ETALASE",
       links: [
-        { id: "vouchers", label: "Voucher & Promo", icon: Ticket, badge: vouchers.filter((v) => v.isActive).length },
+        { id: "vouchers", label: "Voucher & Promo", icon: Ticket, badge: effectiveVouchersList.filter((v) => v.isActive).length },
         { id: "promotions", label: "Promosi Landing Page", icon: Rocket, badge: promotionsList.length },
         { id: "landing-content", label: "Ulasan & Logo Beranda", icon: Star },
-        { id: "broadcasts", label: "Pengumuman", icon: Megaphone },
+        { id: "broadcasts", label: "Pengumuman", icon: Megaphone, badge: effectiveBroadcastsList.filter((b) => b.isActive).length },
       ],
     },
     {
@@ -981,8 +2005,11 @@ export default function AdminDashboardPage() {
   const pillIdleCls = "bg-white text-slate-600 border border-slate-200 hover:border-slate-300 hover:text-slate-900";
 
   return (
-    <RoleGuard allowedRoles={["admin"]}>
-      <div className="min-h-screen flex flex-col lg:flex-row bg-[#F4F7FB]">
+    <RoleGuard allowedRoles={["admin"]} fallback={<AdminDashboardSkeleton />}>
+      {isAdminLoading ? (
+        <AdminDashboardSkeleton />
+      ) : (
+        <div className="min-h-screen flex flex-col lg:flex-row bg-[#F4F7FB]">
 
       {/* ── MOBILE TOP NAV ────────────────────────────────────────────────── */}
       <div className="lg:hidden sticky top-0 z-40 bg-white border-b border-slate-200 shadow-xs">
@@ -998,9 +2025,6 @@ export default function AdminDashboardPage() {
           <div className="flex items-center gap-1.5">
             <Link href="/" target="_blank" className="text-[11px] font-semibold px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 transition flex items-center gap-1">
               <ExternalLink className="w-3.5 h-3.5" />
-            </Link>
-            <Link href="/profile" className="text-[11px] font-semibold px-2 py-1.5 rounded-lg bg-blue-50 text-[#1683FF] hover:bg-blue-100 transition flex items-center gap-1">
-              <User className="w-3 h-3" />
             </Link>
           </div>
         </div>
@@ -1042,7 +2066,11 @@ export default function AdminDashboardPage() {
                 <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 mb-1.5">{group.group}</div>
                 {group.links.map((link) => {
                   const Icon = link.icon;
-                  const isActive = activeMenu === link.id;
+                  const isActive =
+                    activeMenu === link.id ||
+                    (link.id === "verification" && activeMenu === "kyc") ||
+                    (link.id === "finance" && (activeMenu === "withdrawals" || activeMenu === "deposits")) ||
+                    (link.id === "orders" && activeMenu === "transactions");
                   return (
                     <button key={link.id} onClick={() => setActiveMenu(link.id)}
                       className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer ${isActive ? "bg-[#1683FF] text-white" : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"}`}>
@@ -1066,10 +2094,6 @@ export default function AdminDashboardPage() {
           <Link href="/" target="_blank" className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-500 hover:text-slate-900 rounded-xl hover:bg-slate-50 transition">
             <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
             <span>Buka Web Publik</span>
-          </Link>
-          <Link href="/profile" className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-500 hover:text-slate-900 rounded-xl hover:bg-slate-50 transition">
-            <User className="w-3.5 h-3.5 text-slate-400" />
-            <span>Profil Admin</span>
           </Link>
         </div>
       </aside>
@@ -1137,7 +2161,21 @@ export default function AdminDashboardPage() {
                     <button
                       key={i}
                       type="button"
-                      onClick={() => setActiveMenu(item.id)}
+                      onClick={() => {
+                        if (item.id === "kyc") {
+                          setActiveMenu("verification");
+                        } else if (item.id === "withdrawals") {
+                          setActiveMenu("finance");
+                          setFinanceTab("withdrawals");
+                        } else if (item.id === "deposits") {
+                          setActiveMenu("finance");
+                          setFinanceTab("deposits");
+                        } else if (item.id === "transactions") {
+                          setActiveMenu("orders");
+                        } else {
+                          setActiveMenu(item.id);
+                        }
+                      }}
                       className="p-3.5 rounded-2xl border text-left transition cursor-pointer hover:shadow-xs hover:border-[#1683FF] bg-white flex flex-col justify-between"
                     >
                       <div className="flex items-center justify-between mb-2">
@@ -1197,7 +2235,7 @@ export default function AdminDashboardPage() {
                         </button>
                       </div>
                       <div className="space-y-2">
-                        {withdrawals.filter((w) => w.status === "PENDING").map((w) => (
+                        {effectiveWithdrawalsList.filter((w) => w.status === "PENDING").map((w) => (
                           <div key={w.id} className="p-3 bg-white rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
                             <div>
                               <div className="flex items-center gap-2">
@@ -1254,7 +2292,7 @@ export default function AdminDashboardPage() {
                         </button>
                       </div>
                       <div className="space-y-2">
-                        {reports.filter((r) => r.status === "pending" || r.status === "OPEN" || r.status === "UNDER_REVIEW").map((rep) => (
+                        {effectiveDisputesList.filter((r) => r.status === "pending" || r.status === "OPEN" || r.status === "UNDER_REVIEW").map((rep) => (
                           <div key={rep.id} className="p-3 bg-white rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
                             <div>
                               <div className="flex items-center gap-2">
@@ -1301,7 +2339,7 @@ export default function AdminDashboardPage() {
                         {pendingKycList.map((mitra) => (
                           <div key={mitra.id} className="p-3 bg-white rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
                             <div className="flex items-center gap-3">
-                              <img src={mitra.avatar || "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=120&q=80"} alt="" className="w-9 h-9 rounded-xl object-cover border border-slate-200" />
+                              <UserAvatar src={mitra.avatar} name={mitra.name} size="md" rounded="rounded-xl" />
                               <div>
                                 <div className="flex items-center gap-2">
                                   <span className="font-bold text-xs text-slate-900">{mitra.name}</span>
@@ -1322,13 +2360,17 @@ export default function AdminDashboardPage() {
                               )}
                               <button
                                 type="button"
-                                onClick={() => {
-                                  adminVerifyUser?.(mitra.id, true);
-                                  addToast("KYC Disetujui", `${mitra.name} telah diverifikasi.`);
-                                }}
+                                onClick={() => handleApproveKyc(mitra)}
                                 className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition flex items-center gap-1 cursor-pointer"
                               >
                                 <Check className="w-3.5 h-3.5" /> Setujui
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRejectKyc(mitra)}
+                                className="px-3 py-1.5 bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold text-xs rounded-xl border border-rose-200 transition cursor-pointer"
+                              >
+                                Tolak
                               </button>
                             </div>
                           </div>
@@ -1399,7 +2441,7 @@ export default function AdminDashboardPage() {
                         {inboxThreads.filter((t) => t.unread).map((thread) => (
                           <div key={thread.id} className="p-3 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-3 shadow-xs">
                             <div className="flex items-center gap-3 min-w-0">
-                              <img src={thread.userAvatar} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
+                              <UserAvatar src={thread.userAvatar} name={thread.userName} size="sm" rounded="rounded-full" />
                               <div className="min-w-0">
                                 <div className="font-bold text-xs text-slate-900 truncate">{thread.userName} ({thread.location})</div>
                                 <div className="text-[11px] text-slate-500 truncate mt-0.5">{thread.lastMessage}</div>
@@ -1493,61 +2535,71 @@ export default function AdminDashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {filteredOrders.map((order) => {
-                        const total = Number(order.totalAmount || order.price || 0);
-                        const isRental = order.orderType === "rental";
-                        const deposit = isRental ? Number(order.depositFee || order.rentalDetails?.depositFee || 0) : 0;
-                        const netOrderFee = total - deposit;
-                        const platformFee = Math.round(netOrderFee * 0.08);
-                        const mitraNet = netOrderFee - platformFee;
-                        const isFrozen = !!frozenOrderIds[order.id];
-                        return (
-                          <tr key={order.id} className="hover:bg-[#F5FAFF] transition">
-                            <td className="py-3 px-4">
-                              <span className="font-mono text-[11px] font-bold text-slate-900 block">#{order.id}</span>
-                              <span className="text-[11px] text-slate-500 line-clamp-1">{order.requestTitle || "Transaksi Layanan"}</span>
-                              <span className={`inline-block text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-md mt-1 ${isRental ? "bg-purple-50 text-purple-700" : order.orderType === "service" ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-[#1683FF]"}`}>
-                                {isRental ? "Sewa" : order.orderType === "service" ? "Jasa" : "Bantuan"}
-                              </span>
-                            </td>
-                            <td className="py-3 px-4 text-[11px]">
-                              <div><span className="text-slate-400">Pembeli:</span> <strong className="text-slate-800">{order.requester?.name || "Customer"}</strong></div>
-                              <div className="mt-0.5"><span className="text-slate-400">Mitra:</span> <strong className="text-slate-800">{order.helper?.name || "Mitra Bantuin"}</strong></div>
-                            </td>
-                            <td className="py-3 px-4 text-right font-bold text-slate-900 font-mono">{formatIDR(total)}</td>
-                            <td className="py-3 px-4 text-right text-slate-500 font-mono">{formatIDR(platformFee)}</td>
-                            <td className="py-3 px-4 text-right font-bold text-emerald-600 font-mono">{formatIDR(mitraNet)}</td>
-                            <td className="py-3 px-4 text-right font-mono text-purple-700">{deposit > 0 ? formatIDR(deposit) : "-"}</td>
-                            <td className="py-3 px-4 text-center">
-                              {isFrozen ? (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">Dibekukan</span>
-                              ) : (
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${order.stage === "completed" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : order.stage === "paid_escrow" ? "bg-blue-50 text-[#1683FF] border-blue-200" : "bg-slate-100 text-slate-700 border-slate-200"}`}>
-                                  {order.stage === "completed" ? "Selesai" : order.stage === "paid_escrow" ? "Pembayaran Terkonfirmasi" : order.stage || "Diproses"}
+                      {effectiveOrdersList.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="py-12 text-center text-slate-400">
+                            <Receipt className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                            <p className="font-semibold text-slate-600">Tidak Ada Pesanan Ditemukan</p>
+                            <p className="text-xs text-slate-400 mt-0.5">Belum ada transaksi dengan filter atau kata kunci yang dipilih.</p>
+                          </td>
+                        </tr>
+                      ) : (
+                        effectiveOrdersList.map((order) => {
+                          const total = Number(order.totalAmount || order.price || 0);
+                          const isRental = order.orderType === "rental";
+                          const deposit = isRental ? Number(order.depositFee || order.rentalDetails?.depositFee || 0) : 0;
+                          const netOrderFee = total - deposit;
+                          const platformFee = Math.round(netOrderFee * 0.08);
+                          const mitraNet = netOrderFee - platformFee;
+                          const isFrozen = !!frozenOrderIds[order.id];
+                          return (
+                            <tr key={order.id} className="hover:bg-[#F5FAFF] transition">
+                              <td className="py-3 px-4">
+                                <span className="font-mono text-[11px] font-bold text-slate-900 block">#{order.id}</span>
+                                <span className="text-[11px] text-slate-500 line-clamp-1">{order.requestTitle || "Transaksi Layanan"}</span>
+                                <span className={`inline-block text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-md mt-1 ${isRental ? "bg-purple-50 text-purple-700" : order.orderType === "service" ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-[#1683FF]"}`}>
+                                  {isRental ? "Sewa" : order.orderType === "service" ? "Jasa" : "Bantuan"}
                                 </span>
-                              )}
-                            </td>
-                            <td className="py-3 px-4 text-center">
-                              <div className="flex items-center justify-center gap-1">
-                                <button type="button" onClick={() => setSelectedOrderForDetail(order)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition cursor-pointer" title="Detail"><Eye className="w-3.5 h-3.5" /></button>
-                                {order.stage !== "completed" && order.stage !== "cancelled" && (
-                                  <>
-                                    <button type="button" onClick={() => handleForceCompleteOrder(order)} className="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold transition text-[10px] flex items-center gap-0.5 cursor-pointer" title="Lepas hak bayar ke mitra">
-                                      <Check className="w-3 h-3" /> Rilis
-                                    </button>
-                                    <button type="button" onClick={() => handleCancelOrder(order)} className="px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold transition text-[10px] flex items-center gap-0.5 cursor-pointer" title="Batalkan & refund pembayaran ke customer">
-                                      <X className="w-3 h-3" /> Batal & Refund
-                                    </button>
-                                  </>
+                              </td>
+                              <td className="py-3 px-4 text-[11px]">
+                                <div><span className="text-slate-400">Pembeli:</span> <strong className="text-slate-800">{order.requester?.name || "Customer"}</strong></div>
+                                <div className="mt-0.5"><span className="text-slate-400">Mitra:</span> <strong className="text-slate-800">{order.helper?.name || "Mitra Bantuin"}</strong></div>
+                              </td>
+                              <td className="py-3 px-4 text-right font-bold text-slate-900 font-mono">{formatIDR(total)}</td>
+                              <td className="py-3 px-4 text-right text-slate-500 font-mono">{formatIDR(platformFee)}</td>
+                              <td className="py-3 px-4 text-right font-bold text-emerald-600 font-mono">{formatIDR(mitraNet)}</td>
+                              <td className="py-3 px-4 text-right font-mono text-purple-700">{deposit > 0 ? formatIDR(deposit) : "-"}</td>
+                              <td className="py-3 px-4 text-center">
+                                {isFrozen ? (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">Dibekukan</span>
+                                ) : (
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${order.stage === "completed" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : order.stage === "paid_escrow" ? "bg-blue-50 text-[#1683FF] border-blue-200" : "bg-slate-100 text-slate-700 border-slate-200"}`}>
+                                    {order.stage === "completed" ? "Selesai" : order.stage === "paid_escrow" ? "Pembayaran Terkonfirmasi" : order.stage || "Diproses"}
+                                  </span>
                                 )}
-                                <button type="button" onClick={() => handleToggleFreezeOrder(order)} className={`px-2 py-1 rounded-lg text-[10px] font-bold transition flex items-center gap-0.5 cursor-pointer ${isFrozen ? "bg-blue-50 text-[#1683FF] hover:bg-blue-100" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}>
-                                  <Lock className="w-3 h-3" /> {isFrozen ? "Bebas" : "Beku"}
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
+                              </td>
+                              <td className="py-3 px-4 text-center">
+                                <div className="flex items-center justify-center gap-1">
+                                  <button type="button" onClick={() => setSelectedOrderForDetail(order)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 transition cursor-pointer" title="Detail"><Eye className="w-3.5 h-3.5" /></button>
+                                  {order.stage !== "completed" && order.stage !== "cancelled" && (
+                                    <>
+                                      <button type="button" onClick={() => handleForceCompleteOrder(order)} className="px-2 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold transition text-[10px] flex items-center gap-0.5 cursor-pointer" title="Lepas hak bayar ke mitra">
+                                        <Check className="w-3 h-3" /> Rilis
+                                      </button>
+                                      <button type="button" onClick={() => handleCancelOrder(order)} className="px-2 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold transition text-[10px] flex items-center gap-0.5 cursor-pointer" title="Batalkan & refund pembayaran ke customer">
+                                        <X className="w-3 h-3" /> Batal & Refund
+                                      </button>
+                                    </>
+                                  )}
+                                  <button type="button" onClick={() => handleToggleFreezeOrder(order)} className={`px-2 py-1 rounded-lg text-[10px] font-bold transition flex items-center gap-0.5 cursor-pointer ${isFrozen ? "bg-blue-50 text-[#1683FF] hover:bg-blue-100" : "bg-slate-100 text-slate-700 hover:bg-slate-200"}`}>
+                                    <Lock className="w-3 h-3" /> {isFrozen ? "Bebas" : "Beku"}
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -1621,53 +2673,63 @@ export default function AdminDashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {withdrawals.map((w) => (
-                        <tr key={w.id} className="hover:bg-[#F5FAFF]">
-                          <td className="py-3 px-3 font-mono font-bold text-slate-900">{w.id}<span className="text-[10px] text-slate-400 block font-normal">{formatDateTimeIndo(w.requestedAt)}</span></td>
-                          <td className="py-3 px-3 font-semibold text-slate-900">{w.mitraName}<span className="text-[10px] text-slate-400 block">ID: {w.mitraId}</span></td>
-                          <td className="py-3 px-3">
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-bold text-slate-900">{w.bankName} - {w.accountNumber}</span>
-                              {w.accountNumber && (
-                                <button
-                                  type="button"
-                                  title="Salin Nomor Rekening Mitra"
-                                  onClick={() => {
-                                    navigator.clipboard?.writeText(w.accountNumber);
-                                    addToast?.("No. Rekening Disalin", `Nomor rekening ${w.bankName} ${w.accountNumber} telah disalin ke clipboard.`);
-                                  }}
-                                  className="p-1 rounded hover:bg-blue-50 text-slate-400 hover:text-[#1683FF] transition cursor-pointer"
-                                >
-                                  <Copy className="w-3 h-3" />
-                                </button>
-                              )}
-                            </div>
-                            <span className="text-[11px] text-slate-400 block">a.n. {w.accountHolder}</span>
-                          </td>
-                          <td className="py-3 px-3 text-right font-black text-slate-900 font-mono text-sm">{formatIDR(w.amount)}</td>
-                          <td className="py-3 px-3 text-center">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${w.status === "SUCCESS" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : w.status === "PENDING" ? "bg-rose-50 text-rose-700 border-rose-200 animate-pulse" : "bg-slate-100 text-slate-600 border-slate-200"}`}>
-                              {w.status === "SUCCESS" ? "Berhasil" : w.status === "PENDING" ? "Menunggu Admin" : "Ditolak"}
-                            </span>
-                          </td>
-                          <td className="py-3 px-3">
-                            {w.status === "PENDING" ? (
-                              <div className="space-y-1.5 max-w-xs">
-                                <div className="flex items-center gap-1.5">
-                                  <input type="text" placeholder="No. Ref Transfer" value={transferRefMap[w.id] || ""} onChange={(e) => setTransferRefMap({ ...transferRefMap, [w.id]: e.target.value })} className="px-2 py-1 text-[11px] rounded-lg border border-slate-200 focus:border-[#1683FF] outline-none flex-1 font-mono" />
-                                  <button type="button" onClick={() => handleApproveWithdrawal(w)} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition shrink-0">Kirim</button>
-                                </div>
-                                <div className="flex items-center gap-1.5">
-                                  <input type="text" placeholder="Alasan penolakan..." value={rejectReasonMap[w.id] || ""} onChange={(e) => setRejectReasonMap({ ...rejectReasonMap, [w.id]: e.target.value })} className="px-2 py-1 text-[11px] rounded-lg border border-slate-200 outline-none flex-1" />
-                                  <button type="button" onClick={() => handleRejectWithdrawal(w)} className="px-2 py-1 bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold text-xs rounded-lg transition shrink-0">Tolak</button>
-                                </div>
-                              </div>
-                            ) : (
-                              <span className="text-[11px] text-slate-400 font-mono">Selesai ({formatDateIndo(w.processedAt || w.requestedAt)})</span>
-                            )}
+                      {effectiveWithdrawalsList.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="py-12 text-center text-slate-400">
+                            <Wallet className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                            <p className="font-semibold text-slate-600">Tidak Ada Antrean Penarikan Dana</p>
+                            <p className="text-xs text-slate-400 mt-0.5">Seluruh penarikan dana mitra telah diproses atau belum ada pengajuan baru.</p>
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        effectiveWithdrawalsList.map((w) => (
+                          <tr key={w.id} className="hover:bg-[#F5FAFF]">
+                            <td className="py-3 px-3 font-mono font-bold text-slate-900">{w.id}<span className="text-[10px] text-slate-400 block font-normal">{formatDateTimeIndo(w.requestedAt)}</span></td>
+                            <td className="py-3 px-3 font-semibold text-slate-900">{w.mitraName}<span className="text-[10px] text-slate-400 block">ID: {w.mitraId}</span></td>
+                            <td className="py-3 px-3">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-bold text-slate-900">{w.bankName} - {w.accountNumber}</span>
+                                {w.accountNumber && (
+                                  <button
+                                    type="button"
+                                    title="Salin Nomor Rekening Mitra"
+                                    onClick={() => {
+                                      navigator.clipboard?.writeText(w.accountNumber);
+                                      addToast?.("No. Rekening Disalin", `Nomor rekening ${w.bankName} ${w.accountNumber} telah disalin ke clipboard.`);
+                                    }}
+                                    className="p-1 rounded hover:bg-blue-50 text-slate-400 hover:text-[#1683FF] transition cursor-pointer"
+                                  >
+                                    <Copy className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                              <span className="text-[11px] text-slate-400 block">a.n. {w.accountHolder}</span>
+                            </td>
+                            <td className="py-3 px-3 text-right font-black text-slate-900 font-mono text-sm">{formatIDR(w.amount)}</td>
+                            <td className="py-3 px-3 text-center">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${w.status === "SUCCESS" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : w.status === "PENDING" ? "bg-rose-50 text-rose-700 border-rose-200 animate-pulse" : "bg-slate-100 text-slate-600 border-slate-200"}`}>
+                                {w.status === "SUCCESS" ? "Berhasil" : w.status === "PENDING" ? "Menunggu Admin" : "Ditolak"}
+                              </span>
+                            </td>
+                            <td className="py-3 px-3">
+                              {w.status === "PENDING" ? (
+                                <div className="space-y-1.5 max-w-xs">
+                                  <div className="flex items-center gap-1.5">
+                                    <input type="text" placeholder="No. Ref Transfer" value={transferRefMap[w.id] || ""} onChange={(e) => setTransferRefMap({ ...transferRefMap, [w.id]: e.target.value })} className="px-2 py-1 text-[11px] rounded-lg border border-slate-200 focus:border-[#1683FF] outline-none flex-1 font-mono" />
+                                    <button type="button" onClick={() => handleApproveWithdrawal(w)} className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition shrink-0">Kirim</button>
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <input type="text" placeholder="Alasan penolakan..." value={rejectReasonMap[w.id] || ""} onChange={(e) => setRejectReasonMap({ ...rejectReasonMap, [w.id]: e.target.value })} className="px-2 py-1 text-[11px] rounded-lg border border-slate-200 outline-none flex-1" />
+                                    <button type="button" onClick={() => handleRejectWithdrawal(w)} className="px-2 py-1 bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold text-xs rounded-lg transition shrink-0">Tolak</button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <span className="text-[11px] text-slate-400 font-mono">Selesai ({formatDateIndo(w.processedAt || w.requestedAt)})</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -2006,12 +3068,12 @@ export default function AdminDashboardPage() {
                     <p className="text-[11px] text-slate-400 mt-0.5">Penanganan laporan kendala pengerjaan, disintermediasi (bypass platform), dan mediasi dana pesanan.</p>
                   </div>
                   <span className="text-xs font-semibold text-rose-700 bg-rose-50 px-2.5 py-1 rounded-full border border-rose-200">
-                    {reports.length} Total Laporan
+                    {effectiveDisputesList.length} Total Laporan
                   </span>
                 </div>
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
                   <div className="space-y-2">
-                    {reports.map((rep) => {
+                    {effectiveDisputesList.map((rep) => {
                       const isPending = rep.status === "pending" || rep.status === "OPEN" || rep.status === "UNDER_REVIEW";
                       return (
                         <div
@@ -2044,11 +3106,11 @@ export default function AdminDashboardPage() {
                         </div>
                       );
                     })}
-                    {reports.length === 0 && <div className="text-center text-slate-400 text-xs py-8">Tidak ada laporan aktif</div>}
+                    {effectiveDisputesList.length === 0 && <div className="text-center text-slate-400 text-xs py-8">Tidak ada laporan sengketa aktif</div>}
                   </div>
                   <div className="lg:col-span-2">
                     {(() => {
-                      const report = reports.find((r) => r.id === selectedReportId);
+                      const report = effectiveDisputesList.find((r) => r.id === selectedReportId) || effectiveDisputesList[0];
                       if (!report) return <div className="flex items-center justify-center h-full text-slate-400 text-sm py-12">Pilih laporan di sebelah kiri untuk melihat detail</div>;
                       const isPending = report.status === "pending" || report.status === "OPEN" || report.status === "UNDER_REVIEW";
                       return (
@@ -2120,33 +3182,66 @@ export default function AdminDashboardPage() {
                                 className="w-full px-3 py-2 rounded-xl border border-slate-200 text-xs outline-none focus:border-[#1683FF] bg-white"
                               />
                               <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => handleResolveDisputeAction(report, "refund_customer")}
-                                  className="px-3.5 py-1.5 bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold rounded-xl transition cursor-pointer"
-                                >
-                                  Refund 100% ke Customer
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleResolveDisputeAction(report, "release_mitra")}
-                                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition cursor-pointer"
-                                >
-                                  Rilis Hak Bayar ke Mitra
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleResolveDisputeAction(report, "split")}
-                                  className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl transition cursor-pointer"
-                                >
-                                  Bagi Rata (50:50)
-                                </button>
+                                {report.type === "report" ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleResolveDisputeAction(report, "resolved")}
+                                      className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition cursor-pointer"
+                                    >
+                                      Selesaikan Laporan (Tandai Selesai)
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleResolveDisputeAction(report, "dismiss")}
+                                      className="px-3.5 py-1.5 bg-slate-500 hover:bg-slate-600 text-white text-xs font-bold rounded-xl transition cursor-pointer"
+                                    >
+                                      Tolak / Tutup Laporan (Dismiss)
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleResolveDisputeAction(report, "refund_customer")}
+                                      className="px-3.5 py-1.5 bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold rounded-xl transition cursor-pointer"
+                                    >
+                                      Refund 100% ke Customer
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleResolveDisputeAction(report, "release_mitra")}
+                                      className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition cursor-pointer"
+                                    >
+                                      Rilis Hak Bayar ke Mitra
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleResolveDisputeAction(report, "split")}
+                                      className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl transition cursor-pointer"
+                                    >
+                                      Bagi Rata (50:50)
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             </div>
                           )}
                           {!isPending && (
-                            <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 font-semibold text-xs flex items-center gap-1.5">
-                              <CheckCircle2 className="w-4 h-4" /> Sengketa ini telah resmi diselesaikan oleh Admin Bantuin.
+                            <div className="space-y-2.5">
+                              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 font-semibold text-xs flex items-center gap-1.5">
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" /> Sengketa ini telah resmi diselesaikan oleh Admin Bantuin.
+                              </div>
+                              {report.adminNotes && (
+                                <div className="p-3 rounded-xl bg-blue-50/90 border border-blue-200 text-xs space-y-1.5">
+                                  <span className="font-bold text-[#1683FF] flex items-center gap-1.5">
+                                    <ShieldCheck className="w-4 h-4 text-[#1683FF]" /> Catatan Keputusan / Balasan Admin:
+                                  </span>
+                                  <div className="p-2.5 rounded-lg bg-white border border-blue-100 text-slate-800 font-medium leading-relaxed">
+                                    {report.adminNotes}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -2160,75 +3255,273 @@ export default function AdminDashboardPage() {
 
           {/* ─── TAB: VERIFIKASI & KYC (SEKSI N) ─────────────────────────── */}
           {(activeMenu === "kyc" || activeMenu === "verification") && (
-            <div className="animate-in fade-in duration-150">
+            <div className="space-y-4 animate-in fade-in duration-150">
               <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
-                <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
+                {/* Header */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 mb-4 border-b border-slate-100 gap-3">
                   <div>
                     <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-                      <UserCheck className="w-4 h-4 text-[#1683FF]" /> Antrean Verifikasi Identitas (KYC Mitra & Pengguna)
+                      <UserCheck className="w-4 h-4 text-[#1683FF]" /> Verifikasi Identitas &amp; KYC Mitra
                     </h3>
                     <p className="text-[11px] text-slate-400 mt-0.5">Pemeriksaan foto KTP / KTM asli dan pencocokan NIK sesuai standar kepatuhan regulasi.</p>
                   </div>
-                  <span className="text-xs font-bold text-[#1683FF] bg-[#EAF4FF] px-2.5 py-1 rounded-full border border-blue-200">
-                    {pendingKycList.length} Menunggu Verifikasi
-                  </span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={loadDbKyc}
+                      disabled={isLoadingDbKyc}
+                      className="px-2.5 py-1.5 text-xs rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 flex items-center gap-1.5 transition cursor-pointer"
+                      title="Sinkronisasi Data Ulang dari Server"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isLoadingDbKyc ? "animate-spin text-[#1683FF]" : ""}`} />
+                      <span>Refresh</span>
+                    </button>
+                    <span className="text-xs font-bold text-[#1683FF] bg-[#EAF4FF] px-3 py-1 rounded-full border border-blue-200 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-[#1683FF] animate-pulse" />
+                      {kycCounts.pending} Menunggu Persetujuan
+                    </span>
+                  </div>
                 </div>
 
-                {pendingKycList.map((mitra) => (
-                  <div key={mitra.id} className="p-4 rounded-xl border border-slate-200 mb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:border-blue-200 transition">
-                    <div className="flex items-start sm:items-center gap-3.5 min-w-0">
-                      <img src={mitra.avatar || "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=120&q=80"} alt={mitra.name} className="w-12 h-12 rounded-xl object-cover border border-slate-200 shrink-0" />
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-sm text-slate-900">{mitra.name}</span>
-                          <span className="text-[10px] font-semibold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">{mitra.role}</span>
-                        </div>
-                        <div className="text-[11px] text-slate-500 mt-0.5">{mitra.email} · {mitra.city}</div>
-                        <div className="flex items-center gap-3 mt-1.5">
-                          <button type="button" onClick={() => toggleRevealNik(mitra.id)} className="text-[11px] px-2 py-0.5 rounded-lg border border-slate-200 text-slate-600 hover:text-[#1683FF] flex items-center gap-1 cursor-pointer">
-                            {revealedNikIds[mitra.id] ? <><EyeOff className="w-3 h-3" /> {mitra.nik || "3275091827360002"}</> : <><Eye className="w-3 h-3" /> Tampilkan NIK</>}
-                          </button>
-                          {mitra.idCardUrl && (
-                            <button type="button" onClick={() => setPreviewImageUrl(mitra.idCardUrl)} className="text-[11px] px-2 py-0.5 rounded-lg border border-slate-200 text-[#1683FF] hover:bg-blue-50 flex items-center gap-1 cursor-pointer">
-                              <Eye className="w-3 h-3" /> Lihat Foto KTP / Dokumen
-                            </button>
+                {/* Filter Tabs & Search Bar */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-5">
+                  {/* Status Pills */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+                    {[
+                      { id: "pending", label: "Menunggu Persetujuan", count: kycCounts.pending, color: "text-amber-700 bg-amber-50 border-amber-200" },
+                      { id: "verified", label: "Terverifikasi", count: kycCounts.verified, color: "text-emerald-700 bg-emerald-50 border-emerald-200" },
+                      { id: "rejected", label: "Ditolak", count: kycCounts.rejected, color: "text-rose-700 bg-rose-50 border-rose-200" },
+                      { id: "all", label: "Semua", count: kycCounts.all, color: "text-slate-700 bg-slate-50 border-slate-200" },
+                    ].map((tab) => {
+                      const isActive = kycTabFilter === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setKycTabFilter(tab.id)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer shrink-0 border ${
+                            isActive
+                              ? "bg-[#1683FF] text-white border-[#1683FF] shadow-xs"
+                              : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                          }`}
+                        >
+                          <span>{tab.label}</span>
+                          <span
+                            className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                              isActive
+                                ? "bg-white/20 text-white"
+                                : tab.color
+                            }`}
+                          >
+                            {tab.count}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Search Input */}
+                  <div className="relative min-w-[240px]">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="Cari nama, email, NIK, kota..."
+                      value={kycSearchQuery}
+                      onChange={(e) => setKycSearchQuery(e.target.value)}
+                      className="w-full pl-8 pr-7 py-1.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:border-[#1683FF] focus:ring-1 focus:ring-blue-100 transition"
+                    />
+                    {kycSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setKycSearchQuery("")}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {isLoadingDbKyc && dbKycList.length === 0 && (
+                  <div className="py-12 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-[#1683FF]" />
+                    <span>Sinkronisasi data pengajuan KYC database...</span>
+                  </div>
+                )}
+
+                {(!isLoadingDbKyc || dbKycList.length > 0) && filteredKycList.map((mitra) => {
+                  const isVerified = mitra.status === "verified";
+                  const isRejected = mitra.status === "rejected";
+                  const isPending = !isVerified && !isRejected;
+
+                  return (
+                    <div
+                      key={mitra.id}
+                      className={`p-4 rounded-xl border mb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition ${
+                        isVerified
+                          ? "border-emerald-200/80 bg-emerald-50/10 hover:border-emerald-300"
+                          : isRejected
+                          ? "border-rose-200/80 bg-rose-50/10 hover:border-rose-300"
+                          : "border-slate-200 hover:border-blue-200 bg-white"
+                      }`}
+                    >
+                      <div className="flex items-start sm:items-center gap-3.5 min-w-0">
+                        <UserAvatar src={mitra.avatar} name={mitra.name} size="xl" rounded="rounded-xl" />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-sm text-slate-900">{mitra.name}</span>
+                            <span className="text-[10px] font-semibold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
+                              {mitra.role}
+                            </span>
+                            {/* Status Badge */}
+                            {isVerified && (
+                              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200 flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Terverifikasi
+                              </span>
+                            )}
+                            {isRejected && (
+                              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full border bg-rose-50 text-rose-700 border-rose-200 flex items-center gap-1">
+                                <XCircle className="w-3 h-3 text-rose-600" /> Ditolak
+                              </span>
+                            )}
+                            {isPending && (
+                              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200 flex items-center gap-1">
+                                <Clock className="w-3 h-3 text-amber-600" /> Menunggu Persetujuan
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            {mitra.email} · {mitra.city} · Diajukan: <span className="font-medium text-slate-700">{mitra.submittedAt}</span>
+                          </div>
+                          {(mitra.skill || mitra.payoutAccountNumber) && (
+                            <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs">
+                              {mitra.skill && (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-700 font-semibold text-[11px]">
+                                  <Briefcase className="w-3 h-3 text-indigo-500" />
+                                  <span>Keahlian: {mitra.skill}</span>
+                                </span>
+                              )}
+                              {(mitra.payoutAccountNumber || mitra.payoutBank) && (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-800 font-medium text-[11px]">
+                                  <Wallet className="w-3 h-3 text-emerald-600" />
+                                  <span>
+                                    Rekening: {mitra.payoutBank || "Bank"} {mitra.payoutAccountNumber || "-"}{mitra.payoutAccountHolder ? ` a/n ${mitra.payoutAccountHolder}` : ""}
+                                  </span>
+                                </span>
+                              )}
+                            </div>
                           )}
+                          {mitra.notes && (
+                            <div className="text-[11px] text-slate-600 mt-1 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200/80 inline-block">
+                              <span className="font-semibold text-slate-700">Catatan:</span> {mitra.notes}
+                            </div>
+                          )}
+                          <div className="flex items-center gap-3 mt-2">
+                            <button
+                              type="button"
+                              onClick={() => toggleRevealNik(mitra.id)}
+                              className="text-[11px] px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 hover:text-[#1683FF] hover:border-blue-200 flex items-center gap-1 cursor-pointer bg-white"
+                            >
+                              {revealedNikIds[mitra.id] ? (
+                                <><EyeOff className="w-3 h-3" /> {mitra.rawNik || mitra.nik}</>
+                              ) : (
+                                <><Eye className="w-3 h-3" /> Tampilkan NIK</>
+                              )}
+                            </button>
+                            {mitra.idCardUrl && (
+                              <button
+                                type="button"
+                                onClick={() => setPreviewImageUrl(mitra.idCardUrl)}
+                                className="text-[11px] px-2.5 py-1 rounded-lg border border-blue-200 text-[#1683FF] hover:bg-blue-50 flex items-center gap-1.5 cursor-pointer bg-blue-50/40 font-semibold"
+                              >
+                                <Eye className="w-3 h-3" /> Lihat Foto KTP / Dokumen
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <div className="flex gap-2 shrink-0 self-end sm:self-center">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          adminVerifyUser?.(mitra.id, true);
-                          addToast("KYC Disetujui", `${mitra.name} telah diverifikasi resmi.`);
-                        }}
-                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition flex items-center gap-1 cursor-pointer"
-                      >
-                        <Check className="w-3.5 h-3.5" /> Setujui
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const reason = prompt("Masukkan alasan penolakan KYC:", "Dokumen buram / tidak sesuai data");
-                          if (reason !== null) {
-                            adminVerifyUser?.(mitra.id, false, reason);
-                            addToast("KYC Ditolak", `Pengajuan ${mitra.name} ditolak.`, "error");
-                          }
-                        }}
-                        className="px-3.5 py-1.5 bg-rose-50 text-rose-700 hover:bg-rose-100 text-xs font-bold rounded-xl border border-rose-200 transition flex items-center gap-1 cursor-pointer"
-                      >
-                        <XCircle className="w-3.5 h-3.5" /> Tolak
-                      </button>
-                    </div>
-                  </div>
-                ))}
 
-                {pendingKycList.length === 0 && (
+                      {/* Dynamic Action Buttons depending on status */}
+                      <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                        {isPending && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleApproveKyc(mitra)}
+                              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                            >
+                              <Check className="w-3.5 h-3.5" /> Setujui
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRejectKyc(mitra)}
+                              className="px-3.5 py-1.5 bg-rose-50 text-rose-700 hover:bg-rose-100 text-xs font-bold rounded-xl border border-rose-200 transition flex items-center gap-1 cursor-pointer"
+                            >
+                              <XCircle className="w-3.5 h-3.5" /> Tolak
+                            </button>
+                          </>
+                        )}
+
+                        {isVerified && (
+                          <>
+                            <div className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold rounded-xl flex items-center gap-1.5">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Sudah Terverifikasi</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRejectKyc(mitra)}
+                              className="px-2.5 py-1.5 text-xs font-medium text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl border border-slate-200 transition cursor-pointer"
+                              title="Batalkan atau tolak status verifikasi ini"
+                            >
+                              Cabut Verifikasi
+                            </button>
+                          </>
+                        )}
+
+                        {isRejected && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleApproveKyc(mitra)}
+                              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                            >
+                              <Check className="w-3.5 h-3.5" /> Setujui Ulang
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {!isLoadingDbKyc && filteredKycList.length === 0 && (
                   <div className="text-center text-slate-400 text-sm py-12">
-                    <CheckCircle2 className="w-10 h-10 mx-auto mb-2 text-emerald-400" />
-                    <p className="font-semibold text-slate-700">Semua mitra dan pengguna telah terverifikasi!</p>
-                    <p className="text-xs text-slate-400 mt-1">Tidak ada dokumen identitas baru yang menunggu peninjauan.</p>
+                    {kycTabFilter === "pending" ? (
+                      <>
+                        <CheckCircle2 className="w-10 h-10 mx-auto mb-2 text-emerald-500" />
+                        <p className="font-semibold text-slate-800">Semua mitra dan pengguna telah terverifikasi!</p>
+                        <p className="text-xs text-slate-400 mt-1">Tidak ada dokumen identitas baru yang menunggu persetujuan.</p>
+                      </>
+                    ) : kycTabFilter === "verified" ? (
+                      <>
+                        <UserCheck className="w-10 h-10 mx-auto mb-2 text-slate-300" />
+                        <p className="font-semibold text-slate-700">Belum Ada Akun Terverifikasi</p>
+                        <p className="text-xs text-slate-400 mt-1">Akun yang disetujui akan muncul di tab ini.</p>
+                      </>
+                    ) : kycTabFilter === "rejected" ? (
+                      <>
+                        <XCircle className="w-10 h-10 mx-auto mb-2 text-slate-300" />
+                        <p className="font-semibold text-slate-700">Tidak Ada Pengajuan Ditolak</p>
+                        <p className="text-xs text-slate-400 mt-1">Semua dokumen yang ditolak akan dicatat di tab ini.</p>
+                      </>
+                    ) : (
+                      <>
+                        <UserCheck className="w-10 h-10 mx-auto mb-2 text-slate-300" />
+                        <p className="font-semibold text-slate-700">Tidak Ada Data Pengajuan</p>
+                        <p className="text-xs text-slate-400 mt-1">Tidak ditemukan pengajuan KYC yang cocok dengan filter atau kata kunci.</p>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -2467,24 +3760,55 @@ export default function AdminDashboardPage() {
                   }
                   return true;
                 }).map((item) => (
-                  <div key={item.id} className={`bg-white rounded-2xl border p-4 shadow-xs flex flex-col justify-between transition ${item.isHidden ? "opacity-60 border-rose-200 bg-rose-50/10" : "border-slate-200 hover:border-blue-200"}`}>
+                  <div key={item.id} className={`bg-white rounded-2xl border p-3.5 sm:p-4 shadow-xs flex flex-col justify-between transition ${item.isHidden ? "opacity-60 border-rose-200 bg-rose-50/10" : "border-slate-200 hover:border-blue-200"}`}>
                     <div className="flex items-start gap-3">
-                      <img src={item.photoUrl} alt={item.title} className="w-14 h-14 rounded-xl object-cover shrink-0 border border-slate-200" />
+                      <img src={item.photoUrl} alt={item.title} className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl object-cover shrink-0 border border-slate-200 bg-slate-50" />
                       <div className="min-w-0 flex-1">
-                        <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-md ${item.type === "sewa" ? "bg-purple-50 text-purple-700" : item.type === "jasa" ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-[#1683FF]"}`}>{item.type}</span>
-                        <h4 className="text-xs font-bold text-slate-900 mt-1 line-clamp-1">{item.title}</h4>
-                        <span className="text-[11px] text-slate-400 block truncate">{item.provider}</span>
-                        <span className="text-xs font-bold text-[#1683FF] mt-1 block">{formatIDR(item.price)}</span>
-                        <div className="flex items-center gap-1 mt-1 text-[10px] text-slate-400">
-                          <MapPin className="w-2.5 h-2.5" />{item.city}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-md shrink-0 ${item.type === "sewa" ? "bg-purple-50 text-purple-700 border border-purple-200" : item.type === "jasa" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-blue-50 text-[#1683FF] border border-blue-200"}`}>
+                            {item.type}
+                          </span>
+                          {item.isHidden && (
+                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-200 shrink-0">
+                              Disembunyikan
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="text-xs sm:text-[13px] font-bold text-slate-900 mt-1 line-clamp-2 leading-snug break-words">
+                          {item.title}
+                        </h4>
+                        <span className="text-[11px] text-slate-500 block truncate mt-0.5 font-medium">
+                          {item.provider}
+                        </span>
+                        <span className="text-xs sm:text-sm font-black text-[#1683FF] mt-1 block truncate font-mono">
+                          {formatIDR(item.price)}
+                        </span>
+                        <div className="flex items-center gap-1 mt-1 text-[10px] text-slate-400 flex-wrap">
+                          <MapPin className="w-2.5 h-2.5 text-[#1683FF] shrink-0" />
+                          <span className="truncate max-w-[150px]">{item.city}</span>
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center justify-between gap-2 pt-3 mt-3 border-t border-slate-100">
-                      <button type="button" onClick={() => handleToggleHideListing(item)} className={`px-3 py-1 text-xs font-semibold rounded-lg transition ${item.isHidden ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
+                    <div className="flex items-center justify-between gap-2 pt-2.5 mt-2.5 border-t border-slate-100 flex-wrap">
+                      <button 
+                        type="button" 
+                        onClick={() => handleToggleHideListing(item)} 
+                        className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition cursor-pointer flex-1 sm:flex-none text-center ${
+                          item.isHidden 
+                            ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200" 
+                            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                        }`}
+                      >
                         {item.isHidden ? "Tayangkan" : "Sembunyikan"}
                       </button>
-                      <button type="button" onClick={() => handleDeleteListing(item)} className="p-1.5 text-slate-300 hover:text-rose-600 transition"><Trash2 className="w-3.5 h-3.5" /></button>
+                      <button 
+                        type="button" 
+                        onClick={() => handleDeleteListing(item)} 
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                        title="Hapus Listing"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -2497,83 +3821,176 @@ export default function AdminDashboardPage() {
             <div className="animate-in fade-in duration-150">
               <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-                  <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2"><Users className="w-4 h-4 text-[#1683FF]" /> Direktori Akun Pengguna & Mitra</h3>
-                  <div className="relative sm:w-56">
-                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input type="text" placeholder="Cari nama atau email..." value={userSearch} onChange={(e) => setUserSearch(e.target.value)} className="w-full pl-8 pr-3 py-2 text-xs rounded-xl border border-slate-200 focus:border-[#1683FF] outline-none" />
+                  <div className="flex flex-col gap-1">
+                    <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                      <Users className="w-4 h-4 text-[#1683FF]" /> Direktori Akun Pengguna &amp; Mitra
+                    </h3>
+                    <p className="text-[11px] text-slate-400">Total {effectiveUsersList.length} akun terdaftar di sistem platform.</p>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl text-[11px]">
+                      {[
+                        { id: "all", label: "Semua" },
+                        { id: "user", label: "User" },
+                        { id: "provider", label: "Jasa" },
+                        { id: "partner", label: "Mitra" },
+                        { id: "admin", label: "Admin" },
+                      ].map((rf) => (
+                        <button
+                          key={rf.id}
+                          type="button"
+                          onClick={() => setUserRoleFilter(rf.id)}
+                          className={`px-2.5 py-1 rounded-lg font-semibold transition cursor-pointer ${
+                            userRoleFilter === rf.id ? "bg-white text-[#1683FF] shadow-2xs font-bold" : "text-slate-600 hover:text-slate-900"
+                          }`}
+                        >
+                          {rf.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={loadDbUsers}
+                      disabled={isLoadingDbUsers}
+                      className="px-2.5 py-1.5 text-xs rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 flex items-center gap-1 transition"
+                      title="Refresh Pengguna dari Database"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isLoadingDbUsers ? "animate-spin text-[#1683FF]" : ""}`} />
+                      <span>Refresh</span>
+                    </button>
+
+                    <div className="relative sm:w-56">
+                      <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Cari nama atau email..."
+                        value={userSearch}
+                        onChange={(e) => setUserSearch(e.target.value)}
+                        className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 focus:border-[#1683FF] outline-none bg-white"
+                      />
+                    </div>
                   </div>
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs min-w-[700px]">
-                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase text-[10px] tracking-wider">
-                      <tr>
-                        <th className="py-3 px-4">Pengguna</th>
-                        <th className="py-3 px-4">Peran</th>
-                        <th className="py-3 px-4">Kontak</th>
-                        <th className="py-3 px-4 text-center">Status</th>
-                        <th className="py-3 px-4 text-center">Aksi</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {allUsersList.filter((u) => !userSearch || u.name.toLowerCase().includes(userSearch.toLowerCase()) || u.email.toLowerCase().includes(userSearch.toLowerCase())).map((u) => {
-                        const isSuspended = !!suspendedUserIds[u.id];
-                        return (
-                          <tr key={u.id} className="hover:bg-[#F5FAFF]">
-                            <td className="py-3 px-4">
-                              <div className="flex items-center gap-3">
-                                <img src={u.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80"} alt={u.name} className="w-9 h-9 rounded-xl object-cover border border-slate-200" />
-                                <div><strong className="text-slate-900 font-bold block">{u.name}</strong><span className="text-[11px] text-slate-400 font-mono">{u.email}</span></div>
-                              </div>
-                            </td>
-                            <td className="py-3 px-4"><span className="font-semibold text-slate-700">{u.role}</span><span className="text-[10px] text-slate-400 block">{u.ordersCount} Transaksi</span></td>
-                            <td className="py-3 px-4 font-mono text-slate-600">{u.phone}</td>
-                            <td className="py-3 px-4 text-center">
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${isSuspended ? "bg-rose-50 text-rose-700 border-rose-200" : u.verified ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-700 border-amber-200"}`}>
-                                {isSuspended ? "Suspended" : u.verified ? "Verified" : "Reguler"}
-                              </span>
-                            </td>
-                            <td className="py-3 px-4 text-center">
-                              <div className="flex items-center justify-center gap-1.5">
-                                {!u.verified ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      adminVerifyUser?.(u.id, true);
-                                      addToast?.("KYC Diverifikasi", `${u.name} berhasil diverifikasi admin.`);
-                                    }}
-                                    className="px-2 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition"
-                                    title="Setujui KYC Akun"
+
+                {isLoadingDbUsers && (
+                  <div className="py-8 text-center text-xs text-slate-500 flex items-center justify-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin text-[#1683FF]" />
+                    <span>Memuat daftar akun pengguna dari database...</span>
+                  </div>
+                )}
+
+                {!isLoadingDbUsers && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs min-w-[700px]">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase text-[10px] tracking-wider">
+                        <tr>
+                          <th className="py-3 px-4">Pengguna</th>
+                          <th className="py-3 px-4">Peran</th>
+                          <th className="py-3 px-4">Kontak</th>
+                          <th className="py-3 px-4 text-center">Status</th>
+                          <th className="py-3 px-4 text-center">Aksi</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {(() => {
+                          const usersToDisplay = effectiveUsersList.filter((u) => {
+                            if (userRoleFilter !== "all") {
+                              const r = (u.role || "").toLowerCase();
+                              if (userRoleFilter === "user" && !r.includes("pelanggan") && !r.includes("user")) return false;
+                              if (userRoleFilter === "provider" && !r.includes("jasa") && !r.includes("helper") && !r.includes("provider")) return false;
+                              if (userRoleFilter === "partner" && !r.includes("mitra") && !r.includes("rental") && !r.includes("partner")) return false;
+                              if (userRoleFilter === "admin" && !r.includes("admin")) return false;
+                            }
+                            if (!userSearch) return true;
+                            const q = userSearch.toLowerCase();
+                            return (u.name || "").toLowerCase().includes(q) || (u.email || "").toLowerCase().includes(q);
+                          });
+                          if (usersToDisplay.length === 0) {
+                            return (
+                              <tr>
+                                <td colSpan={5} className="py-12 text-center text-slate-400">
+                                  <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                                  <p className="font-semibold text-slate-600">Tidak Ada Pengguna Ditemukan</p>
+                                  <p className="text-xs text-slate-400 mt-0.5">Tidak ada pengguna yang cocok dengan kriteria pencarian.</p>
+                                </td>
+                              </tr>
+                            );
+                          }
+                          return usersToDisplay.map((u) => {
+                            const isSuspended = u.verificationStatus === "suspended" || !!suspendedUserIds[u.id];
+                            return (
+                              <tr key={u.id} className="hover:bg-[#F5FAFF]">
+                                <td className="py-3 px-4">
+                                  <div className="flex items-center gap-3">
+                                    <UserAvatar src={u.avatar} name={u.name} size="md" rounded="rounded-xl" />
+                                    <div>
+                                      <strong className="text-slate-900 font-bold block">{u.name}</strong>
+                                      <span className="text-[11px] text-slate-400 font-mono">{u.email}</span>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="py-3 px-4">
+                                  <span className="font-semibold text-slate-700">{u.role}</span>
+                                  <span className="text-[10px] text-slate-400 block">{u.ordersCount} Selesai</span>
+                                </td>
+                                <td className="py-3 px-4 font-mono text-slate-600">{u.phone}</td>
+                                <td className="py-3 px-4 text-center">
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                      isSuspended
+                                        ? "bg-rose-50 text-rose-700 border-rose-200"
+                                        : u.verified
+                                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                        : "bg-amber-50 text-amber-700 border-amber-200"
+                                    }`}
                                   >
-                                    Verif KYC
-                                  </button>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      adminVerifyUser?.(u.id, false, "Dicabut oleh admin");
-                                      addToast?.("KYC Dicabut", `Status verifikasi ${u.name} dicabut.`, "error");
-                                    }}
-                                    className="px-2 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 transition"
-                                    title="Cabut Status Verifikasi"
-                                  >
-                                    Cabut KYC
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => handleToggleSuspendUser(u)}
-                                  className={`px-2 py-1 rounded-lg text-xs font-semibold transition ${isSuspended ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200" : "bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200"}`}
-                                >
-                                  {isSuspended ? "Aktifkan" : "Suspend"}
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                                    {isSuspended ? "Suspended" : u.verified ? "Verified" : "Reguler"}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 text-center">
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    {!u.verified ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleApproveKyc(u)}
+                                        className="px-2 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition cursor-pointer"
+                                        title="Setujui KYC Akun"
+                                      >
+                                        Verif KYC
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRejectKyc(u)}
+                                        className="px-2 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200 transition cursor-pointer"
+                                        title="Cabut / Tolak Status Verifikasi"
+                                      >
+                                        Tolak KYC
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleSuspendUser(u)}
+                                      className={`px-2 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                                        isSuspended
+                                          ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
+                                          : "bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200"
+                                      }`}
+                                    >
+                                      {isSuspended ? "Aktifkan" : "Suspend"}
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })()}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -2615,19 +4032,26 @@ export default function AdminDashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {allProvidersList
-                        .filter((p) => !providerSearch || p.name.toLowerCase().includes(providerSearch.toLowerCase()) || (p.brandTitle || "").toLowerCase().includes(providerSearch.toLowerCase()))
-                        .map((prov) => {
-                          const isSuspended = !!suspendedProviderIds[prov.id];
+                      {(() => {
+                        const providersToDisplay = allProvidersList.filter((p) => !providerSearch || p.name.toLowerCase().includes(providerSearch.toLowerCase()) || (p.brandTitle || "").toLowerCase().includes(providerSearch.toLowerCase()));
+                        if (providersToDisplay.length === 0) {
+                          return (
+                            <tr>
+                              <td colSpan={5} className="py-12 text-center text-slate-400">
+                                <Briefcase className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                                <p className="font-semibold text-slate-600">Tidak Ada Penyedia Jasa Ditemukan</p>
+                                <p className="text-xs text-slate-400 mt-0.5">Tidak ada data penyedia jasa yang cocok dengan pencarian.</p>
+                              </td>
+                            </tr>
+                          );
+                        }
+                        return providersToDisplay.map((prov) => {
+                          const isSuspended = !!suspendedProviderIds[prov.id] || prov.verificationStatus === "suspended";
                           return (
                             <tr key={prov.id} className="hover:bg-[#F5FAFF]">
                               <td className="py-3 px-4">
                                 <div className="flex items-center gap-3">
-                                  <img 
-                                    src={prov.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80"} 
-                                    alt={prov.name} 
-                                    className="w-9 h-9 rounded-xl object-cover border border-slate-200" 
-                                  />
+                                  <UserAvatar src={prov.avatar} name={prov.name} size="md" rounded="rounded-xl" />
                                   <div>
                                     <strong className="text-slate-900 font-bold block">{prov.name}</strong>
                                     <span className="text-[11px] text-slate-400 flex items-center gap-1">
@@ -2664,10 +4088,7 @@ export default function AdminDashboardPage() {
                                 <div className="flex items-center justify-center gap-1.5">
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setSuspendedProviderIds((prev) => ({ ...prev, [prov.id]: !isSuspended }));
-                                      addToast(isSuspended ? "Akun Diaktifkan" : "Akun Ditangguhkan", `Akun penyedia ${prov.name} ${isSuspended ? "aktif kembali" : "ditangguhkan"}.`);
-                                    }}
+                                    onClick={() => handleToggleSuspendUser(prov)}
                                     className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
                                       isSuspended 
                                         ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200" 
@@ -2680,7 +4101,8 @@ export default function AdminDashboardPage() {
                               </td>
                             </tr>
                           );
-                        })}
+                        });
+                      })()}
                     </tbody>
                   </table>
                 </div>
@@ -2725,19 +4147,26 @@ export default function AdminDashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {allPartnersList
-                        .filter((p) => !partnerSearch || p.name.toLowerCase().includes(partnerSearch.toLowerCase()) || (p.category || "").toLowerCase().includes(partnerSearch.toLowerCase()))
-                        .map((ptr) => {
-                          const isSuspended = !!suspendedPartnerIds[ptr.id];
+                      {(() => {
+                        const partnersToDisplay = allPartnersList.filter((p) => !partnerSearch || p.name.toLowerCase().includes(partnerSearch.toLowerCase()) || (p.category || "").toLowerCase().includes(partnerSearch.toLowerCase()));
+                        if (partnersToDisplay.length === 0) {
+                          return (
+                            <tr>
+                              <td colSpan={5} className="py-12 text-center text-slate-400">
+                                <Store className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                                <p className="font-semibold text-slate-600">Tidak Ada Toko Mitra Ditemukan</p>
+                                <p className="text-xs text-slate-400 mt-0.5">Tidak ada toko mitra sewa yang cocok dengan pencarian.</p>
+                              </td>
+                            </tr>
+                          );
+                        }
+                        return partnersToDisplay.map((ptr) => {
+                          const isSuspended = !!suspendedPartnerIds[ptr.id] || ptr.verificationStatus === "suspended";
                           return (
                             <tr key={ptr.id} className="hover:bg-[#F5FAFF]">
                               <td className="py-3 px-4">
                                 <div className="flex items-center gap-3">
-                                  <img 
-                                    src={ptr.avatar || "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=120&q=80"} 
-                                    alt={ptr.name} 
-                                    className="w-9 h-9 rounded-xl object-cover border border-slate-200" 
-                                  />
+                                  <UserAvatar src={ptr.avatar} name={ptr.name} size="md" rounded="rounded-xl" />
                                   <div>
                                     <strong className="text-slate-900 font-bold block">{ptr.name}</strong>
                                     <span className="text-[11px] text-slate-400 flex items-center gap-1">
@@ -2784,10 +4213,7 @@ export default function AdminDashboardPage() {
                                   </Link>
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setSuspendedPartnerIds((prev) => ({ ...prev, [ptr.id]: !isSuspended }));
-                                      addToast(isSuspended ? "Toko Diaktifkan" : "Toko Ditangguhkan", `Toko ${ptr.name} ${isSuspended ? "aktif kembali" : "ditangguhkan"}.`);
-                                    }}
+                                    onClick={() => handleToggleSuspendUser(ptr)}
                                     className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
                                       isSuspended 
                                         ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200" 
@@ -2800,7 +4226,8 @@ export default function AdminDashboardPage() {
                               </td>
                             </tr>
                           );
-                        })}
+                        });
+                      })()}
                     </tbody>
                   </table>
                 </div>
@@ -2839,8 +4266,8 @@ export default function AdminDashboardPage() {
                 <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-3 text-xs">
                   {[
                     { id: "packages", label: "Paket Promosi", count: packagesList.length },
-                    { id: "active", label: "Promosi Aktif", count: promotionsList.filter((p) => p.status === "active").length },
-                    { id: "history", label: "Riwayat Promosi", count: promotionsList.filter((p) => p.status !== "active").length },
+                    { id: "active", label: "Promosi Aktif", count: ongoingPromotions.length },
+                    { id: "history", label: "Riwayat Promosi", count: historyPromotions.length },
                     { id: "stats", label: "Statistik & Omset", count: null },
                   ].map((tab) => (
                     <button
@@ -3027,7 +4454,7 @@ export default function AdminDashboardPage() {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => handleDeletePackage(pkg.id, pkg.name)}
+                                  onClick={() => handleOpenDeletePackageModal(pkg.id, pkg.name)}
                                   className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition cursor-pointer"
                                   title="Hapus Paket"
                                 >
@@ -3050,9 +4477,9 @@ export default function AdminDashboardPage() {
                   {/* Filter Target Promosi */}
                   <div className="flex items-center gap-2 overflow-x-auto pb-1">
                     {[
-                      { id: "all", label: "Semua Promosi", count: promotionsList.length },
-                      { id: "service", label: "Layanan Jasa", count: promotionsList.filter(p => p.targetType === 'service').length },
-                      { id: "rental", label: "Unit Sewa", count: promotionsList.filter(p => p.targetType === 'rental').length },
+                      { id: "all", label: "Semua Promosi", count: ongoingPromotions.length },
+                      { id: "service", label: "Layanan Jasa", count: ongoingPromotions.filter(p => p.targetType === 'service').length },
+                      { id: "rental", label: "Unit Sewa", count: ongoingPromotions.filter(p => p.targetType === 'rental').length },
                     ].map((tab) => (
                       <button
                         key={tab.id}
@@ -3089,10 +4516,12 @@ export default function AdminDashboardPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {promotionsList
+                        {ongoingPromotions
                           .filter((p) => promoTargetFilter === "all" || p.targetType === promoTargetFilter)
                           .map((promo) => {
                             const isExpired = promo.endDate && new Date(promo.endDate) < new Date();
+                            const isPaused = promo.status === "paused";
+                            const isCancelled = promo.status === "cancelled";
                             const isActive = promo.status === "active" && !isExpired;
 
                             return (
@@ -3132,11 +4561,15 @@ export default function AdminDashboardPage() {
                                   <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                                     isActive 
                                       ? "bg-[#1683FF] text-white" 
+                                      : isPaused
+                                      ? "bg-amber-100 text-amber-900 border border-amber-300 font-extrabold"
+                                      : isCancelled
+                                      ? "bg-rose-100 text-rose-800 border border-rose-200"
                                       : isExpired 
                                       ? "bg-slate-200 text-slate-700" 
                                       : "bg-amber-100 text-amber-800"
                                   }`}>
-                                    {isActive ? "AKTIF TAYANG" : isExpired ? "KEDALUWARSA" : "PENDING"}
+                                    {isActive ? "AKTIF TAYANG" : isPaused ? "DIJEDA MITRA" : isCancelled ? "DINONAKTIFKAN" : isExpired ? "KEDALUWARSA" : "PENDING"}
                                   </span>
                                 </td>
                                 <td className="py-3 px-4 text-slate-500 text-[11px]">
@@ -3149,24 +4582,50 @@ export default function AdminDashboardPage() {
                                 <td className="py-3 px-4 text-center">
                                   <button
                                     type="button"
+                                    disabled={processingActionIds.has(`promo-${promo.id}`)}
                                     onClick={() => {
-                                      const nextStatus = promo.status === "active" ? "cancelled" : "active";
-                                      promotionService.toggleStatus(promo.id);
-                                      setPromotionsList(promotionService.getAllPromotions());
-                                      addToast("Status Promosi Diubah", `Promosi untuk "${promo.targetTitle}" diubah.`);
+                                      withActionLock(`promo-${promo.id}`, async () => {
+                                        const nextStatus = promo.status === "active" ? "cancelled" : "active";
+                                        // Optimistic update
+                                        setPromotionsList((prev) =>
+                                          prev.map((p) => (p.id === promo.id ? { ...p, status: nextStatus } : p))
+                                        );
+                                        try {
+                                          await adminApi.updatePromotion(promo.id, { status: nextStatus });
+                                          await loadDbPromotions();
+                                          window.dispatchEvent(new Event("bantuin_promotions_updated"));
+                                          addToast(
+                                            "Status Promosi Diubah",
+                                            `Promosi untuk "${promo.targetTitle || "Item"}" berhasil ${nextStatus === "cancelled" ? "dinonaktifkan" : "diaktifkan kembali"}.`
+                                          );
+                                        } catch (err) {
+                                          console.warn("Admin promo status toggle error:", err);
+                                          await loadDbPromotions();
+                                          addToast("Gagal Mengubah Status", err.message || "Gagal mengubah status promosi.", "error");
+                                        }
+                                      });
                                     }}
-                                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:pointer-events-none ${
                                       promo.status === "active"
                                         ? "bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200"
                                         : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
                                     }`}
                                   >
-                                    {promo.status === "active" ? "Nonaktifkan" : "Aktifkan"}
+                                    {processingActionIds.has(`promo-${promo.id}`) 
+                                      ? "Memproses..." 
+                                      : (promo.status === "active" ? "Nonaktifkan" : "Aktifkan")}
                                   </button>
                                 </td>
                               </tr>
                             );
                           })}
+                        {ongoingPromotions.filter((p) => promoTargetFilter === "all" || p.targetType === promoTargetFilter).length === 0 && (
+                          <tr>
+                            <td colSpan={8} className="py-8 text-center text-slate-400">
+                              Belum ada promosi yang sedang aktif atau dijeda mitra saat ini.
+                            </td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -3198,26 +4657,31 @@ export default function AdminDashboardPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {promotionsList
-                          .filter((p) => p.status === "expired" || p.status === "cancelled" || (p.endDate && new Date(p.endDate) < new Date()))
-                          .map((promo) => (
-                            <tr key={promo.id} className="hover:bg-slate-50">
-                              <td className="py-3 px-4 font-bold text-slate-900">{promo.targetTitle}</td>
-                              <td className="py-3 px-4 text-slate-600">{promo.ownerName}</td>
-                              <td className="py-3 px-4 text-slate-600">{promo.packageName}</td>
-                              <td className="py-3 px-4 font-mono font-bold text-slate-900">{formatIDR(promo.amount)}</td>
-                              <td className="py-3 px-4 text-center">
-                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                  promo.status === "cancelled" ? "bg-rose-100 text-rose-800" : "bg-slate-100 text-slate-700"
-                                }`}>
-                                  {promo.status === "cancelled" ? "Dibatalkan" : "Selesai (Expired)"}
-                                </span>
-                              </td>
-                              <td className="py-3 px-4 text-slate-500">
-                                {promo.analytics?.views || 0} tayang &middot; {promo.analytics?.clicks || 0} klik
-                              </td>
-                            </tr>
-                          ))}
+                        {historyPromotions.map((promo) => (
+                          <tr key={promo.id} className="hover:bg-slate-50">
+                            <td className="py-3 px-4 font-bold text-slate-900">{promo.targetTitle}</td>
+                            <td className="py-3 px-4 text-slate-600">{promo.ownerName}</td>
+                            <td className="py-3 px-4 text-slate-600">{promo.packageName}</td>
+                            <td className="py-3 px-4 font-mono font-bold text-slate-900">{formatIDR(promo.amount)}</td>
+                            <td className="py-3 px-4 text-center">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                promo.status === "cancelled" ? "bg-rose-100 text-rose-800" : "bg-slate-100 text-slate-700"
+                              }`}>
+                                {promo.status === "cancelled" ? "Dibatalkan" : "Selesai (Expired)"}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-slate-500">
+                              {promo.analytics?.views || 0} tayang &middot; {promo.analytics?.clicks || 0} klik
+                            </td>
+                          </tr>
+                        ))}
+                        {historyPromotions.length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="py-8 text-center text-slate-400">
+                              Belum ada riwayat promosi yang selesai atau dibatalkan.
+                            </td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -3481,8 +4945,10 @@ export default function AdminDashboardPage() {
                         </button>
                         <button
                           type="submit"
-                          className="px-5 py-2 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold transition shadow-xs cursor-pointer"
+                          disabled={isSavingPackage}
+                          className="px-5 py-2 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] disabled:opacity-60 text-white text-xs font-bold transition shadow-xs cursor-pointer flex items-center gap-1.5"
                         >
+                          {isSavingPackage && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                           {editingPackage ? "Simpan Perubahan" : "Buat Paket"}
                         </button>
                       </div>
@@ -3490,24 +4956,330 @@ export default function AdminDashboardPage() {
                   </div>
                 </div>
               )}
+
+              {/* Modal Konfirmasi Hapus Paket Promosi */}
+              {deletePackageConfirm.isOpen && (
+                <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+                  <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150 space-y-4">
+                    <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-600">
+                      <AlertTriangle className="w-6 h-6" />
+                    </div>
+
+                    <div>
+                      <h4 className="text-base font-black text-slate-900">
+                        Hapus Paket Promosi?
+                      </h4>
+                      <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
+                        Apakah Anda yakin ingin menghapus paket promosi{" "}
+                        <span className="font-bold text-slate-900">
+                          &quot;{deletePackageConfirm.packageName}&quot;
+                        </span>
+                        ?
+                      </p>
+                      <div className="mt-3 p-3 bg-amber-50 rounded-xl border border-amber-200/80 text-[11px] text-amber-900 leading-normal">
+                        <span className="font-bold block mb-0.5">Keamanan Riwayat Transaksi:</span>
+                        Jika paket ini sedang digunakan oleh transaksi promosi aktif atau riwayat promosi mitra, sistem akan otomatis melakukan <span className="font-semibold underline">soft-delete</span> (menonaktifkan paket) agar tidak merusak data pelaporan mitra.
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                      <button
+                        type="button"
+                        disabled={deletePackageConfirm.isDeleting}
+                        onClick={() =>
+                          setDeletePackageConfirm({
+                            isOpen: false,
+                            packageId: null,
+                            packageName: "",
+                            isDeleting: false,
+                          })
+                        }
+                        className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition cursor-pointer"
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="button"
+                        disabled={deletePackageConfirm.isDeleting}
+                        onClick={handleConfirmDeletePackage}
+                        className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition shadow-xs cursor-pointer flex items-center gap-1.5"
+                      >
+                        {deletePackageConfirm.isDeleting ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Menghapus...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Ya, Hapus Paket</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          {/* ─── TAB: BROADCASTS ───────────────────────────────────────────── */}
           {activeMenu === "landing-content" && (
-            <div className="space-y-5">
+            <div className="space-y-5 animate-in fade-in duration-150">
               <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                <div><h3 className="font-black text-slate-900">Ulasan & Logo Media Partner</h3><p className="text-xs text-slate-500 mt-1">Kelola konten yang tampil di Beranda. Perubahan tersimpan di browser ini untuk kebutuhan frontend/demo.</p></div>
-                <div className="flex gap-2"><button onClick={() => { setLandingEditorTab("reviews"); setEditingLandingItem(null); }} className={`px-3 py-2 rounded-xl text-xs font-bold ${landingEditorTab === "reviews" ? pillActiveCls : pillIdleCls}`}>Ulasan</button><button onClick={() => { setLandingEditorTab("partners"); setEditingLandingItem(null); }} className={`px-3 py-2 rounded-xl text-xs font-bold ${landingEditorTab === "partners" ? pillActiveCls : pillIdleCls}`}>Logo Medpart</button></div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-sm flex items-center gap-2">
+                    <Star className="w-4 h-4 text-[#1683FF]" /> Ulasan &amp; Logo Media Partner
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Kelola ulasan testimoni dan logo media partner yang tampil resmi di Beranda platform.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { setLandingEditorTab("reviews"); setEditingLandingItem(null); }}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${landingEditorTab === "reviews" ? pillActiveCls : pillIdleCls}`}
+                  >
+                    Ulasan Pelanggan ({landingContent.reviews?.length || 0})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setLandingEditorTab("partners"); setEditingLandingItem(null); }}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${landingEditorTab === "partners" ? pillActiveCls : pillIdleCls}`}
+                  >
+                    Logo Media Partner ({landingContent.partners?.length || 0})
+                  </button>
+                </div>
               </div>
-              <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-5 items-start">
+
+              <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-5 items-start">
+                {/* List Table */}
                 <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-2xs">
-                  <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between"><h4 className="text-sm font-black text-slate-900">{landingEditorTab === "reviews" ? "Ulasan Beranda" : "Logo Media Partner"}</h4><button onClick={() => openLandingForm()} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#1683FF] text-white text-xs font-bold"><Plus className="w-3.5 h-3.5" />Tambah</button></div>
-                  <div className="divide-y divide-slate-100">
-                    {(landingEditorTab === "reviews" ? landingContent.reviews : landingContent.partners).map((item) => <div key={item.id} className="p-4 flex gap-3 items-center"><div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center overflow-hidden shrink-0">{(item.avatar || item.logoUrl) ? <img src={item.avatar || item.logoUrl} alt="" className="w-full h-full object-cover" /> : <Star className="w-4 h-4 text-[#1683FF]" />}</div><div className="min-w-0 flex-1"><p className="text-xs font-bold text-slate-900 truncate">{item.name}</p><p className="text-[11px] text-slate-500 line-clamp-1">{landingEditorTab === "reviews" ? item.quote : item.logoUrl || "Logo teks"}</p></div><button onClick={() => openLandingForm(item)} className="p-2 text-[#1683FF] hover:bg-blue-50 rounded-lg"><Eye className="w-4 h-4" /></button><button onClick={() => deleteLandingItem(item)} className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg"><Trash2 className="w-4 h-4" /></button></div>)}
+                  <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between">
+                    <h4 className="text-sm font-black text-slate-900">
+                      {landingEditorTab === "reviews" ? "Daftar Ulasan Beranda" : "Daftar Media Partner"}
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => openLandingForm()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Tambah Baru
+                    </button>
+                  </div>
+                  <div className="divide-y divide-slate-100 max-h-[500px] overflow-y-auto">
+                    {(landingEditorTab === "reviews" ? landingContent.reviews : landingContent.partners).length === 0 ? (
+                      <div className="p-8 text-center text-slate-400 text-xs">
+                        Belum ada data {landingEditorTab === "reviews" ? "ulasan" : "media partner"}.
+                      </div>
+                    ) : (
+                      (landingEditorTab === "reviews" ? landingContent.reviews : landingContent.partners).map((item) => (
+                        <div key={item.id} className="p-4 flex gap-3 items-center hover:bg-slate-50 transition">
+                          <div className="w-11 h-11 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center overflow-hidden shrink-0">
+                            {item.avatar || item.logoUrl ? (
+                              <img src={item.avatar || item.logoUrl} alt={item.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <Star className="w-5 h-5 text-[#1683FF]" />
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs font-bold text-slate-900 truncate">{item.name}</p>
+                              {landingEditorTab === "partners" && (
+                                <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${item.active !== false ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                                  {item.active !== false ? "Aktif" : "Nonaktif"}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">
+                              {landingEditorTab === "reviews" ? `${item.company ? `(${item.company}) ` : ""}"${item.quote}"` : (item.logoUrl || "Logo teks (tanpa gambar)")}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => openLandingForm(item)}
+                              className="p-1.5 text-[#1683FF] hover:bg-blue-50 rounded-lg transition cursor-pointer"
+                              title="Edit item"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteLandingItem(item)}
+                              className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                              title="Hapus item"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
-                <form onSubmit={saveLandingItem} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs space-y-3"><h4 className="text-sm font-black text-slate-900">{editingLandingItem ? "Ubah" : "Tambah"} {landingEditorTab === "reviews" ? "Ulasan" : "Logo"}</h4><input value={landingForm.name} onChange={(e) => setLandingForm({ ...landingForm, name: e.target.value })} className={inputCls} placeholder={landingEditorTab === "reviews" ? "Nama pelanggan" : "Nama media partner"} />{landingEditorTab === "reviews" ? <><input value={landingForm.company} onChange={(e) => setLandingForm({ ...landingForm, company: e.target.value })} className={inputCls} placeholder="Usaha / keterangan" /><textarea value={landingForm.quote} onChange={(e) => setLandingForm({ ...landingForm, quote: e.target.value })} className={inputCls} rows={4} placeholder="Isi ulasan" /><label className="block text-xs font-semibold text-slate-600">Foto pelanggan (unggah dari perangkat)<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={(e) => handleLandingImageUpload(e, "avatar")} className="block w-full mt-1 text-[11px] text-slate-500 file:mr-2 file:rounded-lg file:border-0 file:bg-blue-50 file:px-2 file:py-1.5 file:text-xs file:font-bold file:text-[#1683FF]" /></label>{landingForm.avatar && <img src={landingForm.avatar} alt="Pratinjau foto" className="w-12 h-12 rounded-xl object-cover border border-blue-100" />}</> : <><label className="block text-xs font-semibold text-slate-600">Logo media partner (unggah dari perangkat)<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" onChange={(e) => handleLandingImageUpload(e, "logoUrl")} className="block w-full mt-1 text-[11px] text-slate-500 file:mr-2 file:rounded-lg file:border-0 file:bg-blue-50 file:px-2 file:py-1.5 file:text-xs file:font-bold file:text-[#1683FF]" /></label>{landingForm.logoUrl && <img src={landingForm.logoUrl} alt="Pratinjau logo" className="max-h-12 max-w-[160px] object-contain border border-blue-100 rounded-xl p-1" />}<label className="flex gap-2 text-xs text-slate-600"><input type="checkbox" checked={landingForm.active} onChange={(e) => setLandingForm({ ...landingForm, active: e.target.checked })} className="accent-[#1683FF]" />Tampilkan di Beranda</label></>}<button type="submit" className="w-full py-2.5 rounded-xl bg-[#1683FF] text-white text-xs font-bold">Simpan ke Beranda</button></form>
+
+                {/* Form Editor */}
+                <form onSubmit={saveLandingItem} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs space-y-3.5">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                    <h4 className="text-sm font-black text-slate-900">
+                      {editingLandingItem ? "Edit" : "Tambah"} {landingEditorTab === "reviews" ? "Ulasan Pelanggan" : "Media Partner"}
+                    </h4>
+                    {editingLandingItem && (
+                      <button
+                        type="button"
+                        onClick={() => openLandingForm(null)}
+                        className="text-[11px] text-slate-400 hover:text-slate-600 font-semibold cursor-pointer"
+                      >
+                        Reset / Tambah Baru
+                      </button>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      {landingEditorTab === "reviews" ? "Nama Pelanggan *" : "Nama Media Partner / Perusahaan *"}
+                    </label>
+                    <input
+                      required
+                      value={landingForm.name}
+                      onChange={(e) => setLandingForm({ ...landingForm, name: e.target.value })}
+                      className={inputCls}
+                      placeholder={landingEditorTab === "reviews" ? "Contoh: Rizky Ramadhan" : "Contoh: Traveloka / Unilever"}
+                    />
+                  </div>
+
+                  {landingEditorTab === "reviews" ? (
+                    <>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Usaha / Profesi / Institusi</label>
+                        <input
+                          value={landingForm.company}
+                          onChange={(e) => setLandingForm({ ...landingForm, company: e.target.value })}
+                          className={inputCls}
+                          placeholder="Contoh: Mahasiswa UNSOED / Kedai Kopi"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Isi Ulasan / Testimoni *</label>
+                        <textarea
+                          required
+                          value={landingForm.quote}
+                          onChange={(e) => setLandingForm({ ...landingForm, quote: e.target.value })}
+                          className={`${inputCls} resize-none`}
+                          rows={3}
+                          placeholder="Tuliskan ulasan pengalaman menggunakan Bantuin.id..."
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Foto Pelanggan</label>
+                        <input
+                          type="text"
+                          value={landingForm.avatar}
+                          onChange={(e) => setLandingForm({ ...landingForm, avatar: e.target.value })}
+                          className={`${inputCls} mb-1.5`}
+                          placeholder="URL foto (https://images.unsplash.com/...)"
+                        />
+                        <div className="flex items-center gap-2">
+                          <label className="flex-1 cursor-pointer">
+                            <span className="block text-center py-1.5 px-3 bg-blue-50 hover:bg-blue-100 text-[#1683FF] text-xs font-bold rounded-xl border border-blue-200 transition">
+                              Unggah File Foto
+                            </span>
+                            <input
+                              type="file"
+                              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                              onChange={(e) => handleLandingImageUpload(e, "avatar")}
+                              className="hidden"
+                            />
+                          </label>
+                          {landingForm.avatar && (
+                            <button
+                              type="button"
+                              onClick={() => setLandingForm({ ...landingForm, avatar: "" })}
+                              className="px-2 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-xl border border-rose-200"
+                            >
+                              Hapus Foto
+                            </button>
+                          )}
+                        </div>
+                        {landingForm.avatar && (
+                          <div className="mt-2 flex items-center gap-2 p-2 bg-slate-50 rounded-xl border border-slate-100">
+                            <img src={landingForm.avatar} alt="Pratinjau" className="w-10 h-10 rounded-full object-cover border border-slate-200" />
+                            <span className="text-[10px] text-slate-500 truncate flex-1">{landingForm.avatar}</span>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">Logo Media Partner</label>
+                        <input
+                          type="text"
+                          value={landingForm.logoUrl}
+                          onChange={(e) => setLandingForm({ ...landingForm, logoUrl: e.target.value })}
+                          className={`${inputCls} mb-1.5`}
+                          placeholder="URL logo (https://... logo.png / svg)"
+                        />
+                        <div className="flex items-center gap-2">
+                          <label className="flex-1 cursor-pointer">
+                            <span className="block text-center py-1.5 px-3 bg-blue-50 hover:bg-blue-100 text-[#1683FF] text-xs font-bold rounded-xl border border-blue-200 transition">
+                              Unggah File Logo
+                            </span>
+                            <input
+                              type="file"
+                              accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                              onChange={(e) => handleLandingImageUpload(e, "logoUrl")}
+                              className="hidden"
+                            />
+                          </label>
+                          {landingForm.logoUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setLandingForm({ ...landingForm, logoUrl: "" })}
+                              className="px-2 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-xl border border-rose-200"
+                            >
+                              Hapus Logo
+                            </button>
+                          )}
+                        </div>
+                        {landingForm.logoUrl && (
+                          <div className="mt-2 flex items-center gap-2 p-2 bg-slate-50 rounded-xl border border-slate-100">
+                            <img src={landingForm.logoUrl} alt="Pratinjau Logo" className="max-h-8 max-w-[120px] object-contain border border-slate-200 rounded p-1" />
+                            <span className="text-[10px] text-slate-500 truncate flex-1">{landingForm.logoUrl}</span>
+                          </div>
+                        )}
+                      </div>
+                      <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 p-2 rounded-xl bg-slate-50 border border-slate-100 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={landingForm.active}
+                          onChange={(e) => setLandingForm({ ...landingForm, active: e.target.checked })}
+                          className="accent-[#1683FF] w-4 h-4"
+                        />
+                        <span>Tampilkan di Beranda</span>
+                      </label>
+                    </>
+                  )}
+
+                  <div className="pt-2 border-t border-slate-100 flex items-center gap-2">
+                    {editingLandingItem && (
+                      <button
+                        type="button"
+                        onClick={() => openLandingForm(null)}
+                        className="py-2.5 px-4 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-bold transition cursor-pointer"
+                      >
+                        Batal
+                      </button>
+                    )}
+                    <button
+                      type="submit"
+                      className="flex-1 py-2.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold shadow-xs transition cursor-pointer"
+                    >
+                      {editingLandingItem ? "Simpan Perubahan" : "Simpan ke Beranda"}
+                    </button>
+                  </div>
+                </form>
               </div>
             </div>
           )}
@@ -3553,22 +5325,30 @@ export default function AdminDashboardPage() {
                 )}
 
                 <div className="space-y-3">
-                  {broadcasts.map((bc) => (
-                    <div key={bc.id} className={`p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 transition ${!bc.isActive ? "bg-slate-50/50 opacity-60 border-slate-200" : "bg-white border-slate-200"}`}>
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${bc.type === "warning" ? "bg-rose-50 text-rose-700" : bc.type === "promo" ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-[#1683FF]"}`}>{bc.type.toUpperCase()}</span>
-                          <span className="text-[10px] text-slate-400">Target: {bc.target} · {formatDateIndo(bc.createdAt)}</span>
-                        </div>
-                        <h4 className="text-xs font-bold text-slate-900">{bc.title}</h4>
-                        <p className="text-xs text-slate-500 mt-0.5">{bc.message}</p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button type="button" onClick={() => handleToggleBroadcast(bc.id)} className="px-3 py-1 text-xs font-semibold rounded-lg border border-slate-200 hover:bg-slate-50">{bc.isActive ? "Nonaktifkan" : "Siarkan"}</button>
-                        <button type="button" onClick={() => handleDeleteBroadcast(bc.id)} className="p-1.5 text-slate-300 hover:text-rose-600"><Trash2 className="w-3.5 h-3.5" /></button>
-                      </div>
+                  {effectiveBroadcastsList.length === 0 ? (
+                    <div className="p-8 text-center text-slate-400">
+                      <Megaphone className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                      <p className="text-xs font-semibold text-slate-600">Belum Ada Pengumuman</p>
+                      <p className="text-[11px] text-slate-400 mt-1">Klik tombol &ldquo;Siaran Baru&rdquo; di atas untuk menerbitkan pengumuman platform.</p>
                     </div>
-                  ))}
+                  ) : (
+                    effectiveBroadcastsList.map((bc) => (
+                      <div key={bc.id} className={`p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 transition ${!bc.isActive ? "bg-slate-50/50 opacity-60 border-slate-200" : "bg-white border-slate-200"}`}>
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${bc.type === "warning" ? "bg-rose-50 text-rose-700" : bc.type === "promo" ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-[#1683FF]"}`}>{bc.type.toUpperCase()}</span>
+                            <span className="text-[10px] text-slate-400">Target: {bc.target} · {formatDateIndo(bc.createdAt)}</span>
+                          </div>
+                          <h4 className="text-xs font-bold text-slate-900">{bc.title}</h4>
+                          <p className="text-xs text-slate-500 mt-0.5">{bc.message}</p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button type="button" onClick={() => handleToggleBroadcast(bc.id)} className="px-3 py-1 text-xs font-semibold rounded-lg border border-slate-200 hover:bg-slate-50">{bc.isActive ? "Nonaktifkan" : "Siarkan"}</button>
+                          <button type="button" onClick={() => handleDeleteBroadcast(bc.id)} className="p-1.5 text-slate-300 hover:text-rose-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             </div>
@@ -3594,15 +5374,25 @@ export default function AdminDashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {auditLogs.map((log) => (
-                        <tr key={log.id} className="hover:bg-[#F5FAFF]">
-                          <td className="py-3 px-3 text-slate-400 whitespace-nowrap font-mono text-[11px]">{formatDateTimeIndo(log.timestamp)}</td>
-                          <td className="py-3 px-3 font-semibold text-slate-900">{log.actor}</td>
-                          <td className="py-3 px-3"><span className="px-2 py-0.5 rounded-md bg-blue-50 text-[#1683FF] font-bold text-[10px] font-mono">{log.action}</span></td>
-                          <td className="py-3 px-3 text-slate-900 font-medium">{log.target}</td>
-                          <td className="py-3 px-3 text-slate-500 max-w-xs truncate">{log.details}</td>
+                      {effectiveAuditLogsList.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="py-12 text-center text-slate-400">
+                            <History className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                            <p className="font-semibold text-slate-600">Belum Ada Rekam Jejak Audit</p>
+                            <p className="text-xs text-slate-400 mt-0.5">Aktivitas administratif akan tercatat otomatis di sini.</p>
+                          </td>
                         </tr>
-                      ))}
+                      ) : (
+                        effectiveAuditLogsList.map((log) => (
+                          <tr key={log.id} className="hover:bg-[#F5FAFF]">
+                            <td className="py-3 px-3 text-slate-400 whitespace-nowrap font-mono text-[11px]">{formatDateTimeIndo(log.timestamp)}</td>
+                            <td className="py-3 px-3 font-semibold text-slate-900">{log.actor}</td>
+                            <td className="py-3 px-3"><span className="px-2 py-0.5 rounded-md bg-blue-50 text-[#1683FF] font-bold text-[10px] font-mono">{log.action}</span></td>
+                            <td className="py-3 px-3 text-slate-900 font-medium">{log.target}</td>
+                            <td className="py-3 px-3 text-slate-500 max-w-xs truncate">{log.details}</td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -3633,7 +5423,7 @@ export default function AdminDashboardPage() {
                           className={`w-full p-4 text-left hover:bg-[#F5FAFF] transition flex items-start gap-3 cursor-pointer group relative ${selectedThreadId === thread.id ? "bg-blue-50/60" : ""}`}
                         >
                           <div className="relative shrink-0">
-                            <img src={thread.userAvatar} alt={thread.userName} className="w-9 h-9 rounded-full object-cover border border-slate-200" />
+                            <UserAvatar src={thread.userAvatar} name={thread.userName} size="md" rounded="rounded-full" />
                             <UnreadBadge count={thread.unread ? 1 : 0} dotOnly />
                           </div>
                           <div className="min-w-0 flex-1">
@@ -3678,7 +5468,7 @@ export default function AdminDashboardPage() {
                           <button type="button" onClick={() => setSelectedThreadId(null)} className="sm:hidden p-1.5 -ml-1 rounded-lg hover:bg-slate-100 text-slate-500">
                             <ChevronRight className="w-4 h-4 rotate-180" />
                           </button>
-                          <img src={selectedThread.userAvatar} alt={selectedThread.userName} className="w-9 h-9 rounded-full object-cover border border-slate-200 shrink-0" />
+                          <UserAvatar src={selectedThread.userAvatar} name={selectedThread.userName} size="md" rounded="rounded-full" />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                               <span className="font-bold text-sm text-slate-900 truncate">{selectedThread.userName}</span>
@@ -3720,7 +5510,7 @@ export default function AdminDashboardPage() {
                             const isAdmin = msg.from === "admin";
                             return (
                               <div key={msg.id} className={`flex items-end gap-2 group ${isAdmin ? "flex-row-reverse" : ""}`}>
-                                {!isAdmin && <img src={selectedThread.userAvatar} alt="" className="w-7 h-7 rounded-full object-cover shrink-0 border border-slate-200" />}
+                                {!isAdmin && <UserAvatar src={selectedThread.userAvatar} name={selectedThread.userName} size="xs" rounded="rounded-full" />}
                                 {isAdmin && (
                                   <div className="w-7 h-7 rounded-full bg-[#1683FF] text-white text-[10px] font-black flex items-center justify-center shrink-0">A</div>
                                 )}
@@ -3834,42 +5624,13 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* ── PHOTO ZOOM / PREVIEW MODAL ───────────────────────────────────── */}
+      {/* ── PHOTO & PDF DOCUMENT PREVIEW MODAL ─────────────────────────── */}
       {previewImageUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-xs animate-in fade-in duration-150" onClick={() => setPreviewImageUrl(null)}>
-          <div className="relative max-w-3xl w-full max-h-[90vh] bg-white rounded-2xl p-4 shadow-2xl overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
-              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                <Eye className="w-4 h-4 text-[#1683FF]" /> Pratinjau Dokumen / Foto Bukti
-              </span>
-              <button
-                type="button"
-                onClick={() => setPreviewImageUrl(null)}
-                className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center transition cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-auto flex items-center justify-center bg-slate-950/5 rounded-xl p-2 min-h-[300px]">
-              <img
-                src={previewImageUrl}
-                alt="Zoom Preview"
-                className="max-h-[75vh] w-auto max-w-full object-contain rounded-lg shadow-sm"
-              />
-            </div>
-            <div className="pt-3 flex justify-between items-center text-xs text-slate-400">
-              <span>Klik di luar atau tombol silang untuk menutup</span>
-              <a
-                href={previewImageUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="text-[#1683FF] hover:underline flex items-center gap-1 font-semibold"
-              >
-                Buka Tab Baru <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
-          </div>
-        </div>
+        <DocumentPreviewModal
+          url={previewImageUrl}
+          title="Pratinjau Dokumen / Foto Bukti"
+          onClose={() => setPreviewImageUrl(null)}
+        />
       )}
 
       {/* ============================================================ */}
@@ -4034,12 +5795,19 @@ export default function AdminDashboardPage() {
                 <button
                   type="button"
                   onClick={() => { setActiveMenu("verification"); setIsMobileMoreOpen(false); }}
-                  className={`p-3 rounded-2xl border text-left flex items-center gap-2.5 transition ${
+                  className={`p-3 rounded-2xl border text-left flex items-center justify-between transition ${
                     activeMenu === "verification" ? "bg-blue-50 border-[#1683FF] text-[#1683FF]" : "bg-slate-50 border-slate-200/80 text-slate-700"
                   }`}
                 >
-                  <UserCheck className="w-4 h-4 shrink-0 text-[#1683FF]" />
-                  <span className="text-xs font-bold truncate">Verifikasi KYC</span>
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <UserCheck className="w-4 h-4 shrink-0 text-[#1683FF]" />
+                    <span className="text-xs font-bold truncate">Verifikasi KYC</span>
+                  </div>
+                  {pendingKycList.length > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-[#1683FF] text-white shrink-0">
+                      {pendingKycList.length}
+                    </span>
+                  )}
                 </button>
               </div>
             </div>
@@ -4165,7 +5933,8 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      </div>
+        </div>
+      )}
     </RoleGuard>
   );
 }

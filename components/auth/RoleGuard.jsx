@@ -20,7 +20,7 @@ import { ShieldAlert, ArrowLeft, RefreshCw, UserCheck, Shield, Store, Briefcase,
  * Mencegah direct URL navigation yang tidak sah.
  */
 export default function RoleGuard({ allowedRoles = [], fallback = null, children }) {
-  const { currentUser, setCurrentUser } = useApp();
+  const { currentUser, isAuthReady, isAuthenticated } = useApp();
   const router = useRouter();
   const [isClient, setIsClient] = useState(false);
 
@@ -28,7 +28,19 @@ export default function RoleGuard({ allowedRoles = [], fallback = null, children
     setIsClient(true);
   }, []);
 
-  if (!isClient) {
+  // Redirect to login if user is not authenticated once auth is ready
+  useEffect(() => {
+    if (isClient && isAuthReady && !currentUser) {
+      const currentPath = typeof window !== "undefined" ? window.location.pathname : "";
+      const isMitraRoute = allowedRoles.length === 1 && (allowedRoles[0] === "partner" || allowedRoles[0] === "mitra");
+      const loginUrl = isMitraRoute
+        ? `/mitra/login?redirect=${encodeURIComponent(currentPath)}`
+        : `/auth/login?redirect=${encodeURIComponent(currentPath)}`;
+      router.replace(loginUrl);
+    }
+  }, [isClient, isAuthReady, currentUser, allowedRoles, router]);
+
+  if (!isClient || !isAuthReady) {
     if (fallback) {
       return fallback;
     }
@@ -37,6 +49,82 @@ export default function RoleGuard({ allowedRoles = [], fallback = null, children
         <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 border-4 border-[#1683FF] border-t-transparent rounded-full animate-spin" />
           <span className="text-xs font-semibold text-slate-500">Memeriksa hak akses peran akun...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    // Waiting for redirect
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-4 border-[#1683FF] border-t-transparent rounded-full animate-spin" />
+          <span className="text-xs font-semibold text-slate-500">Mengarahkan ke halaman masuk...</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Enforcement Penangguhan Akun (Suspended State)
+  if (currentUser?.verificationStatus === "suspended" && !currentUser?.isAdmin) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC] p-4 sm:p-6">
+        <div className="max-w-md w-full bg-white rounded-3xl border border-rose-200 shadow-2xl p-6 sm:p-8 text-center space-y-5 animate-in fade-in zoom-in-95 duration-200">
+          <div className="w-16 h-16 rounded-2xl bg-rose-50 text-rose-600 mx-auto flex items-center justify-center shadow-inner border border-rose-100">
+            <ShieldAlert className="w-8 h-8" />
+          </div>
+
+          <div>
+            <span className="text-[10px] font-extrabold uppercase tracking-wider text-rose-700 bg-rose-50 border border-rose-200 px-3 py-1 rounded-full">
+              Akun Ditangguhkan (Suspended)
+            </span>
+            <h2 className="text-xl font-extrabold text-slate-900 tracking-tight mt-3">
+              Akses Layanan Dibekukan
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-500 mt-1.5 leading-relaxed">
+              Akun Anda sedang ditangguhkan oleh Administrator Bantuin karena peninjauan kepatuhan atau pelanggaran pedoman komunitas.
+            </p>
+          </div>
+
+          <div className="p-4 bg-rose-50/60 rounded-2xl border border-rose-200/80 text-left space-y-2 text-xs">
+            <div className="flex items-center justify-between text-slate-600">
+              <span>Akun:</span>
+              <strong className="text-slate-900">{currentUser?.fullName || currentUser?.name || "Pengguna"}</strong>
+            </div>
+            <div className="flex items-center justify-between text-slate-600">
+              <span>Email:</span>
+              <span className="text-slate-800 font-mono text-[11px]">{currentUser?.email}</span>
+            </div>
+            <div className="pt-2 border-t border-rose-200/60 text-rose-900">
+              <span className="font-bold block text-[11px] text-rose-700 uppercase tracking-wider mb-0.5">Catatan Admin:</span>
+              <p className="text-xs italic bg-white/80 p-2.5 rounded-xl border border-rose-200">
+                &ldquo;{currentUser?.verificationNotes || "Pelanggaran pedoman kepatuhan dan integritas komunitas Bantuin."}&rdquo;
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 pt-2">
+            <a
+              href="https://wa.me/6281250269781?text=Halo%20Admin%20Bantuin,%20saya%20ingin%20mengajukan%20banding%20terkait%20penangguhan%20akun%20saya"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full sm:w-auto flex-1 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm transition active:scale-95 cursor-pointer"
+            >
+              <span>Hubungi Admin / Banding</span>
+            </a>
+            <button
+              type="button"
+              onClick={async () => {
+                const { authService } = await import("@/lib/services/authService");
+                await authService.logout();
+                window.location.href = "/auth/login";
+              }}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition active:scale-95 cursor-pointer"
+            >
+              <span>Keluar</span>
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -55,12 +143,12 @@ export default function RoleGuard({ allowedRoles = [], fallback = null, children
     user: ["user", "pelanggan", "customer"],
   };
 
-  const expandedAllowedRoles = allowedRoles.flatMap(r => roleAliases[r] || [r]);
+  const expandedAllowedRoles = allowedRoles.flatMap((r) => roleAliases[r] || [r]);
 
   // Admin dan Super Admin selalu memiliki akses manajemen & preview seluruh dashboard
-  const isAdministrator = 
-    currentRole === "admin" || 
-    currentRole === "super_admin" || 
+  const isAdministrator =
+    currentRole === "admin" ||
+    currentRole === "super_admin" ||
     currentUser?.isAdmin === true;
 
   const isAllowed = isAdministrator || expandedAllowedRoles.includes(currentRole);

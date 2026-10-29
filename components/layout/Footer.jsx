@@ -4,7 +4,7 @@ import React from "react";
 import Link from "next/link";
 import Image from "next/image";
 import logoImg from "@/components/image/logo.png";
-import { Smartphone, Store, ShieldCheck } from "lucide-react";
+import { Smartphone, Store } from "lucide-react";
 
 export default function Footer() {
   return (
@@ -64,16 +64,16 @@ export default function Footer() {
       <div className="relative z-10 max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8">
         
         {/* 4-Column Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-8 lg:gap-12 mb-12">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-8 lg:gap-12 mb-10">
           
           {/* Col 1: Bantuin */}
           <div>
-            <h4 className="font-extrabold text-sm tracking-wider uppercase text-slate-900 mb-4">
+            <h3 className="font-extrabold text-sm tracking-wider uppercase text-slate-900 mb-4">
               Bantuin
-            </h4>
+            </h3>
             <ul className="space-y-2.5 text-xs text-slate-600">
               <li>
-                <Link href="/about" className="hover:text-[#1683FF] transition font-medium">
+                <Link href="/tentang-kami" className="hover:text-[#1683FF] transition font-medium">
                   Tentang Kami
                 </Link>
               </li>
@@ -102,9 +102,9 @@ export default function Footer() {
 
           {/* Col 2: Pusat Bantuan */}
           <div>
-            <h4 className="font-extrabold text-sm tracking-wider uppercase text-slate-900 mb-4">
+            <h3 className="font-extrabold text-sm tracking-wider uppercase text-slate-900 mb-4">
               Pusat Bantuan
-            </h4>
+            </h3>
             <ul className="space-y-2.5 text-xs text-slate-600">
               <li>
                 <Link href="/faq" className="hover:text-[#1683FF] transition font-medium">
@@ -119,6 +119,11 @@ export default function Footer() {
               <li>
                 <Link href="/syarat-ketentuan" className="hover:text-[#1683FF] transition font-medium">
                   Syarat & Ketentuan
+                </Link>
+              </li>
+              <li>
+                <Link href="/syarat-ketentuan#kebijakan-refund" className="hover:text-[#1683FF] transition font-semibold text-blue-700">
+                  Kebijakan Refund
                 </Link>
               </li>
               <li>
@@ -138,9 +143,9 @@ export default function Footer() {
           <div>
             <div className="flex items-center gap-1.5 mb-4">
               <Store className="w-4 h-4 text-emerald-600" />
-              <h4 className="font-extrabold text-sm tracking-wider uppercase text-emerald-700">
+              <h3 className="font-extrabold text-sm tracking-wider uppercase text-emerald-700">
                 Portal Mitra
-              </h4>
+              </h3>
             </div>
             <ul className="space-y-2.5 text-xs text-slate-600">
               <li>
@@ -174,9 +179,9 @@ export default function Footer() {
 
           {/* Col 4: Download Aplikasi */}
           <div>
-            <h4 className="font-extrabold text-sm tracking-wider uppercase text-slate-900 mb-4">
+            <h3 className="font-extrabold text-sm tracking-wider uppercase text-slate-900 mb-4">
               Download Aplikasi
-            </h4>
+            </h3>
             <div className="space-y-2.5">
               <div className="bg-white/85 backdrop-blur-xs border border-blue-200/70 rounded-2xl p-3 flex items-center gap-3 text-slate-700 shadow-2xs hover:shadow-xs hover:border-blue-300 transition">
                 <Smartphone className="w-5 h-5 text-[#1683FF]" />
@@ -205,7 +210,9 @@ export default function Footer() {
               <Image
                 src={logoImg}
                 alt="Bantuin"
+                width={78}
                 height={26}
+                sizes="100px"
                 className="h-6 w-auto object-contain mix-blend-multiply"
               />
             </div>

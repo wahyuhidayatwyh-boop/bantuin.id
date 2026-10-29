@@ -20,7 +20,7 @@ export default function MobileBottomNav() {
   // Count ongoing activities and unread notifications combined for "Aktivitas" badge
   const totalActivityBadgeCount = useMemo(() => {
     if (!isAuthenticated) return 0;
-    const unreadNotifs = (notifications || []).filter((n) => n.unread).length;
+    const unreadNotifs = (notifications || []).filter((n) => (n.unread ?? !n.isRead)).length;
     return (activeActivitiesCount || 0) + unreadNotifs;
   }, [isAuthenticated, activeActivitiesCount, notifications]);
 

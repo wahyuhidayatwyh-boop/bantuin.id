@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -13,17 +13,69 @@ import {
   CreditCard, 
   Users,
   Zap,
-  Clock
+  Clock,
+  Sparkles,
+  ExternalLink
 } from "lucide-react";
 import { useApp } from "@/lib/context/AppContext";
 import heroImg from "@/components/image/hero.png";
+import { promotionService } from "@/lib/services/promotionService";
 
 export default function HeroSection() {
   const router = useRouter();
   const { activeKabupaten } = useApp();
   const [searchQuery, setSearchQuery] = useState("");
+  const [promotedItems, setPromotedItems] = useState([]);
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const searchContainerRef = useRef(null);
 
-  const quickTags = [
+  useEffect(() => {
+    let isMounted = true;
+    const loadPromos = async () => {
+      try {
+        await promotionService.fetchLivePromotions();
+      } catch (err) {
+        console.warn("Hero promo sync warning:", err);
+      }
+      if (!isMounted) return;
+      const active = promotionService.getActivePromotionsSync();
+      setPromotedItems(active);
+    };
+
+    loadPromos();
+    const handleSync = () => {
+      if (!isMounted) return;
+      setPromotedItems(promotionService.getActivePromotionsSync());
+    };
+
+    window.addEventListener("bantuin_promotions_updated", handleSync);
+    return () => {
+      isMounted = false;
+      window.removeEventListener("bantuin_promotions_updated", handleSync);
+    };
+  }, []);
+
+  // Close search suggestions on outside click
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target)) {
+        setIsSearchFocused(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Quick Tags with dynamic active promotions included
+  const dynamicQuickTags = [
+    ...promotedItems.slice(0, 2).map((p) => ({
+      label: p.targetTitle || "Layanan Pilihan",
+      query: p.targetTitle || "",
+      tab: p.targetType === "rental" ? "sewa" : "jasa",
+      targetId: p.targetId,
+      isPromo: true,
+      promoId: p.id,
+    })),
     { label: "Ambil Dokumen", query: "Ambil Dokumen", tab: "bantuan" },
     { label: "Desain Poster", query: "Desain Poster", tab: "jasa" },
     { label: "Sewa Kamera", query: "Sewa Kamera", tab: "sewa" },
@@ -67,6 +119,7 @@ export default function HeroSection() {
 
   const handleSearch = (e) => {
     e.preventDefault();
+    setIsSearchFocused(false);
     if (!searchQuery.trim()) {
       router.push("/bantuan");
       return;
@@ -75,6 +128,17 @@ export default function HeroSection() {
   };
 
   const handleTagClick = (tag) => {
+    setIsSearchFocused(false);
+    if (tag.isPromo && tag.targetId) {
+      if (tag.promoId) promotionService.recordClick(tag.promoId);
+      if (tag.tab === "sewa") {
+        router.push(`/sewa/${encodeURIComponent(tag.targetId)}`);
+      } else {
+        router.push(`/jasa/${encodeURIComponent(tag.targetId)}`);
+      }
+      return;
+    }
+
     if (tag.tab === "sewa") {
       router.push(`/sewa?q=${encodeURIComponent(tag.query)}`);
     } else if (tag.tab === "jasa") {
@@ -83,6 +147,14 @@ export default function HeroSection() {
       router.push(`/bantuan?q=${encodeURIComponent(tag.query)}`);
     }
   };
+
+  // Filter matching suggestions
+  const matchingPromos = searchQuery.trim()
+    ? promotedItems.filter((p) =>
+        (p.targetTitle || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (p.targetCategory || "").toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : promotedItems.slice(0, 4);
 
   return (
     <section className="relative w-full px-2 sm:px-3.5 md:px-5 lg:px-6 pt-2 pb-8 sm:pb-10">
@@ -100,8 +172,8 @@ export default function HeroSection() {
               alt="Bantuin - Ekosistem Bantuan, Jasa & Sewa"
               fill
               priority
-              quality={100}
-              unoptimized
+              quality={85}
+              sizes="(max-width: 1024px) 100vw, 1560px"
               className="w-full h-full object-cover object-right lg:object-center"
             />
             {/* Desktop Left-to-Right gradient fade to protect text contrast */}
@@ -146,42 +218,145 @@ export default function HeroSection() {
               Temukan orang yang bisa membantu, jasa terpercaya, atau barang yang bisa kamu sewa di sekitar <strong className="text-slate-800">{activeKabupaten}</strong> dengan aman &amp; cepat.
             </p>
 
-            {/* Floating Search Bar */}
-            <form
-              onSubmit={handleSearch}
-              className="w-full max-w-xl bg-white/95 backdrop-blur-xl rounded-2xl sm:rounded-full p-1.5 sm:p-2.5 shadow-[0_12px_36px_rgba(22,131,255,0.12)] border border-white flex flex-col sm:flex-row items-center gap-2"
-            >
-              <div className="flex items-center gap-2.5 w-full pl-3 text-slate-400 py-1">
-                <Search className="w-4 h-4 sm:w-5 sm:h-5 text-[#1683FF] shrink-0" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Kamu lagi butuh apa?"
-                  className="flex-1 bg-transparent text-xs sm:text-sm md:text-base text-slate-900 placeholder-slate-400 focus:outline-none py-1"
-                />
-              </div>
-              
-              <button
-                type="submit"
-                className="w-full sm:w-auto px-5 sm:px-6 py-2.5 sm:py-3 rounded-xl sm:rounded-full bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm shadow-md transition flex items-center justify-center gap-1.5 shrink-0 active:scale-95 cursor-pointer"
+            {/* Floating Search Bar with Dynamic Promoted Suggestions */}
+            <div ref={searchContainerRef} className="relative w-full max-w-xl z-30">
+              <form
+                onSubmit={handleSearch}
+                className="w-full bg-white/95 backdrop-blur-xl rounded-2xl sm:rounded-full p-1.5 sm:p-2.5 shadow-[0_12px_36px_rgba(22,131,255,0.12)] border border-white flex flex-col sm:flex-row items-center gap-2"
               >
-                <span>Cari</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-            </form>
+                <div className="flex items-center gap-2.5 w-full pl-3 text-slate-400 py-1">
+                  <Search className="w-4 h-4 sm:w-5 sm:h-5 text-[#1683FF] shrink-0" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onFocus={() => setIsSearchFocused(true)}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      setIsSearchFocused(true);
+                    }}
+                    placeholder="Kamu lagi butuh apa?"
+                    className="flex-1 bg-transparent text-xs sm:text-sm md:text-base text-slate-900 placeholder-slate-400 focus:outline-none py-1"
+                  />
+                </div>
+                
+                <button
+                  type="submit"
+                  className="w-full sm:w-auto px-5 sm:px-6 py-2.5 sm:py-3 rounded-xl sm:rounded-full bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm shadow-md transition flex items-center justify-center gap-1.5 shrink-0 active:scale-95 cursor-pointer"
+                >
+                  <span>Cari</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </form>
+
+              {/* Dynamic Promoted & Search Suggestions Popover */}
+              {isSearchFocused && (
+                <div className="absolute left-0 right-0 top-full mt-2 bg-white/98 backdrop-blur-xl rounded-2xl shadow-[0_16px_40px_rgba(0,0,0,0.14)] border border-blue-100 p-3 z-50 text-left animate-in fade-in-50 slide-in-from-top-2 duration-150">
+                  {matchingPromos.length > 0 && (
+                    <div className="mb-2">
+                      <div className="flex items-center justify-between px-2 py-1 mb-1 border-b border-slate-100">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-[#1683FF] flex items-center gap-1">
+                          <Sparkles className="w-3 h-3 text-[#1683FF]" />
+                          <span>Pilihan Direkomendasikan &amp; Promosi</span>
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-400">Resmi</span>
+                      </div>
+                      <div className="space-y-1">
+                        {matchingPromos.map((promo) => (
+                          <div
+                            key={promo.id}
+                            onClick={() => {
+                              promotionService.recordClick(promo.id);
+                              setIsSearchFocused(false);
+                              if (promo.targetType === "rental") {
+                                router.push(`/sewa/${encodeURIComponent(promo.targetId || promo.id)}`);
+                              } else {
+                                router.push(`/jasa/${encodeURIComponent(promo.targetId || promo.id)}`);
+                              }
+                            }}
+                            className="flex items-center justify-between gap-3 p-2 rounded-xl hover:bg-blue-50/80 transition cursor-pointer group"
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="w-8 h-8 rounded-lg bg-blue-100 text-[#1683FF] flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden relative">
+                                {promo.targetImage && promo.targetImage !== "/logotab.png" ? (
+                                  <img src={promo.targetImage} alt={promo.targetTitle} className="w-full h-full object-cover" />
+                                ) : (
+                                  <Sparkles className="w-4 h-4" />
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="text-xs font-bold text-slate-900 group-hover:text-[#1683FF] truncate flex items-center gap-1.5">
+                                  <span>{promo.targetTitle}</span>
+                                  <span className="text-[9px] font-black uppercase px-1.5 py-0.2 rounded-full bg-blue-100 text-[#1683FF] border border-blue-200 shrink-0">
+                                    Promosi
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-slate-500 truncate">
+                                  {promo.ownerName} &middot; {promo.targetCategory}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <span className="text-xs font-black text-slate-800">
+                                {promo.targetPrice > 0 ? `Rp ${promo.targetPrice.toLocaleString("id-ID")}` : "Tersedia"}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Quick Shortcut Buttons */}
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 px-2">
+                    <span>Cari langsung di:</span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsSearchFocused(false);
+                          router.push(`/jasa?q=${encodeURIComponent(searchQuery || "semua")}`);
+                        }}
+                        className="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-blue-50 hover:text-[#1683FF] font-semibold transition"
+                      >
+                        Katalog Jasa &rarr;
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsSearchFocused(false);
+                          router.push(`/sewa?q=${encodeURIComponent(searchQuery || "semua")}`);
+                        }}
+                        className="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-blue-50 hover:text-[#1683FF] font-semibold transition"
+                      >
+                        Katalog Sewa &rarr;
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Quick Tags */}
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-3.5 sm:mt-4">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-3.5 sm:mt-4 min-h-[32px] sm:min-h-[36px]">
               <span className="text-[11px] sm:text-xs text-slate-500 font-semibold">Contoh:</span>
-              {quickTags.map((tag) => (
+              {dynamicQuickTags.map((tag) => (
                 <button
-                  key={tag.label}
+                  key={tag.label + (tag.isPromo ? "-promo" : "")}
                   type="button"
                   onClick={() => handleTagClick(tag)}
-                  className="text-[11px] sm:text-xs px-2.5 sm:px-3.5 py-1 rounded-full bg-white/90 hover:bg-white text-slate-700 hover:text-[#1683FF] border border-slate-200/70 shadow-2xs transition font-semibold cursor-pointer active:scale-95"
+                  className={`text-[11px] sm:text-xs px-2.5 sm:px-3.5 py-1 rounded-full border shadow-2xs transition font-semibold cursor-pointer active:scale-95 flex items-center gap-1.5 ${
+                    tag.isPromo
+                      ? "bg-blue-50 text-[#0F6FE5] border-blue-200 hover:bg-blue-100 font-bold"
+                      : "bg-white/90 hover:bg-white text-slate-700 hover:text-[#0F6FE5] border-slate-200/70"
+                  }`}
                 >
-                  {tag.label}
+                  {tag.isPromo && <Sparkles className="w-3 h-3 text-[#0F6FE5] shrink-0" />}
+                  <span>{tag.label}</span>
+                  {tag.isPromo && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-blue-100 text-[#0B60D0] font-extrabold uppercase">
+                      Promo
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
@@ -237,9 +412,9 @@ export default function HeroSection() {
                 <Icon className={`w-4 h-4 sm:w-5 sm:h-5 ${badge.color}`} />
               </div>
               <div className="min-w-0 flex-1 overflow-hidden">
-                <h4 className="font-bold text-[11px] sm:text-sm text-slate-900 leading-snug truncate">
+                <h3 className="font-bold text-[11px] sm:text-sm text-slate-900 leading-snug truncate">
                   {badge.title}
-                </h4>
+                </h3>
                 <p className="text-[9px] sm:text-[11px] text-slate-500 leading-normal mt-0.5 truncate">
                   {badge.desc}
                 </p>

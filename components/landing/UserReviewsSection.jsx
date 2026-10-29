@@ -1,78 +1,22 @@
 "use client";
 
 import React, { useRef, useState, useEffect, useMemo } from "react";
-import { landingContentService } from "@/lib/services/landingContentService";
-
-const REVIEWS = [
-  {
-    id: 1,
-    quote:
-      "Bantuin lebih terjangkau dari segi harga. Freelancernya cepat tanggap, skillnya bagus dan pengerjaannya sangat cepat. Hasilnya juga memuaskan.",
-    name: "Peter",
-    company: "Istana Bakmi",
-    avatar: "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=120&q=80",
-    initials: "IB",
-  },
-  {
-    id: 2,
-    quote:
-      "Mantap pake Bantuin. Gampang aksesnya. Toko mitra dan layanannya jg profesional semua. Recommended.",
-    name: "Daniel",
-    company: "D'Clean",
-    avatar: "https://images.unsplash.com/photo-1563245372-f21724e3856d?auto=format&fit=crop&w=120&q=80",
-    initials: "DC",
-  },
-  {
-    id: 3,
-    quote:
-      "Sya baru pertama kali mencoba aplikasi ini. Dan saya puas dengan pelayanannya, baik dari aplikasi maupun mitranya. Ekspektasinya memuaskan.",
-    name: "Alvan Prima",
-    company: "Pas Steak",
-    avatar: "https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&w=120&q=80",
-    initials: "PS",
-  },
-  {
-    id: 4,
-    quote:
-      "Fitur bantuan tugasnya sangat membantu pas butuh cepat angkut barang dan tugas mendadak. Respon teman-teman mahasiswa cepat dan saling bantu.",
-    name: "Nabila Putri",
-    company: "Mahasiswa UNSOED",
-    avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80",
-    initials: "NP",
-  },
-  {
-    id: 5,
-    quote:
-      "Sewa kamera dan drone buat liputan event kampus prosesnya gampang banget. Unit terawat, sensor bersih, dan sistem pembayarannya aman.",
-    name: "Rizky Ramadhan",
-    company: "Kopi Soedirman",
-    avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&q=80",
-    initials: "RR",
-  },
-  {
-    id: 6,
-    quote:
-      "Teknisi panggilan servis laptop datang on-time ke tempat. Diagnosanya tepat, biaya jujur tanpa dilebih-lebihkan, dan bergaransi.",
-    name: "Natasha Caroline",
-    company: "Focus Creative",
-    avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=120&q=80",
-    initials: "NC",
-  },
-];
-
 const INITIAL_REVIEW_INDEX = 1;
 
 export default function UserReviewsSection() {
   const scrollRef = useRef(null);
   const loopIndexRef = useRef(0);
   const [activeIndex, setActiveIndex] = useState(INITIAL_REVIEW_INDEX);
-  const [reviews, setReviews] = useState(() => landingContentService.getContentSync().reviews || REVIEWS);
+  const [reviews, setReviews] = useState([]);
   const loopReviews = useMemo(() => [...reviews, ...reviews, ...reviews], [reviews]);
 
   useEffect(() => {
-    const sync = () => setReviews(landingContentService.getContentSync().reviews);
-    window.addEventListener(landingContentService.eventName, sync);
-    return () => window.removeEventListener(landingContentService.eventName, sync);
+    let cancelled = false;
+    fetch("/api/landing-content", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((json) => { if (!cancelled && json.success) setReviews(json.data?.reviews || []); })
+      .catch(() => { if (!cancelled) setReviews([]); });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -172,10 +116,10 @@ export default function UserReviewsSection() {
                 key={`${rev.id}-${index}`}
                 data-review-card={index}
                 data-review-original={originalIndex}
-                className={`bg-white rounded-2xl p-6 sm:p-7 border flex flex-col justify-between flex-shrink-0 w-[290px] sm:w-[350px] md:w-[380px] min-h-[210px] sm:min-h-[225px] snap-center transition-all duration-500 ${
+                className={`bg-white rounded-2xl p-6 sm:p-7 border flex flex-col justify-between flex-shrink-0 w-[290px] sm:w-[350px] md:w-[380px] min-h-[210px] sm:min-h-[225px] snap-center transition-transform duration-500 will-change-transform ${
                   activeIndex === originalIndex
-                    ? "-translate-y-2 scale-[1.035] border-blue-200 shadow-[0_16px_36px_rgba(22,131,255,0.16)]"
-                    : "border-slate-100 shadow-[0_4px_24px_rgba(0,0,0,0.06)]"
+                    ? "-translate-y-2 scale-[1.035] border-blue-200 shadow-[0_12px_28px_rgba(22,131,255,0.12)]"
+                    : "border-slate-100 shadow-[0_4px_20px_rgba(0,0,0,0.04)]"
                 }`}
               >
                 {/* Quotation mark on left & quote text */}
@@ -191,8 +135,12 @@ export default function UserReviewsSection() {
                 {/* Profile Circle, Name & Subtitle */}
                 <div className="flex items-center gap-3 pt-4 mt-auto">
                   <img
-                    src={rev.avatar}
+                    src={rev.avatarUrl || rev.avatar || "/logotab.png"}
                     alt={rev.name}
+                    width={40}
+                    height={40}
+                    loading="lazy"
+                    decoding="async"
                     className="w-10 h-10 rounded-full object-cover border border-slate-200 shadow-2xs shrink-0"
                     onError={(e) => {
                       e.target.style.display = "none";
@@ -200,10 +148,10 @@ export default function UserReviewsSection() {
                   />
 
                   <div className="min-w-0">
-                    <h4 className="text-xs sm:text-sm font-bold text-[#1683FF] truncate leading-tight">
+                    <h3 className="text-xs sm:text-sm font-bold text-[#0F6FE5] truncate leading-tight">
                       {rev.name}
-                    </h4>
-                    <p className="text-[11px] sm:text-xs text-slate-400 truncate mt-0.5 font-medium">
+                    </h3>
+                    <p className="text-[11px] sm:text-xs text-slate-500 truncate mt-0.5 font-medium">
                       {rev.company}
                     </p>
                   </div>

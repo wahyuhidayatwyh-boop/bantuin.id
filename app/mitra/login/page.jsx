@@ -7,15 +7,18 @@ import { useRouter } from "next/navigation";
 import logoImg from "@/components/image/logo.png";
 import { Store, ShieldCheck, ArrowRight, Lock, Mail, ArrowLeft, Loader2 } from "lucide-react";
 import GoogleIcon from "@/components/common/GoogleIcon";
+import GoogleSignInButton from "@/components/auth/GoogleSignInButton";
+import AuthLoadingScreen from "@/components/auth/AuthLoadingScreen";
 import { authService, CANONICAL_ROLES } from "@/lib/services/authService";
+import { useApp } from "@/lib/context/AppContext";
 import AuthSkeleton from "@/components/skeletons/AuthSkeleton";
 
 function MitraLoginPageContent() {
   const router = useRouter();
-  const [email, setEmail] = useState("mitra@bantuin.id");
-  const [password, setPassword] = useState("password123");
+  const { addToast, setCurrentUser } = useApp();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
   const getSafeRedirect = () => {
     if (typeof window === "undefined") return null;
@@ -27,23 +30,20 @@ function MitraLoginPageContent() {
     e.preventDefault();
     setIsLoading(true);
     try {
-      await authService.login({ email, password, role: CANONICAL_ROLES.PARTNER });
+      const res = await authService.login({ email, password, role: CANONICAL_ROLES.PARTNER });
+      if (res?.user) {
+        setCurrentUser(res.user);
+      }
+      addToast?.("Berhasil Masuk", `Selamat datang kembali, ${res.user?.fullName || "Mitra"}!`, "success");
       router.push(getSafeRedirect() || "/mitra/dashboard");
+    } catch (err) {
+      console.error("Mitra login error:", err);
+      addToast?.("Gagal Masuk", err.message || "Email atau kata sandi tidak cocok.", "error");
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleGoogleLogin = async () => {
-    if (isLoading || isGoogleLoading) return;
-    setIsGoogleLoading(true);
-    try {
-      await authService.loginWithGoogle();
-      router.push(getSafeRedirect() || "/mitra/dashboard");
-    } finally {
-      setIsGoogleLoading(false);
-    }
-  };
 
   return (
     <div className="min-h-[100dvh] relative flex flex-col justify-between p-3 sm:p-6 lg:p-8 overflow-x-hidden font-sans bg-gradient-to-br from-[#EBF3FE] via-[#F0F6FF] to-[#DEEEFC] text-slate-800">
@@ -149,7 +149,7 @@ function MitraLoginPageContent() {
 
             <button
               type="submit"
-              disabled={isLoading || isGoogleLoading}
+              disabled={isLoading}
               className="w-full py-3 rounded-xl bg-gradient-to-r from-[#1683FF] to-[#0F6FE5] hover:from-[#0F6FE5] hover:to-[#0B56B3] text-white font-bold text-xs sm:text-sm shadow-[0_8px_20px_rgba(22,131,255,0.25)] transition active:scale-95 flex items-center justify-center gap-2 mt-2 cursor-pointer disabled:opacity-60"
             >
               <span>{isLoading ? "Memverifikasi Akun..." : "Masuk ke Dashboard Mitra"}</span>
@@ -169,29 +169,13 @@ function MitraLoginPageContent() {
             </div>
           </div>
 
-          {/* Google Login Button */}
-          <button
-            type="button"
-            disabled={isLoading || isGoogleLoading}
-            onClick={handleGoogleLogin}
-            className={`w-full py-2.5 px-4 rounded-xl border text-xs sm:text-sm font-semibold shadow-2xs transition flex items-center justify-center gap-2.5 cursor-pointer active:scale-95 disabled:cursor-not-allowed ${
-              isGoogleLoading
-                ? "bg-blue-50 border-blue-300 text-[#1683FF]"
-                : "border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-700"
-            }`}
-          >
-            {isGoogleLoading ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin text-[#1683FF]" />
-                <span>Membuka Google OAuth...</span>
-              </>
-            ) : (
-              <>
-                <GoogleIcon className="w-4 h-4 shrink-0" />
-                <span>Lanjutkan dengan Google</span>
-              </>
-            )}
-          </button>
+          {/* Google Login Button (GIS Pop-up / One Tap with Custom Domain Branding) */}
+          <GoogleSignInButton
+            role={CANONICAL_ROLES.PARTNER}
+            mode="login"
+            label="Lanjutkan dengan Google"
+            disabled={isLoading}
+          />
 
           {/* Switch to Mitra Register */}
           <div className="pt-2 text-center text-xs text-slate-600">
@@ -213,6 +197,14 @@ function MitraLoginPageContent() {
         </div>
 
       </div>
+
+      {/* Immersive Brand Loading Screen saat Login Mitra */}
+      {isLoading && (
+        <AuthLoadingScreen
+          title="Memverifikasi Akun Mitra..."
+          subtitle="Sedang memeriksa kredensial merchant Anda secara aman..."
+        />
+      )}
 
       {/* Footer Info */}
       <div className="max-w-[1200px] w-full mx-auto text-center text-xs text-slate-400 z-10 py-2">

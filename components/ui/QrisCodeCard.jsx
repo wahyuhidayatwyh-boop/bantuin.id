@@ -137,7 +137,7 @@ export default function QrisCodeCard({
         {/* Bottom Details of QR Card */}
         <div className="w-full pt-3 mt-3 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-500 font-semibold">
           <span className="tracking-tight">NMID: ID1020039281729</span>
-          <span className="text-[#1683FF] font-bold">Bantuin Pay</span>
+          <span className="text-[#1683FF] font-bold">Midtrans QRIS</span>
         </div>
       </div>
 
@@ -174,8 +174,8 @@ export default function QrisCodeCard({
         <div className="text-xs text-slate-600 bg-white/70 p-2.5 sm:p-3 rounded-xl border border-slate-200/60 space-y-2">
           {[
             "Buka aplikasi m-Banking atau e-Wallet di smartphone Anda",
-            <React.Fragment key="step2">Pilih menu <strong>Scan QRIS</strong> dan arahkan kamera ke kode di samping</React.Fragment>,
-            "Periksa nominal tagihan dan konfirmasi pembayaran Anda"
+            <React.Fragment key="step2">Klik <strong>Bayar Sekarang</strong> untuk menampilkan QRIS resmi dari sistem pembayaran</React.Fragment>,
+            "Arahkan kamera ke kode QRIS resmi dan konfirmasi pembayaran Anda"
           ].map((text, i) => (
             <div key={i} className="flex items-start gap-2 leading-snug">
               <span className="w-4 h-4 rounded-full bg-blue-100 text-[#1683FF] text-[10px] font-black flex items-center justify-center shrink-0 mt-0.5">{i + 1}</span>
@@ -187,7 +187,7 @@ export default function QrisCodeCard({
         {/* Auto Status Pulse — compact inline */}
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-50/70 border border-blue-100 w-fit">
           <span className="w-2 h-2 rounded-full bg-[#1683FF] animate-pulse shrink-0" />
-          <span className="text-[11px] text-[#1683FF] font-semibold">Menunggu scan pembayaran (terdeteksi otomatis 24 jam)</span>
+          <span className="text-[11px] text-[#1683FF] font-semibold">Kode QRIS resmi akan diterbitkan otomatis saat menekan Bayar Sekarang</span>
         </div>
       </div>
     </div>

@@ -23,16 +23,10 @@ import {
 } from "lucide-react";
 
 export default function ExploreServicesSection() {
-  const { rentals = [], activeKabupaten = "Kab. Banyumas" } = useApp() || {};
+  const { rentals = [], services = [], activeKabupaten = "Kab. Banyumas" } = useApp() || {};
 
-  // Real counts derived from existing data
-  const servicesCount = useMemo(() => {
-    try {
-      return getAllCatalogServices().length;
-    } catch {
-      return 0;
-    }
-  }, []);
+  // Real counts derived directly from database services
+  const servicesCount = Array.isArray(services) ? services.length : 0;
 
   const rentalsCount = rentals.length;
 
@@ -78,7 +72,6 @@ export default function ExploreServicesSection() {
                   <Image
                     src={jasaImg}
                     alt="Layanan Jasa Profesional Bantuin"
-                    priority
                     sizes="(max-width: 1024px) 100vw, 50vw"
                     className="w-full h-auto object-cover transition-transform duration-500 group-hover:scale-[1.02]"
                   />
@@ -135,7 +128,7 @@ export default function ExploreServicesSection() {
                     <span>Jelajahi Katalog Jasa</span>
                     <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                   </Link>
-                  <span className="text-[11px] text-slate-400 font-medium">
+                  <span className="text-[11px] text-slate-500 font-medium">
                     Bebas konsultasi langsung dengan mitra jasa
                   </span>
                 </div>
@@ -214,7 +207,6 @@ export default function ExploreServicesSection() {
                   <Image
                     src={sewaImg}
                     alt="Rental Alat dan Perlengkapan Bantuin"
-                    priority
                     sizes="(max-width: 1024px) 100vw, 50vw"
                     className="w-full h-auto object-cover transition-transform duration-500 group-hover:scale-[1.02]"
                   />

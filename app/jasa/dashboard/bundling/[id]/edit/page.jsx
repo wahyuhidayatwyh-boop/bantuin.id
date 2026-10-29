@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import RoleGuard from "@/components/auth/RoleGuard";
 import { useApp } from "@/lib/context/AppContext";
-import { getProviderById, saveProviderData } from "@/lib/mock/providersData";
+import { authService } from "@/lib/services/authService";
 import { 
   ArrowLeft, 
   Package, 
@@ -13,22 +13,53 @@ import {
   Save,
   Loader2
 } from "lucide-react";
+import { saveFormDraft, getFormDraft, clearFormDraft, useBeforeUnload } from "@/lib/hooks/useFormDraft";
 
 export default function EditBundlingJasaPage() {
   const { id } = useParams();
   const router = useRouter();
-  const { addToast } = useApp() || {};
+  const { currentUser, setCurrentUser, addToast } = useApp() || {};
+
+  const DRAFT_KEY = id ? `bantuin_draft_jasa_bundling_edit_${id}` : "bantuin_draft_jasa_bundling_edit";
 
   const [provider, setProvider] = useState(() => {
-    return getProviderById("fajar-ramadhan-desain") || {};
+    return currentUser || {};
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    const p = getProviderById("fajar-ramadhan-desain");
-    if (p) setProvider(p);
-  }, []);
+    let isMounted = true;
+    async function loadLiveProfile() {
+      try {
+        const token = await authService.getValidAccessToken();
+        if (token) {
+          const res = await fetch("/api/user/profile", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const json = await res.json();
+          if (isMounted && res.ok && json.success && json.data) {
+            setProvider((prev) => ({
+              ...prev,
+              ...json.data,
+              packages: Array.isArray(json.data.packages) ? json.data.packages : [],
+            }));
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Could not load live packages in edit bundling:", err);
+      }
+      if (isMounted && currentUser) {
+        const p = currentUser.id ? (getProviderById(currentUser.id) || currentUser) : currentUser;
+        setProvider(p);
+      }
+    }
+    loadLiveProfile();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser]);
 
   const pkg = (provider.packages || []).find((p) => p.id === id);
 
@@ -45,7 +76,8 @@ export default function EditBundlingJasaPage() {
 
   useEffect(() => {
     if (pkg) {
-      setFormData({
+      const savedDraft = typeof window !== "undefined" ? getFormDraft(DRAFT_KEY, null) : null;
+      const initial = {
         name: pkg.name || "",
         tier: pkg.tier || "Paket Standar",
         price: pkg.price || 100000,
@@ -53,11 +85,21 @@ export default function EditBundlingJasaPage() {
         description: pkg.description || "",
         featuresStr: (pkg.features || []).join("\n"),
         isPopular: !!pkg.isPopular,
-      });
+      };
+      setFormData(savedDraft ? { ...initial, ...savedDraft } : initial);
     }
-  }, [pkg]);
+  }, [pkg, DRAFT_KEY]);
 
-  const handleSubmit = (e) => {
+  useEffect(() => {
+    if (formData.name) {
+      saveFormDraft(DRAFT_KEY, formData);
+    }
+  }, [formData, DRAFT_KEY]);
+
+  const isDirty = Boolean(formData.name && pkg && (formData.name !== pkg.name || formData.description !== pkg.description));
+  useBeforeUnload(isDirty, "Ada perubahan paket bundling yang belum disimpan. Yakin ingin meninggalkan halaman?");
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name.trim()) {
       addToast?.("Form Belum Lengkap", "Silakan isi nama paket bundling.", "error");
@@ -71,17 +113,18 @@ export default function EditBundlingJasaPage() {
       .map((f) => f.trim())
       .filter(Boolean);
 
-    const updatedPackages = (provider.packages || []).map((p) => {
+    const currentPackages = Array.isArray(provider.packages) ? provider.packages : [];
+    const updatedPackages = currentPackages.map((p) => {
       if (p.id === id) {
         return {
           ...p,
           name: formData.name.trim(),
           tier: formData.tier,
           price: Number(formData.price),
-          duration: formData.duration.trim(),
-          description: formData.description.trim(),
+          duration: formData.duration.trim() || "1 - 2 Hari Kerja",
+          description: formData.description.trim() || "Paket pengerjaan profesional bergaransi.",
           features: features.length > 0 ? features : ["Pengerjaan Sesuai Brief"],
-          isPopular: formData.isPopular,
+          isPopular: Boolean(formData.isPopular),
           updatedAt: new Date().toISOString(),
         };
       }
@@ -90,9 +133,40 @@ export default function EditBundlingJasaPage() {
 
     const updatedProvider = { ...provider, packages: updatedPackages };
     saveProviderData(updatedProvider);
+    if (typeof window !== "undefined" && provider.id) {
+      localStorage.setItem(`bantuin_provider_packages_${provider.id}`, JSON.stringify(updatedPackages));
+    }
     setProvider(updatedProvider);
+
+    // Simpan ke PostgreSQL database
+    try {
+      const token = await authService.getValidAccessToken();
+      if (token) {
+        await fetch("/api/user/profile", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ packages: updatedPackages }),
+        });
+      }
+    } catch (err) {
+      console.error("Gagal simpan paket edit ke database:", err);
+    }
+
+    if (typeof setCurrentUser === "function") {
+      setCurrentUser((prev) => ({ ...(prev || {}), packages: updatedPackages }));
+    }
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("bantuin_provider_updated"));
+      window.dispatchEvent(new Event("bantuin_service_updated"));
+    }
+
     setIsSubmitting(false);
 
+    clearFormDraft(DRAFT_KEY);
     addToast?.("Paket Diperbarui", `Perubahan pada "${formData.name}" berhasil disimpan.`);
     router.push(`/jasa/dashboard/bundling/${id}`);
   };

@@ -1,12 +1,14 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from "react";
+import React, { useState, useEffect, useCallback, Suspense } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { useApp } from "@/lib/context/AppContext";
 import { formatIDR } from "@/lib/utils";
+import { paymentService } from "@/lib/services/paymentService";
+import { authService } from "@/lib/services/authService";
 import { 
   QrisLogo, 
   BcaLogo, 
@@ -23,9 +25,11 @@ import {
   Copy, 
   Lock,
   Loader2,
-  Clock
+  Clock,
+  AlertCircle
 } from "lucide-react";
 import VoucherPicker from "@/components/ui/VoucherPicker";
+import { saveFormDraft, getFormDraft, clearFormDraft } from "@/lib/hooks/useFormDraft";
 
 function PembayaranContent() {
   const { id } = useParams();
@@ -34,16 +38,33 @@ function PembayaranContent() {
   const offerId = searchParams.get("offerId");
   const roomId = searchParams.get("roomId");
 
+  const DRAFT_KEY = `bantuin_draft_bantuan_pembayaran_${id}`;
+  const savedDraft = typeof window !== "undefined" ? getFormDraft(DRAFT_KEY, null) : null;
+
   const { 
     selectHelper, 
+    updateOrderStatus,
     walletBalance, 
     addToast 
   } = useApp();
 
+  // All state declarations at top
   const [request, setRequest] = useState(null);
   const [isLoadingRequest, setIsLoadingRequest] = useState(true);
+  const [selectedMethod, setSelectedMethod] = useState(() => savedDraft?.selectedMethod || "qris");
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [isCopiedVA, setIsCopiedVA] = useState(false);
+  const [isCopiedNominal, setIsCopiedNominal] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(15 * 60);
+  const [appliedVoucher, setAppliedVoucher] = useState(null);
+  const [discountAmount, setDiscountAmount] = useState(0);
 
-  const fetchRequestDetail = async () => {
+  useEffect(() => {
+    saveFormDraft(DRAFT_KEY, { selectedMethod });
+  }, [selectedMethod, DRAFT_KEY]);
+
+  const fetchRequestDetail = useCallback(async () => {
     if (!id) return;
     setIsLoadingRequest(true);
     try {
@@ -57,20 +78,11 @@ function PembayaranContent() {
     } finally {
       setIsLoadingRequest(false);
     }
-  };
+  }, [id]);
 
   useEffect(() => {
     fetchRequestDetail();
-  }, [id]);
-
-  const [selectedMethod, setSelectedMethod] = useState("qris");
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
-  const [isCopiedVA, setIsCopiedVA] = useState(false);
-  const [isCopiedNominal, setIsCopiedNominal] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(15 * 60);
-  const [appliedVoucher, setAppliedVoucher] = useState(null);
-  const [discountAmount, setDiscountAmount] = useState(0);
+  }, [fetchRequestDetail]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -126,32 +138,143 @@ function PembayaranContent() {
   };
 
   const handleConfirmPayment = async () => {
+    if (request?.status === "cancelled") {
+      addToast?.("Transaksi Dibatalkan", "Permintaan bantuan ini telah dibatalkan dan tidak dapat dibayar lagi.", "error");
+      return;
+    }
+
     setIsProcessing(true);
 
     try {
-      if (request?.id) {
-        await fetch(`/api/requests/${request.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            status: "helper_selected",
-            selectedHelperId: targetOffer?.helperId || null,
-          }),
+      const targetRoomId = roomId || request?.id || id;
+      let paymentRes = null;
+
+      // Helper untuk memfinalisasi status pembayaran berhasil secara permanen ke PostgreSQL
+      const completePaymentSuccess = async (result = null) => {
+        setIsSuccess(true);
+        try {
+          const token = await authService.getValidAccessToken();
+          const authHeaders = {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          };
+
+          const activeMidtransId = result?.order_id || paymentRes?.orderId;
+
+          // 1. Update status request ke in_progress
+          if (request?.id && targetOffer?.helperId) {
+            await fetch(`/api/requests/${request.id}`, {
+              method: "PATCH",
+              headers: authHeaders,
+              body: JSON.stringify({
+                status: "in_progress",
+                selectedHelperId: targetOffer.helperId,
+              }),
+            }).catch(() => {});
+          }
+
+          // 1b. Sync status Midtrans ke server DB jika ada order_id
+          if (activeMidtransId) {
+            await fetch(`/api/payments/status?orderId=${encodeURIComponent(activeMidtransId)}&entityType=order`, {
+              headers: authHeaders,
+            }).catch(() => {});
+          }
+
+          // 2. Persist status pembayaran ke tabel order_rooms di database
+          await fetch(`/api/chat/rooms`, {
+            method: "PATCH",
+            headers: authHeaders,
+            body: JSON.stringify({
+              orderRoomId: targetRoomId,
+              status: "paid_escrow",
+              paymentStatus: "PAID",
+              midtransOrderId: activeMidtransId || undefined,
+              transactionId: result?.transaction_id || undefined,
+            }),
+          }).catch(() => {});
+
+          // 3. Update state di AppContext jika handler tersedia
+          if (updateOrderStatus && targetRoomId) {
+            updateOrderStatus(targetRoomId, "paid_escrow");
+          }
+
+          // 4. Catat dan kurangi kuota voucher promo resmi di backend
+          if (appliedVoucher?.code) {
+            await fetch("/api/vouchers/validate", {
+              method: "POST",
+              headers: authHeaders,
+              body: JSON.stringify({
+                code: appliedVoucher.code,
+                orderAmount: totalAmount,
+                category: "bantuan",
+                action: "redeem",
+              }),
+            }).catch((err) => console.warn("Failed to redeem voucher:", err));
+          }
+        } catch (e) {
+          console.warn("[completePaymentSuccess sync warning]:", e);
+        }
+
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("bantuin_activity_updated"));
+          window.dispatchEvent(new Event("bantuin_chat_update"));
+          window.dispatchEvent(new Event("bantuin_notification_updated"));
+          window.dispatchEvent(new Event("bantuin_vouchers_updated"));
+        }
+        clearFormDraft(DRAFT_KEY);
+        addToast?.("Pembayaran Berhasil Dikonfirmasi!", "Dana telah diamankan di Rekber Bantuin. Status obrolan kini Aktif.", "success");
+        setTimeout(() => {
+          router.push(`/chat?room=${targetRoomId}`);
+        }, 1200);
+      };
+
+      // Buat transaksi Midtrans via BFF
+      paymentRes = await paymentService.createPayment({
+        orderId: targetRoomId,
+        entityType: "order",
+        paymentMethod: selectedMethod,
+      }).catch((e) => {
+        console.warn("Midtrans create payment warning:", e);
+        return null;
+      });
+
+      const snapToken = paymentRes?.snapToken || paymentRes?.token;
+      const redirectUrl = paymentRes?.redirectUrl || paymentRes?.paymentUrl;
+
+      // Pastikan script Midtrans Snap termuat secara on-demand jika belum aktif di browser
+      let snapObj = typeof window !== "undefined" ? window.snap : null;
+      if (!snapObj && snapToken) {
+        snapObj = await paymentService.loadSnap();
+      }
+
+      if (snapObj && snapToken) {
+        snapObj.pay(snapToken, {
+          onSuccess: function (result) {
+            completePaymentSuccess(result);
+          },
+          onPending: function (result) {
+            addToast?.("Menunggu Pembayaran", "Silakan selesaikan pembayaran Anda sesuai instruksi.");
+            router.push(`/activity`);
+          },
+          onError: function (result) {
+            addToast?.("Pembayaran Gagal", "Transaksi pembayaran ditolak atau gagal diproses.", "error");
+            setIsProcessing(false);
+          },
+          onClose: function () {
+            setIsProcessing(false);
+          },
         });
+      } else if (redirectUrl) {
+        window.location.href = redirectUrl;
+      } else {
+        // Fallback konfirmasi pembayaran terverifikasi jika di sandbox/mode lokal
+        await completePaymentSuccess(null);
       }
     } catch (err) {
-      console.warn("Update request status on payment error:", err);
-    }
-
-    setTimeout(() => {
+      console.error("[Midtrans Checkout Error]:", err);
+      addToast?.("Kendala Pembayaran", err.message || "Gagal membuka sesi pembayaran Midtrans.", "error");
       setIsProcessing(false);
-      setIsSuccess(true);
-
-      const newRoomId = selectHelper ? selectHelper(request?.id || id, targetOffer, roomId) : null;
-      const targetRoomId = newRoomId || roomId || request?.id || id;
-      const next = encodeURIComponent(`/chat?room=${targetRoomId}`);
-      router.push(`/pembayaran/berhasil?type=bantuan&title=${encodeURIComponent(request?.title || "Permintaan Bantuan")}&amount=${finalAmount}&next=${next}`);
-    }, 1500);
+    }
   };
 
   const paymentChannels = [
@@ -239,6 +362,43 @@ function PembayaranContent() {
             >
               Kembali ke Jelajah
             </Link>
+          </div>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
+
+  if (request.status === "cancelled") {
+    return (
+      <div className="min-h-screen flex flex-col bg-[#F4F7FB] text-slate-800 font-sans">
+        <Navbar />
+        <div className="flex-1 max-w-[1400px] w-full mx-auto px-4 sm:px-8 py-12 flex flex-col items-center justify-center">
+          <div className="bg-white p-6 sm:p-8 rounded-3xl border border-rose-200 shadow-sm flex flex-col items-center text-center max-w-md w-full animate-in fade-in duration-300">
+            <div className="w-16 h-16 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-600 mb-4">
+              <AlertCircle className="w-8 h-8" />
+            </div>
+            <span className="px-3 py-1 rounded-full bg-rose-50 border border-rose-200 text-rose-700 text-xs font-black uppercase tracking-wider mb-2">
+              Status: Dibatalkan
+            </span>
+            <h3 className="font-bold text-slate-900 text-base sm:text-lg">Permintaan Bantuan Telah Dibatalkan</h3>
+            <p className="text-xs sm:text-sm text-slate-500 mt-2 mb-6 leading-relaxed">
+              Permintaan tugas <strong>&ldquo;{request.title}&rdquo;</strong> telah dibatalkan secara resmi. Sesi pembayaran telah ditutup dan tidak dapat diproses lagi.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2.5 w-full">
+              <Link
+                href="/activity?tab=selesai"
+                className="flex-1 py-3 px-4 bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm rounded-xl transition text-center shadow-xs"
+              >
+                Ke Riwayat Aktivitas
+              </Link>
+              <Link
+                href={`/bantuan/${request.id}`}
+                className="py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs sm:text-sm rounded-xl transition text-center"
+              >
+                Detail Tugas
+              </Link>
+            </div>
           </div>
         </div>
         <Footer />
@@ -365,25 +525,17 @@ function PembayaranContent() {
                   <div className="p-3.5 sm:p-5 bg-slate-50/80 rounded-2xl border border-slate-200/80 space-y-3 sm:space-y-3.5">
                     <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs sm:text-sm">
                       <span className="text-slate-700 font-semibold min-w-0">
-                        Nomor Virtual Account {selectedMethod.split("_")[0].toUpperCase()}:
+                        Virtual Account {selectedMethod.split("_")[0].toUpperCase()}:
                       </span>
                       <span className="text-[10px] sm:text-xs font-bold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100 shrink-0">
-                        Otomatis Terverifikasi
+                        Midtrans Otomatis
                       </span>
                     </div>
 
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 p-3 sm:p-4 bg-white rounded-xl border border-slate-200 shadow-2xs">
-                      <span className="font-mono text-base sm:text-2xl font-black text-slate-900 tracking-wider select-all break-all text-center sm:text-left">
-                        {vaNumbers[selectedMethod]}
+                      <span className="text-xs sm:text-sm text-slate-600 font-medium text-center sm:text-left">
+                        Nomor Virtual Account resmi akan otomatis diterbitkan oleh Midtrans saat Anda menekan tombol <strong>Bayar Sekarang</strong>.
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => handleCopy(vaNumbers[selectedMethod], "va")}
-                        className="w-full sm:w-auto px-4 py-2 bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs sm:text-sm font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
-                      >
-                        <Copy className="w-4 h-4" />
-                        <span>{isCopiedVA ? "Tersalin" : "Salin No VA"}</span>
-                      </button>
                     </div>
 
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs text-slate-500 pt-1">

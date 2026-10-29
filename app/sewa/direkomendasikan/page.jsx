@@ -50,13 +50,21 @@ export default function SewaDirekomendasikanPage() {
           promo.image ||
           rentalItem?.photoUrl ||
           rentalItem?.image ||
-          "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=800&auto=format&fit=crop&q=80",
+          "/logotab.png",
         targetImage: promo.targetImage || promo.image || rentalItem?.photoUrl || rentalItem?.image,
         targetLocation: promo.targetLocation || rentalItem?.address || rentalItem?.location || "Banyumas",
-        ownerName: promo.ownerName || rentalItem?.ownerName || rentalItem?.owner?.name || "Mitra Rental",
-        rating: 5.0,
-        ratingAvg: 5.0,
-        ratingCount: 16,
+        ownerName:
+          rentalItem?.owner?.partnerBusinessName ||
+          rentalItem?.owner?.name ||
+          rentalItem?.ownerName ||
+          (promo.ownerName && promo.ownerName !== "wahyump222" ? promo.ownerName : "Dean Outdoor Rental"),
+        rating: Number(rentalItem?.ratingAvg ?? promo.ratingAvg ?? promo.rating ?? 5.0),
+        ratingAvg: Number(rentalItem?.ratingAvg ?? promo.ratingAvg ?? promo.rating ?? 5.0),
+        reviewCount: Number(rentalItem?.ratingCount ?? promo.reviewCount ?? promo.ratingCount ?? 0),
+        ratingCount: Number(rentalItem?.ratingCount ?? promo.reviewCount ?? promo.ratingCount ?? 0),
+        totalRentedCount: Number(rentalItem?.totalRentedCount ?? rentalItem?.completedRentals ?? promo.completedCount ?? 0),
+        completedRentals: Number(rentalItem?.totalRentedCount ?? rentalItem?.completedRentals ?? promo.completedCount ?? 0),
+        completedCount: Number(rentalItem?.totalRentedCount ?? rentalItem?.completedRentals ?? promo.completedCount ?? 0),
         isVerifiedPartner: true,
         targetType: "rental",
       };
@@ -69,7 +77,7 @@ export default function SewaDirekomendasikanPage() {
   // ─── Filter ───────────────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     return promotedRentals.filter((item) => {
-      const q = searchQuery.toLowerCase().trim();
+      const q = String(searchQuery || "").toLowerCase().trim();
       const matchQuery =
         !q ||
         item.title?.toLowerCase().includes(q) ||
@@ -78,7 +86,7 @@ export default function SewaDirekomendasikanPage() {
 
       const matchCat =
         selectedCategory === "Semua" ||
-        (item.category || "").toLowerCase().includes(selectedCategory.toLowerCase());
+        String(item.category || "").toLowerCase().includes(String(selectedCategory || "").toLowerCase());
 
       return matchQuery && matchCat;
     });
@@ -92,7 +100,7 @@ export default function SewaDirekomendasikanPage() {
         cat.id === "Semua"
           ? promotedRentals.length
           : promotedRentals.filter((item) =>
-              (item.category || "").toLowerCase().includes(cat.id.toLowerCase())
+              String(item.category || "").toLowerCase().includes(String(cat.id || "").toLowerCase())
             ).length,
     })).filter((cat) => cat.id === "Semua" || cat.count > 0);
   }, [promotedRentals]);

@@ -1,1 +1,1 @@
-export { GET } from "../user/activities/route";
+export { GET, DELETE } from "../user/activities/route";

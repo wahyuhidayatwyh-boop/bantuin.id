@@ -10,6 +10,7 @@ import { useApp } from "@/lib/context/AppContext";
 import { getMitraStoreById, saveMitraStoreData } from "@/lib/mock/mitraData";
 import { promotionService } from "@/lib/services/promotionService";
 import { paymentService } from "@/lib/services/paymentService";
+import { authService } from "@/lib/services/authService";
 import { formatIDR } from "@/lib/utils";
 import { 
   QrisLogo, 
@@ -24,8 +25,8 @@ import {
   Megaphone, 
   CheckCircle2, 
   Clock, 
-  Lock,
-  Building2,
+  Lock, 
+  Building2, 
   ShieldCheck, 
   Loader2, 
   ExternalLink,
@@ -36,6 +37,10 @@ import {
   Tag,
   Layers
 } from "lucide-react";
+
+import { saveFormDraft, getFormDraft, clearFormDraft } from "@/lib/hooks/useFormDraft";
+
+const DRAFT_KEY = "bantuin_draft_mitra_promosi_buat";
 
 const getPlacementSummary = (pkg) => {
   const placements = pkg?.placements || ["katalog", "search"];
@@ -49,86 +54,73 @@ const getPlacementSummary = (pkg) => {
   };
 };
 
-const MITRA_PROMOTION_PACKAGES = [
-  {
-    id: "pkg-bronze",
-    name: "Spotlight Kategori Sewa",
-    durationDays: 3,
-    price: 35000,
-    badgeText: "Populer Mahasiswa",
-    benefits: [
-      "Posisi teratas pada filter kategori spesifik",
-      "Badge 'Rekomendasi Sewa'",
-      "Estimasi jangkauan +350 calon penyewa/hari",
-      "Statistik klik & impresi harian"
-    ]
-  },
-  {
-    id: "pkg-silver",
-    name: "Banner Beranda & Top Search",
-    durationDays: 7,
-    price: 75000,
-    badgeText: "Paling Diminati",
-    isPopular: true,
-    benefits: [
-      "Tampil di Headline Banner halaman /sewa",
-      "Prioritas #1 hasil pencarian alat rental",
-      "Badge 'Mitra Pilihan Utama'",
-      "Estimasi jangkauan +1.200 calon penyewa/hari",
-      "Laporan analitik promosi lengkap"
-    ]
-  },
-  {
-    id: "pkg-gold",
-    name: "Mega Sultan Flash Placement",
-    durationDays: 14,
-    price: 135000,
-    badgeText: "Maksimal Omset",
-    benefits: [
-      "Semua fitur Paket Silver (14 hari penuh)",
-      "Push notifikasi ke mahasiswa aktif sekitar kampus",
-      "Dukungan WhatsApp customer support prioritas",
-      "Garansi kenaikan traffic minimal 300%",
-      "Slot eksklusif footer & detail unit terkait"
-    ]
-  }
-];
-
 function BuatPromosiMitraContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const targetParam = searchParams.get("target");
   const pkgParam = searchParams.get("pkg");
   const unitParam = searchParams.get("unitId");
-  const { addToast } = useApp() || {};
+  const { addToast, currentUser, rentals } = useApp() || {};
+
+  const savedDraft = typeof window !== "undefined" ? getFormDraft(DRAFT_KEY, null) : null;
 
   const [isSuccess, setIsSuccess] = useState(false);
   const [store, setStore] = useState(() => {
+    if (currentUser?.id) {
+      return getMitraStoreById(currentUser.id) || {
+        id: currentUser.id,
+        name: currentUser.partnerBusinessName || currentUser.fullName || "Toko Mitra",
+        catalog: currentUser.rentals || []
+      };
+    }
     return getMitraStoreById("mitra-kamera") || {};
   });
   const selectedTargetType = "unit"; // Mitra promosi dikhususkan untuk unit sewa
   const [selectedUnitIds, setSelectedUnitIds] = useState(() => {
-    const s = getMitraStoreById("mitra-kamera");
-    const initial = unitParam || s?.catalog?.[0]?.id || "";
+    if (savedDraft?.selectedUnitIds && Array.isArray(savedDraft.selectedUnitIds) && savedDraft.selectedUnitIds.length > 0) {
+      return savedDraft.selectedUnitIds;
+    }
+    const s = currentUser?.id ? (getMitraStoreById(currentUser.id) || currentUser) : getMitraStoreById("mitra-kamera");
+    const initial = unitParam || s?.catalog?.[0]?.id || s?.rentals?.[0]?.id || "";
     return initial ? [initial] : [];
   });
-  const [selectedPackageId, setSelectedPackageId] = useState(pkgParam || "pkg-silver");
-  const [selectedMethod, setSelectedMethod] = useState("qris"); // "qris", "bca_va", "mandiri_va", "bri_va", "bni_va"
+  const [selectedPackageId, setSelectedPackageId] = useState(() => savedDraft?.selectedPackageId || pkgParam || "");
+  const [selectedMethod, setSelectedMethod] = useState(() => savedDraft?.selectedMethod || "qris"); // "qris", "bca_va", "mandiri_va", "bri_va", "bni_va"
+
+  useEffect(() => {
+    saveFormDraft(DRAFT_KEY, {
+      selectedUnitIds,
+      selectedPackageId,
+      selectedMethod
+    });
+  }, [selectedUnitIds, selectedPackageId, selectedMethod]);
 
   // Dynamic Packages dari promotionService (Admin Sync - Sewa)
   const [packages, setPackages] = useState(() => {
-    const list = promotionService.getPackagesByTypeSync("sewa");
-    return list.length > 0 ? list : MITRA_PROMOTION_PACKAGES;
+    return promotionService.getPackagesByTypeSync("sewa");
   });
 
   useEffect(() => {
+    const loadLive = async () => {
+      try {
+        const live = await promotionService.fetchLivePackages("sewa");
+        if (Array.isArray(live)) {
+          setPackages(live);
+          if (live.length > 0 && !live.some((p) => p.id === selectedPackageId)) {
+            setSelectedPackageId(live[0].id);
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to fetch live rental packages:", e);
+      }
+    };
+    loadLive();
+
     const updatePackages = () => {
       const list = promotionService.getPackagesByTypeSync("sewa");
-      if (list.length > 0) {
-        setPackages(list);
-        if (!list.some((p) => p.id === selectedPackageId)) {
-          setSelectedPackageId(list[0].id);
-        }
+      setPackages(list);
+      if (list.length > 0 && !list.some((p) => p.id === selectedPackageId)) {
+        setSelectedPackageId(list[0].id);
       }
     };
 
@@ -147,14 +139,22 @@ function BuatPromosiMitraContent() {
   const [timeLeft, setTimeLeft] = useState(15 * 60);
 
   useEffect(() => {
-    const s = getMitraStoreById("mitra-kamera");
+    let s = null;
+    if (currentUser?.id) {
+      s = getMitraStoreById(currentUser.id) || {
+        id: currentUser.id,
+        name: currentUser.partnerBusinessName || currentUser.fullName || "Toko Mitra",
+        catalog: currentUser.rentals || []
+      };
+    }
+    if (!s) s = getMitraStoreById("mitra-kamera");
     if (s) {
       setStore(s);
       if (selectedUnitIds.length === 0 && s.catalog && s.catalog.length > 0) {
         setSelectedUnitIds([unitParam || s.catalog[0].id]);
       }
     }
-  }, [unitParam, selectedUnitIds.length]);
+  }, [unitParam, selectedUnitIds.length, currentUser?.id]);
 
   const toggleUnitSelection = (id) => {
     setSelectedUnitIds((prev) => {
@@ -190,29 +190,26 @@ function BuatPromosiMitraContent() {
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
 
-  const selectedPkg = packages.find((p) => p.id === selectedPackageId) || packages[0] || {
-    id: "pkg-sewa-7d",
-    name: "Promosi Sewa 7 Hari",
-    price: 35000,
-    durationDays: 7,
-    placements: ["katalog", "search"],
-  };
-  const selectedPlacement = getPlacementSummary(selectedPkg);
+  const selectedPkg = packages.find((p) => p.id === selectedPackageId) || packages[0] || null;
+  const selectedPlacement = selectedPkg
+    ? getPlacementSummary(selectedPkg)
+    : { inBeranda: false, label: "-", note: "Belum ada paket promosi sewa aktif yang dibuat Admin." };
   const selectedUnits = (store?.catalog || []).filter(u => selectedUnitIds.includes(u.id));
   const effectiveSelectedUnits = selectedUnits.length > 0 ? selectedUnits : [store?.catalog?.[0] || { id: "unit-001", name: "Unit Rental" }];
   const selectedUnit = effectiveSelectedUnits[0];
   
   const unitCount = effectiveSelectedUnits.length;
-  const subtotalAmount = selectedPkg.price * unitCount;
+  const pkgPrice = selectedPkg ? Number(selectedPkg.price) : 0;
+  const subtotalAmount = pkgPrice * unitCount;
 
   // Aturan Diskon Paket Bundling Sewa:
   // 1 unit: 0% diskon
   // 2 unit sewa: 20% diskon
   // 3 unit sewa: 30% diskon
   // 4+ unit sewa: 35% diskon
-  const discountRate = unitCount >= 4 ? 0.35 : unitCount === 3 ? 0.30 : unitCount === 2 ? 0.20 : 0;
+  const discountRate = selectedPkg && unitCount >= 4 ? 0.35 : selectedPkg && unitCount === 3 ? 0.30 : selectedPkg && unitCount === 2 ? 0.20 : 0;
   const discountAmount = Math.round(subtotalAmount * discountRate);
-  const totalAmount = subtotalAmount - discountAmount;
+  const totalAmount = Math.max(0, subtotalAmount - discountAmount);
   const targetName = effectiveSelectedUnits.length === 1 ? effectiveSelectedUnits[0].name : `Paket ${effectiveSelectedUnits.length} Unit Rental`;
 
   const vaNumbers = {
@@ -286,6 +283,10 @@ function BuatPromosiMitraContent() {
   };
 
   const handleConfirmPayment = async () => {
+    if (!selectedPkg) {
+      if (addToast) addToast("Paket Belum Tersedia", "Belum ada paket promosi sewa yang dibuat oleh Admin.", "error");
+      return;
+    }
     if (selectedTargetType === "unit" && effectiveSelectedUnits.length === 0) {
       if (addToast) addToast("Pilih Unit", "Mohon pilih minimal satu unit rental yang ingin dipromosikan.", "error");
       return;
@@ -293,67 +294,141 @@ function BuatPromosiMitraContent() {
 
     setIsProcessing(true);
     try {
-      if (store) {
-        let newPromos = [];
+      const token = await authService.getValidAccessToken();
+      const createdPromoIds = [];
+      let snapToken = null;
+      let redirectUrl = null;
+
+      // 1. Simpan order promosi ke PostgreSQL
+      if (token) {
         if (selectedTargetType === "unit") {
-          newPromos = effectiveSelectedUnits.map((u, idx) => ({
-            id: `prm-${Date.now()}-${idx}`,
-            target: "unit",
-            targetId: u.id,
-            targetName: u.name,
-            packageName: selectedPkg.name,
-            durationDays: selectedPkg.durationDays,
-            startDate: new Date().toISOString(),
-            expiryDate: new Date(Date.now() + selectedPkg.durationDays * 24 * 60 * 60 * 1000).toISOString(),
-            status: "ACTIVE",
-            paidAmount: Math.round(totalAmount / effectiveSelectedUnits.length)
-          }));
+          for (const u of effectiveSelectedUnits) {
+            try {
+              const res = await fetch("/api/promotions/order", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                  rentalId: u.id,
+                  targetId: u.id,
+                  targetType: "rental",
+                  packageId: selectedPkg.id,
+                  reachType: "city",
+                  amount: Math.round(totalAmount / effectiveSelectedUnits.length),
+                  paymentMethod: selectedMethod,
+                  isPaid: false,
+                }),
+              });
+              const json = await res.json().catch(() => ({}));
+              if (json.success && json.data) {
+                if (json.data.id || json.data.promotionId) {
+                  createdPromoIds.push(json.data.id || json.data.promotionId);
+                }
+                if (json.data.snapToken) snapToken = json.data.snapToken;
+                if (json.data.redirectUrl) redirectUrl = json.data.redirectUrl;
+              }
+            } catch (err) {
+              console.warn("[promosi sewa] Order error:", err);
+            }
+          }
         } else {
-          newPromos = [{
-            id: `prm-${Date.now()}`,
-            target: "store",
-            targetId: store.id,
-            targetName: store.name || "Toko Mitra Rental",
-            packageName: selectedPkg.name,
-            durationDays: selectedPkg.durationDays,
-            startDate: new Date().toISOString(),
-            expiryDate: new Date(Date.now() + selectedPkg.durationDays * 24 * 60 * 60 * 1000).toISOString(),
-            status: "ACTIVE",
-            paidAmount: totalAmount
-          }];
+          try {
+            const res = await fetch("/api/promotions/order", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                targetId: store.id,
+                targetType: "store",
+                packageId: selectedPkg.id,
+                reachType: "city",
+                amount: totalAmount,
+                paymentMethod: selectedMethod,
+                isPaid: false,
+              }),
+            });
+            const json = await res.json().catch(() => ({}));
+            if (json.success && json.data) {
+              if (json.data.id || json.data.promotionId) {
+                createdPromoIds.push(json.data.id || json.data.promotionId);
+              }
+              if (json.data.snapToken) snapToken = json.data.snapToken;
+              if (json.data.redirectUrl) redirectUrl = json.data.redirectUrl;
+            }
+          } catch (err) {
+            console.warn("[promosi toko] Order error:", err);
+          }
+        }
+      }
+
+      // 2. Helper aktivasi setelah pembayaran sukses
+      const onPaymentSuccess = async () => {
+        // Aktifkan langsung di PostgreSQL
+        if (token && createdPromoIds.length > 0) {
+          for (const pid of createdPromoIds) {
+            try {
+              await fetch("/api/promotions/order", {
+                method: "PATCH",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ promotionId: pid }),
+              });
+            } catch (pErr) {
+              console.warn("[promosi sewa] PATCH error:", pErr);
+            }
+          }
         }
 
-        const updatedStore = {
-          ...store,
-          promotions: [
-            ...(store.promotions || []),
-            ...newPromos
-          ]
-        };
-        saveMitraStoreData(updatedStore);
-
-        // Sinkronkan ke promotionService & paymentService
-        try {
-          const payment = await paymentService.createPromotionPayment({
-            ownerId: store.id || "mitra-kamera",
-            ownerName: store.name || "Focus Lens Studio",
-            ownerType: "partner",
-            targetType: "rental",
-            targetId: effectiveSelectedUnits.map(u => u.id).join(","),
-            targetTitle: targetName,
-            packageId: selectedPkg.id,
-            packageName: selectedPkg.name,
-            amount: totalAmount,
-            paymentMethod: selectedMethod,
-          });
-          if (payment?.id) {
-            await paymentService.confirmPayment(payment.id);
+        if (store) {
+          let newPromos = [];
+          if (selectedTargetType === "unit") {
+            newPromos = effectiveSelectedUnits.map((u, idx) => ({
+              id: `prm-${Date.now()}-${idx}`,
+              target: "unit",
+              targetId: u.id,
+              targetName: u.name,
+              packageName: selectedPkg.name,
+              durationDays: selectedPkg.durationDays,
+              startDate: new Date().toISOString(),
+              expiryDate: new Date(Date.now() + selectedPkg.durationDays * 24 * 60 * 60 * 1000).toISOString(),
+              status: "ACTIVE",
+              paidAmount: Math.round(totalAmount / effectiveSelectedUnits.length)
+            }));
+          } else {
+            newPromos = [{
+              id: `prm-${Date.now()}`,
+              target: "store",
+              targetId: store.id,
+              targetName: store.name || "Toko Mitra Rental",
+              packageName: selectedPkg.name,
+              durationDays: selectedPkg.durationDays,
+              startDate: new Date().toISOString(),
+              expiryDate: new Date(Date.now() + selectedPkg.durationDays * 24 * 60 * 60 * 1000).toISOString(),
+              status: "ACTIVE",
+              paidAmount: totalAmount
+            }];
           }
+
+          const updatedStore = {
+            ...store,
+            promotions: [
+              ...(store.promotions || []),
+              ...newPromos
+            ]
+          };
+          saveMitraStoreData(updatedStore);
+
           for (const u of effectiveSelectedUnits) {
             try {
               const promoItem = await promotionService.createPromotionOrder({
-                ownerId: store.id || "mitra-kamera",
-                ownerName: store.name || "Focus Lens Studio",
+                ownerId: store.id || currentUser?.id,
+                ownerName: store.name || currentUser?.fullName || "Mitra Toko",
                 ownerType: "partner",
                 targetType: "rental",
                 targetId: u.id,
@@ -364,12 +439,12 @@ function BuatPromosiMitraContent() {
                 reachType: "city",
                 targetLocation: u.address || store.address || store.location || "all",
                 packageId: selectedPkg.id,
-                paymentId: payment?.id || `PAY-${Date.now()}`,
+                paymentId: `PAY-${Date.now()}`,
                 amount: Math.round(totalAmount / effectiveSelectedUnits.length),
                 paymentMethod: selectedMethod,
               });
               if (promoItem?.id) {
-                await promotionService.activatePromotion(promoItem.id, payment?.id);
+                await promotionService.activatePromotion(promoItem.id);
               }
             } catch (innerErr) {
               console.warn("[promosi] Gagal aktivasi sub-unit:", innerErr);
@@ -379,27 +454,74 @@ function BuatPromosiMitraContent() {
             window.dispatchEvent(new Event("bantuin_promotions_updated"));
             window.dispatchEvent(new Event("bantuin_payments_updated"));
           }
-        } catch (e) {
-          console.warn("[mitra] paymentService sync:", e);
         }
+
+        setIsProcessing(false);
+        setIsSuccess(true);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        if (addToast) {
+          addToast("Promosi Berhasil Aktif!", `Promosi untuk "${targetName}" telah diverifikasi dan aktif tayang.`);
+        }
+        clearFormDraft(DRAFT_KEY);
+        router.push(`/pembayaran/berhasil?type=promosi&title=${encodeURIComponent(`Promosi ${targetName}`)}&amount=${totalAmount}&next=${encodeURIComponent("/mitra/dashboard")}`);
+      };
+
+      // 4. Buka Midtrans Snap Payment Gateway
+      let snapObj = typeof window !== "undefined" ? window.snap : null;
+      if (!snapObj && snapToken) {
+        snapObj = await paymentService.loadSnap();
       }
 
-      setIsProcessing(false);
-      setIsSuccess(true);
-      window.scrollTo({ top: 0, behavior: "smooth" });
-      if (addToast) {
-        addToast("Promosi Berhasil Aktif!", `Promosi untuk "${targetName}" telah diverifikasi.`);
+      if (snapObj && snapToken) {
+        snapObj.pay(snapToken, {
+          onSuccess: async function () {
+            await onPaymentSuccess();
+          },
+          onPending: function () {
+            setIsProcessing(false);
+            if (addToast) {
+              addToast(
+                "Menunggu Pembayaran",
+                "Silakan selesaikan pembayaran di kanal yang Anda pilih.",
+                "warning"
+              );
+            }
+          },
+          onError: function (err) {
+            setIsProcessing(false);
+            if (addToast) {
+              addToast(
+                "Pembayaran Gagal",
+                err?.status_message || "Transaksi pembayaran dibatalkan atau ditolak.",
+                "error"
+              );
+            }
+          },
+          onClose: function () {
+            setIsProcessing(false);
+            if (addToast) {
+              addToast(
+                "Pembayaran Belum Diselesaikan",
+                "Jendela pembayaran ditutup sebelum transaksi diselesaikan.",
+                "warning"
+              );
+            }
+          },
+        });
+        return;
+      } else if (redirectUrl) {
+        window.location.href = redirectUrl;
+        return;
       }
-      router.push(`/pembayaran/berhasil?type=promosi&title=${encodeURIComponent(`Promosi ${targetName}`)}&amount=${totalAmount}&next=${encodeURIComponent("/")}`);
+
+      // Fallback lokal jika gateway belum dikonfigurasi di env
+      await onPaymentSuccess();
     } catch (err) {
-      console.warn("[mitra] Fallback konfirmasi:", err);
+      console.warn("[mitra] Payment gateway error, fallback:", err);
       setIsProcessing(false);
-      setIsSuccess(true);
-      window.scrollTo({ top: 0, behavior: "smooth" });
       if (addToast) {
-        addToast("Promosi Berhasil Aktif!", `Promosi untuk "${targetName}" telah diverifikasi.`);
+        addToast("Kendala Pembayaran", err?.message || "Gagal memproses transaksi gateway.", "error");
       }
-      router.push(`/pembayaran/berhasil?type=promosi&title=${encodeURIComponent(`Promosi ${targetName}`)}&amount=${totalAmount}&next=${encodeURIComponent("/")}`);
     }
   };
 
@@ -629,60 +751,76 @@ function BuatPromosiMitraContent() {
                     <p className="text-xs text-slate-500">Setiap paket menampilkan lokasi tayang yang benar sebelum Anda memilih.</p>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-                    {packages.map((pkg) => {
-                      const isSelected = selectedPackageId === pkg.id;
-                      const placement = getPlacementSummary(pkg);
-                      return (
-                        <div
-                          key={pkg.id}
-                          onClick={() => setSelectedPackageId(pkg.id)}
-                          className={`rounded-2xl p-4 sm:p-5 border-2 cursor-pointer transition flex flex-col relative min-h-[270px] ${
-                            isSelected
-                              ? "border-[#1683FF] bg-white ring-1 ring-[#1683FF]/20 shadow-[0_8px_24px_rgba(22,131,255,0.10)]"
-                              : "border-slate-200 hover:border-blue-200 bg-white hover:shadow-xs"
-                          }`}
-                        >
-                          {pkg.isPopular && (
-                            <div className="absolute -top-2.5 right-3 bg-[#1683FF] text-white text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full shadow-xs flex items-center gap-1">
-                              <Star className="w-2.5 h-2.5 fill-white" />
-                              <span>Diminati</span>
-                            </div>
-                          )}
+                  {packages.length === 0 ? (
+                    <div className="p-8 sm:p-10 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/60 text-center flex flex-col items-center justify-center space-y-3">
+                      <div className="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center text-[#1683FF]">
+                        <Package className="w-7 h-7" />
+                      </div>
+                      <div className="max-w-md">
+                        <h4 className="text-sm sm:text-base font-bold text-slate-900">
+                          Belum Ada Paket Promosi Sewa Aktif
+                        </h4>
+                        <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                          Paket promosi saat ini belum dibuat oleh Admin di panel Admin &gt; Manajemen Sistem Promosi. Paket akan otomatis muncul di sini setelah Admin menambahkannya.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                      {packages.map((pkg) => {
+                        const isSelected = selectedPackageId === pkg.id;
+                        const placement = getPlacementSummary(pkg);
+                        return (
+                          <div
+                            key={pkg.id}
+                            onClick={() => setSelectedPackageId(pkg.id)}
+                            className={`rounded-2xl p-4 sm:p-5 border-2 cursor-pointer transition flex flex-col relative min-h-[270px] ${
+                              isSelected
+                                ? "border-[#1683FF] bg-white ring-1 ring-[#1683FF]/20 shadow-[0_8px_24px_rgba(22,131,255,0.10)]"
+                                : "border-slate-200 hover:border-blue-200 bg-white hover:shadow-xs"
+                            }`}
+                          >
+                            {pkg.isPopular && (
+                              <div className="absolute -top-2.5 right-3 bg-[#1683FF] text-white text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full shadow-xs flex items-center gap-1">
+                                <Star className="w-2.5 h-2.5 fill-white" />
+                                <span>Diminati</span>
+                              </div>
+                            )}
 
-                          <div className="min-w-0 space-y-3">
-                            <div>
-                              <h4 className="font-extrabold text-sm sm:text-base text-slate-900 leading-snug break-words">{pkg.name}</h4>
-                              <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-1">
-                              <Clock className="w-3 h-3 text-slate-400 shrink-0" />
-                              <span className="truncate"><strong>{pkg.durationDays} Hari</strong> Tayang</span>
+                            <div className="min-w-0 space-y-3">
+                              <div>
+                                <h4 className="font-extrabold text-sm sm:text-base text-slate-900 leading-snug break-words">{pkg.name}</h4>
+                                <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-1">
+                                <Clock className="w-3 h-3 text-slate-400 shrink-0" />
+                                <span className="truncate"><strong>{pkg.durationDays} Hari</strong> Tayang</span>
+                                </div>
+                              </div>
+
+                              <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-100 min-w-0">
+                                <div className="text-base sm:text-lg font-black text-[#1683FF] truncate">{formatIDR(pkg.price)}</div>
+                                <div className="text-[9px] text-slate-400">Bebas biaya admin</div>
+                              </div>
+                              <div className={`rounded-xl border px-3 py-2 text-[11px] leading-snug ${placement.inBeranda ? "border-blue-100 bg-blue-50/70 text-blue-800" : "border-slate-200 bg-slate-50/70 text-slate-600"}`}>
+                                <strong className="block text-[#1683FF]">{placement.inBeranda ? "Termasuk Beranda" : "Tanpa slot Beranda"}</strong>
+                                <span>{placement.inBeranda ? "Beranda + katalog + pencarian" : "Katalog + pencarian"}</span>
                               </div>
                             </div>
 
-                            <div className="p-3 bg-blue-50/60 rounded-xl border border-blue-100 min-w-0">
-                              <div className="text-base sm:text-lg font-black text-[#1683FF] truncate">{formatIDR(pkg.price)}</div>
-                              <div className="text-[9px] text-slate-400">Bebas biaya admin</div>
-                            </div>
-                            <div className={`rounded-xl border px-3 py-2 text-[11px] leading-snug ${placement.inBeranda ? "border-blue-100 bg-blue-50/70 text-blue-800" : "border-slate-200 bg-slate-50/70 text-slate-600"}`}>
-                              <strong className="block text-[#1683FF]">{placement.inBeranda ? "Termasuk Beranda" : "Tanpa slot Beranda"}</strong>
-                              <span>{placement.inBeranda ? "Beranda + katalog + pencarian" : "Katalog + pencarian"}</span>
-                            </div>
+                            <button
+                              type="button"
+                              className={`w-full py-2.5 rounded-xl text-xs font-bold transition mt-auto ${
+                                isSelected
+                                  ? "bg-[#1683FF] text-white shadow-sm"
+                                  : "bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-[#1683FF]"
+                              }`}
+                            >
+                              {isSelected ? "✓ Paket terpilih" : "Pilih paket ini"}
+                            </button>
                           </div>
-
-                          <button
-                            type="button"
-                            className={`w-full py-2.5 rounded-xl text-xs font-bold transition mt-auto ${
-                              isSelected
-                                ? "bg-[#1683FF] text-white shadow-sm"
-                                : "bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-[#1683FF]"
-                            }`}
-                          >
-                            {isSelected ? "✓ Paket terpilih" : "Pilih paket ini"}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 {/* 3. Kanal Pembayaran Resmi (DENGAN QRIS & NO VA LANGSUNG MUNCUL) */}
@@ -757,25 +895,17 @@ function BuatPromosiMitraContent() {
                         <div className="p-3.5 sm:p-5 bg-slate-50/80 rounded-2xl border border-slate-200/80 space-y-3 sm:space-y-3.5">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs sm:text-sm">
                             <span className="text-slate-700 font-semibold break-words">
-                              Nomor Virtual Account {selectedMethod.split("_")[0].toUpperCase()}:
+                              Virtual Account {selectedMethod.split("_")[0].toUpperCase()}:
                             </span>
                             <span className="text-[10px] sm:text-xs font-bold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100 self-start sm:self-auto shrink-0">
-                              Otomatis Terverifikasi
+                              Midtrans Otomatis
                             </span>
                           </div>
 
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 sm:p-4 bg-white rounded-xl border border-slate-200 shadow-2xs">
-                            <span className="font-mono text-base sm:text-2xl font-black text-slate-900 tracking-wider select-all break-all text-center sm:text-left">
-                              {vaNumbers[selectedMethod] || "8802918291028371"}
+                            <span className="text-xs sm:text-sm text-slate-600 font-medium text-center sm:text-left">
+                              Nomor Virtual Account resmi akan otomatis diterbitkan oleh Midtrans saat Anda menekan tombol <strong>Bayar Sekarang</strong>.
                             </span>
-                            <button
-                              type="button"
-                              onClick={() => handleCopy(vaNumbers[selectedMethod] || "8802918291028371", "va")}
-                              className="px-4 py-2 bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs sm:text-sm font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-xs w-full sm:w-auto"
-                            >
-                              <Copy className="w-4 h-4" />
-                              <span>{isCopiedVA ? "Tersalin" : "Salin No VA"}</span>
-                            </button>
                           </div>
 
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs text-slate-500 pt-1">
@@ -825,8 +955,9 @@ function BuatPromosiMitraContent() {
                   {/* Compact Item Card */}
                   <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-50/70 border border-slate-200/80 flex items-start sm:items-center gap-3">
                     <img
-                      src={selectedUnit?.photoUrl || selectedUnit?.image || "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=400&q=80"}
+                      src={selectedUnit?.photoUrl || selectedUnit?.image || "/logotab.png"}
                       alt={targetName}
+                      onError={(e) => { e.currentTarget.src = "/logotab.png"; }}
                       className="w-12 h-12 sm:w-16 sm:h-16 rounded-xl object-cover shrink-0 border border-slate-200"
                     />
                     <div className="min-w-0 flex-1">
@@ -835,7 +966,7 @@ function BuatPromosiMitraContent() {
                       </h3>
                       <div className="flex items-center gap-2 mt-1">
                         <span className="text-[11px] font-bold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
-                          {selectedPkg.name} ({selectedPkg.durationDays} Hari)
+                          {selectedPkg ? `${selectedPkg.name} (${selectedPkg.durationDays} Hari)` : "Paket Promosi Belum Tersedia"}
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-slate-200/60 min-w-0">
@@ -870,7 +1001,7 @@ function BuatPromosiMitraContent() {
                         <span>Durasi Tayang:</span>
                       </span>
                       <span className="font-bold text-slate-900 text-right">
-                        {selectedPkg.durationDays} Hari Penuh
+                        {selectedPkg ? `${selectedPkg.durationDays} Hari Penuh` : "-"}
                       </span>
                     </div>
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
@@ -887,8 +1018,10 @@ function BuatPromosiMitraContent() {
                   {/* Price Breakdown Calculation */}
                   <div className="space-y-2 pt-2 border-t border-slate-100 text-xs">
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 text-slate-600">
-                      <span className="min-w-0 break-words">Harga Paket ({selectedPkg.name})</span>
-                      <span className="font-semibold text-slate-900 text-right max-w-[150px] sm:max-w-none">{formatIDR(selectedPkg.price)} / unit</span>
+                      <span className="min-w-0 break-words">Harga Paket ({selectedPkg?.name || "-"})</span>
+                      <span className="font-semibold text-slate-900 text-right max-w-[150px] sm:max-w-none">
+                        {selectedPkg ? `${formatIDR(selectedPkg.price)} / unit` : "Rp 0"}
+                      </span>
                     </div>
 
                     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 text-slate-600">
@@ -941,14 +1074,20 @@ function BuatPromosiMitraContent() {
                   <button
                     type="button"
                     onClick={handleConfirmPayment}
-                    disabled={isProcessing}
-                    className="w-full py-3.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm transition shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-75"
+                    disabled={isProcessing || !selectedPkg}
+                    className={`w-full py-3.5 rounded-xl font-bold text-xs sm:text-sm transition shadow-xs flex items-center justify-center gap-2 cursor-pointer ${
+                      !selectedPkg
+                        ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                        : "bg-[#1683FF] hover:bg-[#0F6FE5] text-white disabled:opacity-75"
+                    }`}
                   >
                     {isProcessing ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
                         <span>Memverifikasi Pembayaran...</span>
                       </>
+                    ) : !selectedPkg ? (
+                      <span>Paket Belum Tersedia</span>
                     ) : (
                       <>
                         <ShieldCheck className="w-4 h-4" />

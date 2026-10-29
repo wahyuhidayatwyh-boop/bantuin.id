@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useRef, useEffect, Suspense } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Navbar from "@/components/layout/Navbar";
@@ -38,7 +38,8 @@ import {
   Check,
   Globe,
   ArrowUpDown,
-  Filter
+  Filter,
+  HandHeart
 } from "lucide-react";
 
 const SORT_OPTIONS = [
@@ -63,10 +64,20 @@ function BantuanContent() {
     isItemInCurrentKabupaten
   } = useApp();
 
+  // All state hooks declared at top of component
   const [dbRequests, setDbRequests] = useState([]);
   const [isLoadingRequests, setIsLoadingRequests] = useState(true);
+  const [searchQuery, setSearchQuery] = useState(initialQuery);
+  const [scopeFilter, setScopeFilter] = useState("all"); // 'all' | 'my_requests'
+  const [selectedCategory, setSelectedCategory] = useState(() => BANTUAN_CATEGORIES.some((item) => item.id === initialCategory) ? initialCategory : "Semua");
+  const [sortBy, setSortBy] = useState("terbaru");
+  const [activeModal, setActiveModal] = useState(null); // null | 'kategori' | 'wilayah' | 'urutkan'
+  const [showMap, setShowMap] = useState(false);
+  const ITEMS_PER_PAGE = 10;
+  const [currentPage, setCurrentPage] = useState(1);
+  const controlsRef = useRef(null);
 
-  const fetchRequests = async () => {
+  const fetchRequests = useCallback(async () => {
     setIsLoadingRequests(true);
     try {
       const res = await fetch("/api/requests");
@@ -79,21 +90,11 @@ function BantuanContent() {
     } finally {
       setIsLoadingRequests(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchRequests();
-  }, []);
-
-  const [searchQuery, setSearchQuery] = useState(initialQuery);
-  const [scopeFilter, setScopeFilter] = useState("all"); // 'all' | 'my_requests'
-  const [selectedCategory, setSelectedCategory] = useState(() => BANTUAN_CATEGORIES.some((item) => item.id === initialCategory) ? initialCategory : "Semua");
-  const [sortBy, setSortBy] = useState("terbaru");
-  const [activeModal, setActiveModal] = useState(null); // null | 'kategori' | 'wilayah' | 'urutkan'
-  const [showMap, setShowMap] = useState(false);
-  const ITEMS_PER_PAGE = 10;
-  const [currentPage, setCurrentPage] = useState(1);
-  const controlsRef = useRef(null);
+  }, [fetchRequests]);
 
   // Close desktop dropdowns on outside click or escape
   useEffect(() => {
@@ -117,27 +118,10 @@ function BantuanContent() {
   }, []);
 
   function isTaskMine(r, user) {
-    if (!user || (!user.id && !user.fullName && !user.email)) return false;
-    const isRequester =
-      (user.id && (r.requesterId === user.id || r.requester?.id === user.id)) ||
-      (user.fullName && (r.userName === user.fullName || r.requester?.fullName === user.fullName)) ||
-      (user.email && (r.userEmail === user.email || r.requester?.email === user.email));
-
-    const isSelectedHelper =
-      (user.id && (r.selectedHelperId === user.id || r.selectedHelper?.id === user.id)) ||
-      (user.fullName && r.selectedHelper?.fullName === user.fullName) ||
-      (Array.isArray(r.offers) && r.offers.some((o) => 
-        ((user.id && (o.helperId === user.id || o.helper?.id === user.id)) || (user.fullName && o.helper?.fullName === user.fullName)) &&
-        o.status === "accepted"
-      ));
-
-    const hasApplied =
-      Array.isArray(r.offers) && r.offers.some((o) => 
-        (user.id && (o.helperId === user.id || o.helper?.id === user.id)) ||
-        (user.fullName && o.helper?.fullName === user.fullName)
-      );
-
-    return Boolean(isRequester || isSelectedHelper || hasApplied);
+    if (!user || !user.id || !r) return false;
+    const uid = String(user.id).trim();
+    const reqId = r.requesterId ? String(r.requesterId).trim() : (r.requester?.id ? String(r.requester.id).trim() : null);
+    return Boolean(reqId && reqId === uid);
   }
 
   // Counts for scope tabs
@@ -156,9 +140,10 @@ function BantuanContent() {
       if (filterByKabupaten && !isItemInCurrentKabupaten(r)) return false;
       return true;
     }).length;
-  }, [dbRequests, filterByKabupaten, isItemInCurrentKabupaten, currentUser]);
+  }, [dbRequests, filterByKabupaten, isItemInCurrentKabupaten]);
 
   const countMyRequests = useMemo(() => {
+    if (!currentUser?.id) return 0;
     return dbRequests.filter((r) => {
       if (!isTaskMine(r, currentUser)) return false;
       const isUnavailable =
@@ -243,25 +228,6 @@ function BantuanContent() {
     if (typeof window !== "undefined") {
       window.scrollTo({ top: 180, behavior: "smooth" });
     }
-  };
-
-  const handleOpenOfferModal = (task) => {
-    setSelectedTask(task);
-    setProposedPrice(task.rewardAmount || 15000);
-    setPitchMessage("");
-    setSubmitted(false);
-  };
-
-  const handleSendOffer = (e) => {
-    e.preventDefault();
-    if (!pitchMessage.trim()) return;
-    submitOffer(selectedTask.id, pitchMessage, Number(proposedPrice));
-    setSubmitted(true);
-    setTimeout(() => {
-      setSelectedTask(null);
-      setSubmitted(false);
-      setPitchMessage("");
-    }, 1200);
   };
 
   return (
@@ -873,18 +839,29 @@ function BantuanContent() {
           </div>
         ) : (
           <div className="text-center py-16 px-4 bg-white rounded-3xl border border-slate-200">
+            <div className="w-12 h-12 rounded-2xl bg-blue-50 text-[#1683FF] flex items-center justify-center mx-auto mb-3">
+              <HandHeart className="w-6 h-6" />
+            </div>
             <p className="text-sm font-bold text-slate-800">
-              {filterByKabupaten 
-                ? `Belum ada permintaan bantuan di ${activeKabupaten} untuk filter saat ini.`
-                : "Tidak ada permintaan bantuan yang cocok dengan filter pencarian."}
+              {scopeFilter === "my_requests"
+                ? "Belum Ada Permintaan Bantuan Terbuka Milik Anda"
+                : dbRequests.length === 0
+                ? "Belum Ada Permintaan Bantuan"
+                : filterByKabupaten 
+                  ? `Belum ada permintaan bantuan di ${activeKabupaten} untuk filter saat ini.`
+                  : "Tidak ada permintaan bantuan yang cocok dengan filter pencarian."}
             </p>
             <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-              {filterByKabupaten
-                ? `Anda dapat beralih ke "Semua Wilayah" untuk melihat bantuan di kota lain, atau jadilah yang pertama membuat permintaan di ${activeKabupaten}.`
-                : "Coba ubah kata kunci pencarian atau pilih kategori bantuan lainnya."}
+              {scopeFilter === "my_requests"
+                ? "Anda belum memiliki permintaan bantuan aktif yang sedang mencari penolong. Jika butuh bantuan untuk tugas harian atau pesan antar, Anda dapat membuat permintaan baru kapan saja."
+                : dbRequests.length === 0
+                ? "Saat ini belum ada tugas atau permintaan bantuan aktif. Jadilah yang pertama membuat permintaan bantuan!"
+                : filterByKabupaten
+                  ? `Anda dapat beralih ke "Semua Wilayah" untuk melihat bantuan di kota lain, atau jadilah yang pertama membuat permintaan di ${activeKabupaten}.`
+                  : "Coba ubah kata kunci pencarian atau pilih kategori bantuan lainnya."}
             </p>
             <div className="flex flex-wrap items-center justify-center gap-3 mt-4">
-              {filterByKabupaten && (
+              {dbRequests.length > 0 && filterByKabupaten && (
                 <button
                   type="button"
                   onClick={() => setFilterByKabupaten(false)}

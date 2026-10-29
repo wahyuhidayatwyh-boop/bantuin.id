@@ -1,12 +1,14 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import RoleGuard from "@/components/auth/RoleGuard";
 import { useApp } from "@/lib/context/AppContext";
 import { getProviderById, saveProviderData } from "@/lib/mock/providersData";
 import { imageService } from "@/lib/services/imageService";
+import { authService } from "@/lib/services/authService";
+import { saveFormDraft, getFormDraft, clearFormDraft, useBeforeUnload } from "@/lib/hooks/useFormDraft";
 import { 
   ArrowLeft, 
   Image as ImageIcon, 
@@ -20,11 +22,43 @@ import {
 
 export default function TambahPortofolioPage() {
   const router = useRouter();
-  const { addToast } = useApp() || {};
+  const { currentUser, setCurrentUser, addToast } = useApp() || {};
 
   const [provider, setProvider] = useState(() => {
-    return getProviderById("fajar-ramadhan-desain") || {};
+    return currentUser || {};
   });
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadLiveProfile() {
+      try {
+        const token = await authService.getValidAccessToken();
+        if (token) {
+          const res = await fetch("/api/user/profile", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const json = await res.json();
+          if (isMounted && res.ok && json.success && json.data) {
+            setProvider((prev) => ({
+              ...prev,
+              ...json.data,
+              portfolioPhotos: Array.isArray(json.data.portfolioPhotos) ? json.data.portfolioPhotos : [],
+            }));
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Could not load live portfolio in tambah portofolio:", err);
+      }
+      if (isMounted && currentUser) {
+        setProvider(currentUser);
+      }
+    }
+    loadLiveProfile();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
@@ -38,6 +72,28 @@ export default function TambahPortofolioPage() {
     clientName: "",
     completedYear: "2026",
   });
+
+  const DRAFT_KEY = "bantuin_draft_jasa_portofolio_tambah";
+  const hasLoadedDraftRef = useRef(false);
+
+  useEffect(() => {
+    if (hasLoadedDraftRef.current) return;
+    hasLoadedDraftRef.current = true;
+    const draft = getFormDraft(DRAFT_KEY, null);
+    if (draft) {
+      setFormData((prev) => ({ ...prev, ...draft }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedDraftRef.current) return;
+    if (formData.title || formData.description) {
+      saveFormDraft(DRAFT_KEY, formData);
+    }
+  }, [formData]);
+
+  const isFormDirty = Boolean(formData.title.trim().length > 0 || (formData.description && formData.description.trim().length > 0));
+  useBeforeUnload(isFormDirty, "Ada isian karya portofolio jasa yang belum disimpan. Yakin ingin meninggalkan halaman?");
 
   const categoryPresets = [
     "Branding",
@@ -67,7 +123,7 @@ export default function TambahPortofolioPage() {
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.title.trim()) {
       addToast?.("Form Belum Lengkap", "Silakan isi judul karya portofolio.", "error");
@@ -81,7 +137,7 @@ export default function TambahPortofolioPage() {
     setIsSubmitting(true);
 
     const newPhoto = {
-      id: `port-${Date.now()}`,
+      id: `port-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       url: formData.url,
       title: formData.title.trim(),
       category: formData.category,
@@ -91,16 +147,60 @@ export default function TambahPortofolioPage() {
       createdAt: new Date().toISOString(),
     };
 
-    const currentPhotos = provider.portfolioPhotos || [];
+    // Pastikan mengambil seluruh karya portofolio yang ada, baik dari state, live API, maupun localStorage
+    let currentPhotos = Array.isArray(provider.portfolioPhotos) ? [...provider.portfolioPhotos] : [];
+    if (currentPhotos.length === 0 && provider.id && typeof window !== "undefined") {
+      const localStored = localStorage.getItem(`bantuin_provider_portfolio_${provider.id}`);
+      if (localStored) {
+        try {
+          const parsed = JSON.parse(localStored);
+          if (Array.isArray(parsed) && parsed.length > 0) currentPhotos = parsed;
+        } catch {}
+      }
+    }
+
+    // Card nambah baru: simpan karya baru ke dalam list bersama karya-karya lama tanpa menimpa
+    const updatedPhotos = [newPhoto, ...currentPhotos];
     const updatedProvider = {
       ...provider,
-      portfolioPhotos: [newPhoto, ...currentPhotos],
+      portfolioPhotos: updatedPhotos,
     };
 
     saveProviderData(updatedProvider);
+    if (typeof window !== "undefined" && provider.id) {
+      localStorage.setItem(`bantuin_provider_portfolio_${provider.id}`, JSON.stringify(updatedPhotos));
+    }
     setProvider(updatedProvider);
+
+    // Simpan ke PostgreSQL database
+    try {
+      const token = await authService.getValidAccessToken();
+      if (token) {
+        await fetch("/api/user/profile", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ portfolioPhotos: updatedPhotos }),
+        });
+      }
+    } catch (err) {
+      console.error("Gagal simpan portofolio ke database:", err);
+    }
+
+    if (typeof setCurrentUser === "function") {
+      setCurrentUser((prev) => ({ ...(prev || {}), portfolioPhotos: updatedPhotos }));
+    }
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("bantuin_provider_updated"));
+      window.dispatchEvent(new Event("bantuin_service_updated"));
+    }
+
     setIsSubmitting(false);
 
+    clearFormDraft(DRAFT_KEY);
     addToast?.("Karya Ditambahkan", `Foto "${newPhoto.title}" berhasil ditambahkan ke portofolio.`);
     router.push("/jasa/dashboard");
   };

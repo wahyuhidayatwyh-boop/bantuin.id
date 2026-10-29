@@ -11,7 +11,6 @@ import { useApp } from "@/lib/context/AppContext";
 import { formatIDR } from "@/lib/utils";
 import { promotionService } from "@/lib/services/promotionService";
 import RecommendedCarousel from "@/components/promotion/RecommendedCarousel";
-import { MITRA_STORES, getAllMitraStores } from "@/lib/mock/mitraData";
 import CategoryIcon from "@/components/common/CategoryIcon";
 import { SEWA_CATEGORIES, resolveIcon, matchesCategory } from "@/lib/categories";
 import { 
@@ -27,6 +26,8 @@ import {
   Star,
   Store
 } from "lucide-react";
+
+let cachedPromotedRentals = null;
 
 function SewaPageContent() {
   const searchParams = useSearchParams();
@@ -82,16 +83,45 @@ function SewaPageContent() {
 
   const ITEMS_PER_PAGE = 16;
 
-  // List of verified rental stores (reaktif terhadap pembaruan dashboard mitra)
-  const [storeList, setStoreList] = useState(() => Object.values(MITRA_STORES));
+  // List of verified rental stores dari database riil
+  const [storeList, setStoreList] = useState([]);
 
   useEffect(() => {
-    setStoreList(getAllMitraStores());
-    const handleMitraUpdate = () => {
-      setStoreList(getAllMitraStores());
+    let isMounted = true;
+    async function loadMitraStores() {
+      try {
+        const res = await fetch("/api/mitra?limit=50");
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && Array.isArray(json.data?.mitraList) && isMounted) {
+            const mapped = json.data.mitraList.map((m) => ({
+              id: m.id,
+              name: m.partnerBusinessName || m.fullName,
+              tagline: m.bio || `Mitra Rental ${m.campusName || "Resmi"}`,
+              category: "Rental & Sewa Alat",
+              address: m.partnerAddress || m.campusName || "Indonesia",
+              avatar: m.avatarUrl && !m.avatarUrl.includes("images.unsplash.com") ? m.avatarUrl : "/logotab.png",
+              rating: Number(m.ratingAvg) || 5.0,
+              reviewCount: m.ratingCount || 0,
+              completedOrders: m.totalOrdersCompleted || 0,
+              catalog: (m.previewItems || []).map((p) => ({
+                id: p.id,
+                name: p.title,
+                category: p.category,
+              })),
+              about: m.bio || "",
+            }));
+            setStoreList(mapped);
+          }
+        }
+      } catch (e) {
+        console.warn("Could not fetch mitra stores:", e);
+      }
+    }
+    loadMitraStores();
+    return () => {
+      isMounted = false;
     };
-    window.addEventListener("bantuin_mitra_store_updated", handleMitraUpdate);
-    return () => window.removeEventListener("bantuin_mitra_store_updated", handleMitraUpdate);
   }, []);
 
   // Smart Search: Temukan toko rental yang cocok dengan pencarian pengguna secara otomatis
@@ -119,10 +149,69 @@ function SewaPageContent() {
   const currentCatName = currentCat?.name || currentCat?.label || "Semua Kategori";
 
   // Promoted Rentals (Sistem Promosi Terpadu Bantuin)
-  const [promotedRentals, setPromotedRentals] = useState([]);
+  const [promotedRentals, setPromotedRentals] = useState(() => {
+    if (cachedPromotedRentals && cachedPromotedRentals.length > 0) return cachedPromotedRentals;
+    if (typeof window === "undefined") return [];
+    try {
+      const activePromos = promotionService.getActivePromotionsSync({
+        type: "sewa",
+        placement: "sewa",
+      });
+      const initial = activePromos.map((promo) => ({
+        promoId: promo.id,
+        id: promo.targetId || promo.id,
+        targetId: promo.targetId || promo.id,
+        title: promo.targetTitle || "Unit Sewa",
+        targetTitle: promo.targetTitle || "Unit Sewa",
+        category: promo.targetCategory || promo.category || "Rental",
+        targetCategory: promo.targetCategory || promo.category || "Rental",
+        price: promo.targetPrice || promo.price || 50000,
+        targetPrice: promo.targetPrice || promo.price || 50000,
+        image: promo.targetImage || promo.image || "/logotab.png",
+        targetImage: promo.targetImage || promo.image,
+        description: promo.description || "",
+        address: promo.targetLocation || "Banyumas",
+        targetLocation: promo.targetLocation || "Banyumas",
+        ownerName: promo.ownerName && promo.ownerName !== "wahyump222" ? promo.ownerName : "Dean Outdoor Rental",
+        rating: Number(promo.ratingAvg || promo.rating || 5.0),
+        ratingAvg: Number(promo.ratingAvg || promo.rating || 5.0),
+        reviewCount: Number(promo.reviewCount || promo.ratingCount || 0),
+        ratingCount: Number(promo.reviewCount || promo.ratingCount || 0),
+        totalRentedCount: Number(promo.completedCount || 0),
+        completedRentals: Number(promo.completedCount || 0),
+        completedCount: Number(promo.completedCount || 0),
+        isVerifiedPartner: true,
+        targetType: "rental",
+      }));
+
+      const uniqueInitial = [];
+      const seenInit = new Set();
+      for (const item of initial) {
+        const key = String(item.id || item.targetId || item.title);
+        if (!seenInit.has(key)) {
+          seenInit.add(key);
+          uniqueInitial.push(item);
+        }
+      }
+
+      cachedPromotedRentals = uniqueInitial;
+      return uniqueInitial;
+    } catch {
+      return [];
+    }
+  });
 
   useEffect(() => {
-    const fetchPromoted = (trackImpressions = false) => {
+    let isMounted = true;
+    const fetchPromoted = async (trackImpressions = false) => {
+      try {
+        await promotionService.fetchLivePromotions();
+      } catch (err) {
+        console.warn("Could not sync live promotions:", err);
+      }
+
+      if (!isMounted) return;
+
       const activePromos = promotionService.getActivePromotionsSync({
         type: "sewa",
         placement: "sewa",
@@ -135,6 +224,15 @@ function SewaPageContent() {
         const rentalItem = rentals.find(
           (r) => String(r.id) === String(promo.targetId) || (r.title || r.name)?.toLowerCase() === (promo.targetTitle || "").toLowerCase()
         );
+        const resolvedOwnerName =
+          rentalItem?.owner?.partnerBusinessName ||
+          rentalItem?.owner?.name ||
+          rentalItem?.ownerName ||
+          (promo.ownerName && promo.ownerName !== "wahyump222" ? promo.ownerName : "Dean Outdoor Rental");
+        const realRating = Number(rentalItem?.ratingAvg ?? promo.ratingAvg ?? promo.rating ?? 5.0);
+        const realReviews = Number(rentalItem?.ratingCount ?? promo.reviewCount ?? promo.ratingCount ?? 0);
+        const realTersewa = Number(rentalItem?.totalRentedCount ?? rentalItem?.completedRentals ?? promo.completedCount ?? 0);
+
         return {
           promoId: promo.id,
           id: rentalItem?.id || promo.targetId || promo.id,
@@ -145,24 +243,38 @@ function SewaPageContent() {
           targetCategory: promo.targetCategory || promo.category || rentalItem?.category || "Rental",
           price: promo.targetPrice || promo.price || rentalItem?.dailyPrice || rentalItem?.price || 50000,
           targetPrice: promo.targetPrice || promo.price || rentalItem?.dailyPrice || rentalItem?.price || 50000,
-          image: promo.targetImage || promo.image || rentalItem?.photoUrl || rentalItem?.image || "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=800&auto=format&fit=crop&q=80",
+          unit: rentalItem?.unit || promo.unit || "/hari",
+          image: promo.targetImage || promo.image || rentalItem?.photoUrl || rentalItem?.image || "/logotab.png",
           targetImage: promo.targetImage || promo.image || rentalItem?.photoUrl || rentalItem?.image,
           description: promo.description || rentalItem?.description || "",
           address: promo.targetLocation || rentalItem?.address || rentalItem?.location || "Banyumas",
           targetLocation: promo.targetLocation || rentalItem?.address || rentalItem?.location || "Banyumas",
-          ownerName: promo.ownerName || rentalItem?.ownerName || rentalItem?.owner?.name || "Mitra Rental",
-          rating: 5.0,
-          ratingAvg: 5.0,
-          ratingCount: 16,
+          ownerName: resolvedOwnerName,
+          rating: realRating,
+          ratingAvg: realRating,
+          reviewCount: realReviews,
+          ratingCount: realReviews,
+          totalRentedCount: realTersewa,
+          completedRentals: realTersewa,
+          completedCount: realTersewa,
           isVerifiedPartner: true,
           targetType: "rental",
         };
       });
 
-      setPromotedRentals(mapped);
+      const seenKeys = new Set();
+      const uniqueMapped = [];
+      for (const item of mapped) {
+        const key = String(item.id || item.targetId || item.title);
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          uniqueMapped.push(item);
+        }
+      }
 
-      // Hindari siklus event: recordImpression memancarkan pembaruan promosi,
-      // sedangkan listener hanya perlu memuat ulang data tanpa merekam ulang.
+      cachedPromotedRentals = uniqueMapped;
+      setPromotedRentals(uniqueMapped);
+
       if (trackImpressions) {
         activePromos.forEach((p) => {
           promotionService.recordImpression(p.id);
@@ -171,17 +283,105 @@ function SewaPageContent() {
     };
 
     fetchPromoted(true);
-    const handleSync = () => fetchPromoted(false);
+    const handleSync = () => {
+      if (!isMounted) return;
+      cachedPromotedRentals = null;
+      const activePromos = promotionService.getActivePromotionsSync({
+        type: "sewa",
+        placement: "sewa",
+        userLocation: filterByKabupaten ? activeKabupaten : undefined,
+        category: selectedCategory !== "Semua" ? selectedCategory : undefined,
+        search: searchQuery.trim() || undefined,
+      });
+
+      const mapped = activePromos.map((promo) => {
+        const rentalItem = rentals.find(
+          (r) => String(r.id) === String(promo.targetId) || (r.title || r.name)?.toLowerCase() === (promo.targetTitle || "").toLowerCase()
+        );
+        const resolvedOwnerName =
+          rentalItem?.ownerName ||
+          rentalItem?.owner?.name ||
+          rentalItem?.owner?.partnerBusinessName ||
+          rentalItem?.owner?.fullName ||
+          promo.ownerName ||
+          "Mitra Rental";
+
+        const realRating = Number(rentalItem?.ratingAvg ?? rentalItem?.owner?.rating ?? promo.ratingAvg ?? promo.ownerRating ?? promo.rating ?? 5.0);
+        const realReviews = Math.max(
+          Number(rentalItem?.ratingCount ?? 0),
+          Number(rentalItem?.reviewsCount ?? 0),
+          Number(rentalItem?.owner?.ratingCount ?? 0),
+          Number(promo.reviewCount ?? 0),
+          Number(promo.ratingCount ?? 0)
+        );
+        const realTersewa = Number(
+          rentalItem?.totalRentedCount ??
+          rentalItem?.completedRentals ??
+          rentalItem?.completedCount ??
+          promo.completedCount ??
+          promo.completedOrders ??
+          promo.completedRentals ??
+          0
+        );
+
+        return {
+          promoId: promo.id,
+          id: rentalItem?.id || promo.targetId || promo.id,
+          targetId: rentalItem?.id || promo.targetId || promo.id,
+          title: promo.targetTitle || rentalItem?.title || rentalItem?.name || "Unit Sewa",
+          targetTitle: promo.targetTitle || rentalItem?.title || rentalItem?.name || "Unit Sewa",
+          category: promo.targetCategory || promo.category || rentalItem?.category || "Rental",
+          targetCategory: promo.targetCategory || promo.category || rentalItem?.category || "Rental",
+          price: promo.targetPrice || promo.price || rentalItem?.dailyPrice || rentalItem?.price || 50000,
+          targetPrice: promo.targetPrice || promo.price || rentalItem?.dailyPrice || rentalItem?.price || 50000,
+          unit: rentalItem?.unit || promo.unit || "/hari",
+          image: promo.targetImage || promo.image || rentalItem?.photoUrl || rentalItem?.image || "/logotab.png",
+          targetImage: promo.targetImage || promo.image || rentalItem?.photoUrl || rentalItem?.image,
+          description: promo.description || rentalItem?.description || "",
+          address: promo.targetLocation || rentalItem?.address || rentalItem?.location || "Banyumas",
+          targetLocation: promo.targetLocation || rentalItem?.address || rentalItem?.location || "Banyumas",
+          ownerName: resolvedOwnerName,
+          rating: realRating,
+          ratingAvg: realRating,
+          reviewCount: realReviews,
+          ratingCount: realReviews,
+          totalRentedCount: realTersewa,
+          completedRentals: realTersewa,
+          completedCount: realTersewa,
+          isVerifiedPartner: true,
+          targetType: "rental",
+        };
+      });
+
+      const seenKeys = new Set();
+      const uniqueMapped = [];
+      for (const item of mapped) {
+        const key = String(item.id || item.targetId || item.title);
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          uniqueMapped.push(item);
+        }
+      }
+
+      cachedPromotedRentals = uniqueMapped;
+      setPromotedRentals(uniqueMapped);
+    };
+
     window.addEventListener("bantuin_promotions_updated", handleSync);
     window.addEventListener("bantuin_promotion_packages_updated", handleSync);
+    window.addEventListener("bantuin_rentals_updated", handleSync);
+    window.addEventListener("bantuin_rental_updated", handleSync);
     return () => {
+      isMounted = false;
       window.removeEventListener("bantuin_promotions_updated", handleSync);
       window.removeEventListener("bantuin_promotion_packages_updated", handleSync);
+      window.removeEventListener("bantuin_rentals_updated", handleSync);
+      window.removeEventListener("bantuin_rental_updated", handleSync);
     };
   }, [rentals, activeKabupaten, filterByKabupaten, selectedCategory, searchQuery]);
 
   const filteredRentals = useMemo(() => {
-    return rentals.filter((item) => {
+    const matched = rentals.filter((item) => {
       // Filter Kabupaten: Tampilkan hanya di kabupaten yang sama jika filter aktif
       if (filterByKabupaten && !isItemInCurrentKabupaten(item)) {
         return false;
@@ -197,13 +397,34 @@ function SewaPageContent() {
 
       if (!matchQuery || !matchCategory) return false;
 
-      // Deduplikasi: jangan tampilkan unit yang sedang tampil di slot Sewa Dipromosikan (Step 33)
-      if (promotedRentals.some((p) => String(p.id) === String(item.id) || p.title?.toLowerCase() === item.title?.toLowerCase())) {
-        return false;
-      }
-
       return true;
     });
+
+    // Anotasi status promosi dan boost ranking ke urutan teratas
+    const listWithPromo = matched.map((item) => {
+      const promoMatch = promotedRentals.find(
+        (p) => String(p.id) === String(item.id) ||
+               String(p.targetId) === String(item.id) ||
+               (p.title && item.title && p.title.toLowerCase() === item.title.toLowerCase())
+      );
+      return {
+        ...item,
+        isPromoted: Boolean(promoMatch),
+        promoPriority: promoMatch ? Number(promoMatch.priority || promoMatch.package?.priority || 1) : 0,
+      };
+    });
+
+    // Urutan prioritas teratas (boost ranking) untuk unit sewa yang dipromosikan (Priority 3 > 2 > 1 > organik)
+    listWithPromo.sort((a, b) => {
+      if (a.isPromoted && !b.isPromoted) return -1;
+      if (!a.isPromoted && b.isPromoted) return 1;
+      if (a.isPromoted && b.isPromoted) {
+        return (b.promoPriority || 0) - (a.promoPriority || 0);
+      }
+      return 0;
+    });
+
+    return listWithPromo;
   }, [rentals, searchQuery, selectedCategory, filterByKabupaten, isItemInCurrentKabupaten, promotedRentals]);
 
   // Reset to page 1 whenever filters/search/category change

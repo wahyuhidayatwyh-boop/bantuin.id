@@ -8,17 +8,41 @@ import { ArrowRight, Lock, Mail, Loader2 } from "lucide-react";
 import { useApp } from "@/lib/context/AppContext";
 import { authService, ROLE_LABELS } from "@/lib/services/authService";
 import GoogleIcon from "@/components/common/GoogleIcon";
+import GoogleSignInButton from "@/components/auth/GoogleSignInButton";
+import AuthLoadingScreen from "@/components/auth/AuthLoadingScreen";
 import logoImg from "@/components/image/logo.png";
 import AuthSkeleton from "@/components/skeletons/AuthSkeleton";
 
 function LoginPageContent() {
   const router = useRouter();
+  const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const { addToast, setCurrentUser } = useApp();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [infoMsg, setInfoMsg] = useState("");
+
+  // Handle URL notice params
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const emailParam = params.get("email");
+    const noticeParam = params.get("notice");
+
+    if (emailParam) {
+      setEmail(emailParam);
+    }
+
+    if (noticeParam === "already_registered") {
+      setInfoMsg(`Akun Google (${emailParam || "ini"}) sudah terdaftar. Silakan masukkan kata sandi Anda atau klik Masuk dengan Google.`);
+      addToast?.(
+        "Akun Sudah Terdaftar",
+        "Akun Google Anda sudah terdaftar. Silakan masuk.",
+        "info"
+      );
+    }
+  }, [addToast]);
 
   const getSafeRedirect = () => {
     if (typeof window === "undefined") return null;
@@ -38,6 +62,7 @@ function LoginPageContent() {
     }
 
     setErrorMsg("");
+    setInfoMsg("");
     setLoading(true);
 
     try {
@@ -55,30 +80,29 @@ function LoginPageContent() {
         `Selamat datang kembali, ${user.fullName || ROLE_LABELS[user.role] || "Pengguna"}!`
       );
 
-      const targetPath = getSafeRedirect() || authService.getRedirectPathByRole(user.role);
+      const targetPath = getSafeRedirect() || authService.getRedirectPathByRole(user.role || user.accountRole, user);
       router.push(targetPath);
     } catch (err) {
-      setErrorMsg(err.message || "Gagal masuk. Periksa kembali email dan kata sandi Anda.");
-      addToast?.("Login Gagal", err.message || "Terjadi kesalahan saat masuk.", "error");
+      const isUnregistered = err.message?.toLowerCase().includes("belum terdaftar");
+      if (isUnregistered) {
+        setErrorMsg("Akun dengan email ini belum terdaftar di platform Bantuin. Mengalihkan ke halaman pendaftaran akun baru...");
+        addToast?.(
+          "Akun Belum Terdaftar",
+          `Email ${email} belum terdaftar di Bantuin. Mengalihkan ke formulir pendaftaran akun baru...`,
+          "error"
+        );
+        setTimeout(() => {
+          router.push(`/auth/register?notice=unregistered&email=${encodeURIComponent(email)}`);
+        }, 1800);
+      } else {
+        setErrorMsg(err.message || "Gagal masuk. Periksa kembali email dan kata sandi Anda.");
+        addToast?.("Login Gagal", err.message || "Terjadi kesalahan saat masuk.", "error");
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const handleGoogleLogin = async () => {
-    if (loading || googleLoading) return;
-    setErrorMsg("");
-    setGoogleLoading(true);
-    addToast?.("Menghubungkan Google", "Mengarahkan ke halaman autentikasi Google aman...", "info");
-
-    try {
-      await authService.loginWithGoogle();
-    } catch (err) {
-      setErrorMsg(err.message || "Login dengan Google gagal. Silakan coba lagi.");
-      addToast?.("Google Auth Gagal", err.message || "Terjadi kesalahan saat otentikasi Google.", "error");
-      setGoogleLoading(false);
-    }
-  };
 
   return (
     <div className="min-h-[100dvh] relative flex flex-col justify-between p-3 sm:p-6 lg:p-8 overflow-x-hidden font-sans bg-gradient-to-br from-[#EBF3FE] via-[#F0F6FF] to-[#DEEEFC]">
@@ -106,7 +130,7 @@ function LoginPageContent() {
           <Link href="/" className="inline-block transition hover:opacity-90">
             <Image
               src={logoImg}
-              alt="Bantuin.id"
+              alt="BantuinAja.id"
               height={48}
               className="h-10 sm:h-12 w-auto object-contain mix-blend-multiply"
             />
@@ -115,6 +139,22 @@ function LoginPageContent() {
 
         {/* Clean & Elevated Login Card */}
         <div className="bg-white/95 backdrop-blur-md py-5 sm:py-8 px-4 sm:px-8 shadow-[0_20px_50px_rgba(16,42,67,0.12)] border border-white/80 rounded-2xl sm:rounded-3xl space-y-4 sm:space-y-5">
+          {/* Top Segmented Tab Switcher: Masuk vs Daftar */}
+          <div className="flex items-center bg-slate-100/90 p-1 rounded-xl sm:rounded-2xl mb-4 sm:mb-5 border border-slate-200/60 shadow-2xs">
+            <Link
+              href="/auth/login"
+              className="flex-1 py-2 sm:py-2.5 text-center rounded-lg sm:rounded-xl text-xs sm:text-sm font-extrabold bg-white text-[#1683FF] shadow-xs border border-slate-200/50 transition flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              Masuk
+            </Link>
+            <Link
+              href="/auth/register"
+              className="flex-1 py-2 sm:py-2.5 text-center rounded-lg sm:rounded-xl text-xs sm:text-sm font-bold text-slate-600 hover:text-slate-900 transition flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              Daftar
+            </Link>
+          </div>
+
           <div className="text-center sm:text-left">
             <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
               Masuk ke Akun
@@ -125,8 +165,14 @@ function LoginPageContent() {
           </div>
 
           {errorMsg && (
-            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 font-medium animate-in fade-in duration-150">
+            <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 font-semibold animate-in fade-in duration-150">
               {errorMsg}
+            </div>
+          )}
+
+          {infoMsg && (
+            <div className="p-3.5 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-800 font-semibold animate-in fade-in duration-150">
+              {infoMsg}
             </div>
           )}
 
@@ -177,7 +223,7 @@ function LoginPageContent() {
 
             <button
               type="submit"
-              disabled={loading || googleLoading}
+              disabled={loading}
               className="w-full py-2.5 sm:py-3 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs sm:text-sm font-bold shadow-xs transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60 active:scale-[0.99]"
             >
               {loading ? (
@@ -206,29 +252,13 @@ function LoginPageContent() {
             </div>
           </div>
 
-          {/* Google Login Button */}
-          <button
-            type="button"
-            disabled={loading || googleLoading}
-            onClick={handleGoogleLogin}
-            className={`w-full py-2.5 px-4 rounded-xl border text-xs sm:text-sm font-bold shadow-2xs transition flex items-center justify-center gap-2.5 cursor-pointer active:scale-95 disabled:cursor-not-allowed ${
-              googleLoading
-                ? "bg-blue-50 border-blue-300 text-[#1683FF]"
-                : "border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-700"
-            }`}
-          >
-            {googleLoading ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin text-[#1683FF]" />
-                <span>Membuka Google OAuth...</span>
-              </>
-            ) : (
-              <>
-                <GoogleIcon className="w-4 h-4 shrink-0" />
-                <span>Lanjutkan dengan Google</span>
-              </>
-            )}
-          </button>
+          {/* Google Login Button (GIS Pop-up / One Tap with Custom Domain Branding) */}
+          <GoogleSignInButton
+            role="user"
+            mode="login"
+            label="Lanjutkan dengan Google"
+            disabled={loading}
+          />
 
           <div className="pt-1 text-center text-xs text-slate-500">
             Belum punya akun?{" "}
@@ -240,9 +270,17 @@ function LoginPageContent() {
 
       </div>
 
+      {/* Immersive Brand Loading Screen saat Verifikasi Akun */}
+      {loading && (
+        <AuthLoadingScreen
+          title="Memverifikasi Akun..."
+          subtitle="Sedang memeriksa kredensial akun Anda secara aman, mohon tunggu sebentar..."
+        />
+      )}
+
       {/* Subtle Bottom Footer */}
       <footer className="w-full max-w-md mx-auto text-center text-[11px] text-slate-500 font-medium pt-2 pointer-events-none z-10">
-        &copy; {new Date().getFullYear()} Bantuin.id &middot; Platform Bantuan, Jasa &amp; Sewa Komunitas
+        &copy; {new Date().getFullYear()} BantuinAja.id &middot; Platform Bantuan, Jasa &amp; Sewa Komunitas
       </footer>
     </div>
   );

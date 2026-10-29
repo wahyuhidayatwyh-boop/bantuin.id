@@ -1,11 +1,14 @@
 "use client";
 
-import React, { useState, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { useApp } from "@/lib/context/AppContext";
+import { saveFormDraft, getFormDraft, clearFormDraft, useBeforeUnload } from "@/lib/hooks/useFormDraft";
+
+const DRAFT_KEY = "bantuin_draft_lapor";
 import {
   Flag,
   ChevronRight,
@@ -60,16 +63,30 @@ export default function LaporPage() {
   const { submitReport, addToast, orderRooms = [] } = useApp();
   const fileInputRef = useRef(null);
 
-  const [category, setCategory] = useState("");
-  const [targetRoomId, setTargetRoomId] = useState("");
-  const [involvedUser, setInvolvedUser] = useState("");
-  const [description, setDescription] = useState("");
+  const savedDraft = typeof window !== "undefined" ? getFormDraft(DRAFT_KEY, null) : null;
+
+  const [category, setCategory] = useState(() => savedDraft?.category || "");
+  const [targetRoomId, setTargetRoomId] = useState(() => savedDraft?.targetRoomId || "");
+  const [involvedUser, setInvolvedUser] = useState(() => savedDraft?.involvedUser || "");
+  const [description, setDescription] = useState(() => savedDraft?.description || "");
   const [photos, setPhotos] = useState([]);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [reportId, setReportId] = useState("");
+
+  useEffect(() => {
+    saveFormDraft(DRAFT_KEY, {
+      category,
+      targetRoomId,
+      involvedUser,
+      description
+    });
+  }, [category, targetRoomId, involvedUser, description]);
+
+  const isDirty = Boolean(category || description.trim());
+  useBeforeUnload(isDirty, "Ada draf laporan yang belum dikirim. Yakin ingin meninggalkan halaman?");
 
   const activeOrders = orderRooms.filter(
     (r) => r.orderStatus !== "completed" && r.orderStatus !== "cancelled"
@@ -111,6 +128,7 @@ export default function LaporPage() {
     await new Promise((r) => setTimeout(r, 1000));
     const evidenceUrls = photos.map((f, i) => `evidence-${Date.now()}-${i}`);
     const report = submitReport({ targetRoomId: targetRoomId || null, targetUserId: involvedUser || null, category, description: description.trim(), evidenceUrls });
+    clearFormDraft(DRAFT_KEY);
     setReportId(report?.id || `rep-${Date.now()}`);
     setIsSubmitting(false);
     setSubmitted(true);

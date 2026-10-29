@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { 
@@ -17,6 +17,10 @@ import RoleGuard from "@/components/auth/RoleGuard";
 import { useApp } from "@/lib/context/AppContext";
 import { getMitraStoreById, saveMitraStoreData } from "@/lib/mock/mitraData";
 import { imageService } from "@/lib/services/imageService";
+import { authService } from "@/lib/services/authService";
+import { saveFormDraft, getFormDraft, clearFormDraft, useBeforeUnload } from "@/lib/hooks/useFormDraft";
+
+const DRAFT_KEY = "bantuin_draft_mitra_galeri_tambah";
 
 const GALLERY_CATEGORIES = [
   "Kamera & Rig",
@@ -31,14 +35,28 @@ const GALLERY_CATEGORIES = [
 
 export default function TambahFotoGaleriMitraPage() {
   const router = useRouter();
-  const { addToast } = useApp();
+  const { addToast, currentUser } = useApp();
 
-  const [title, setTitle] = useState("");
-  const [category, setCategory] = useState("Kamera & Rig");
-  const [description, setDescription] = useState("");
-  const [photoUrl, setPhotoUrl] = useState("");
+  const savedDraft = typeof window !== "undefined" ? getFormDraft(DRAFT_KEY, null) : null;
+
+  const [title, setTitle] = useState(() => savedDraft?.title || "");
+  const [category, setCategory] = useState(() => savedDraft?.category || "Kamera & Rig");
+  const [description, setDescription] = useState(() => savedDraft?.description || "");
+  const [photoUrl, setPhotoUrl] = useState(() => savedDraft?.photoUrl || "");
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    saveFormDraft(DRAFT_KEY, {
+      title,
+      category,
+      description,
+      photoUrl
+    });
+  }, [title, category, description, photoUrl]);
+
+  const isDirty = Boolean(title.trim() || photoUrl);
+  useBeforeUnload(isDirty, "Ada draf foto galeri yang belum disimpan. Yakin ingin meninggalkan halaman?");
 
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -66,65 +84,81 @@ export default function TambahFotoGaleriMitraPage() {
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!photoUrl) {
-      alert("Mohon unggah foto fisik gear atau setup terlebih dahulu.");
+      addToast?.("Foto Belum Ada", "Mohon unggah foto fisik gear atau setup terlebih dahulu.", "error");
       return;
     }
     if (!title.trim()) {
-      alert("Mohon masukkan judul foto showcase.");
+      addToast?.("Judul Wajib Diisi", "Mohon masukkan judul foto showcase.", "error");
       return;
     }
 
     setSaving(true);
-    const store = getMitraStoreById("mitra-kamera");
-    const currentPortfolio = Array.isArray(store?.portfolioPhotos) ? store.portfolioPhotos : [];
+    try {
+      const token =
+        (await authService.getValidAccessToken?.()) ||
+        authService.getToken?.() ||
+        authService.getAccessToken?.() ||
+        (typeof window !== "undefined"
+          ? localStorage.getItem("bantuin_auth_access_token") ||
+            localStorage.getItem("bantuin_auth_session_token") ||
+            localStorage.getItem("bantuin_token")
+          : null);
+      const res = await fetch("/api/mitra/gallery", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          title: title.trim(),
+          caption: title.trim(),
+          category,
+          photoUrl: photoUrl.trim(),
+          url: photoUrl.trim(),
+          description: description.trim(),
+        }),
+      });
 
-    const newPhotoItem = {
-      id: `gal-${Date.now()}`,
-      title: title.trim(),
-      category,
-      url: photoUrl,
-      description: description.trim(),
-      createdAt: new Date().toISOString()
-    };
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || "Gagal menyimpan foto ke galeri database.");
+      }
 
-    const updatedStore = {
-      ...store,
-      portfolioPhotos: [newPhotoItem, ...currentPortfolio]
-    };
-
-    saveMitraStoreData(updatedStore);
-
-    if (addToast) {
-      addToast("Foto Ditambahkan", `Foto "${newPhotoItem.title}" berhasil disimpan ke galeri showcase.`);
+      addToast?.("Foto Ditambahkan", `Foto "${title}" berhasil disimpan ke galeri showcase.`);
+      clearFormDraft(DRAFT_KEY);
+      router.push("/mitra/dashboard?menu=gallery");
+    } catch (err) {
+      console.error("Gallery submit error:", err);
+      addToast?.("Gagal Menyimpan", err.message || "Terjadi kesalahan.", "error");
+    } finally {
+      setSaving(false);
     }
-
-    router.push("/mitra/dashboard");
   };
 
   return (
-    <RoleGuard allowedRoles={["mitra", "super_admin"]}>
+    <RoleGuard allowedRoles={["partner", "mitra", "super_admin", "admin"]}>
       <div className="min-h-screen bg-slate-50 pb-24">
         {/* Header with Breadcrumbs */}
         <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
           <div className="max-w-4xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
             <div>
               <nav className="flex items-center gap-2 text-xs text-slate-500 mb-1">
-                <Link href="/mitra/dashboard" className="hover:text-emerald-600 transition">
+                <Link href="/mitra/dashboard?menu=gallery" className="hover:text-[#1683FF] transition">
                   Dashboard Mitra
                 </Link>
                 <ChevronRight className="w-3.5 h-3.5" />
                 <span className="text-slate-800 font-semibold">Tambah Foto Galeri Showcase</span>
               </nav>
               <h1 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2.5">
-                <span className="w-2.5 h-6 bg-emerald-600 rounded-full inline-block"></span>
+                <span className="w-2.5 h-6 bg-[#1683FF] rounded-full inline-block"></span>
                 Tambah Foto Galeri Gear &amp; Setup
               </h1>
             </div>
             <Link
-              href="/mitra/dashboard"
+              href="/mitra/dashboard?menu=gallery"
               className="hidden sm:inline-flex items-center gap-2 px-4 py-2 border border-slate-300 text-slate-700 rounded-xl hover:bg-slate-100 font-medium text-sm transition"
             >
               <ArrowLeft className="w-4 h-4" />
@@ -139,7 +173,7 @@ export default function TambahFotoGaleriMitraPage() {
             {/* Card 1: Upload Foto */}
             <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 shadow-sm">
               <div className="flex items-center gap-3 border-b border-slate-100 pb-4 mb-6">
-                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#1683FF] flex items-center justify-center font-bold">
                   1
                 </div>
                 <div>
@@ -149,7 +183,7 @@ export default function TambahFotoGaleriMitraPage() {
               </div>
 
               {!photoUrl ? (
-                <div className="border-2 border-dashed border-slate-300 hover:border-emerald-500 bg-slate-50/50 hover:bg-emerald-50/20 rounded-2xl p-8 sm:p-12 text-center transition cursor-pointer relative">
+                <div className="border-2 border-dashed border-slate-300 hover:border-[#1683FF] bg-slate-50/50 hover:bg-blue-50/30 rounded-2xl p-8 sm:p-12 text-center transition cursor-pointer relative">
                   <input
                     type="file"
                     accept="image/*"
@@ -158,9 +192,9 @@ export default function TambahFotoGaleriMitraPage() {
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                   />
                   <div className="flex flex-col items-center justify-center pointer-events-none">
-                    <div className="w-14 h-14 bg-white rounded-2xl shadow-sm border border-slate-200 flex items-center justify-center text-emerald-600 mb-3">
+                    <div className="w-14 h-14 bg-white rounded-2xl shadow-sm border border-slate-200 flex items-center justify-center text-[#1683FF] mb-3">
                       {uploading ? (
-                        <Loader2 className="w-7 h-7 animate-spin text-emerald-600" />
+                        <Loader2 className="w-7 h-7 animate-spin text-[#1683FF]" />
                       ) : (
                         <Upload className="w-7 h-7" />
                       )}
@@ -199,7 +233,7 @@ export default function TambahFotoGaleriMitraPage() {
             {/* Card 2: Informasi Foto Showcase */}
             <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 shadow-sm">
               <div className="flex items-center gap-3 border-b border-slate-100 pb-4 mb-6">
-                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#1683FF] flex items-center justify-center font-bold">
                   2
                 </div>
                 <div>
@@ -219,7 +253,7 @@ export default function TambahFotoGaleriMitraPage() {
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="Contoh: Rig Cinema Sony FX3 + Wireless Transmission Ready"
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 transition text-slate-900"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-[#1683FF] focus:ring-2 focus:ring-blue-100 transition text-slate-900"
                   />
                 </div>
 
@@ -230,7 +264,7 @@ export default function TambahFotoGaleriMitraPage() {
                   <select
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 transition text-slate-900 bg-white"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-[#1683FF] focus:ring-2 focus:ring-blue-100 transition text-slate-900 bg-white"
                   >
                     {GALLERY_CATEGORIES.map((cat) => (
                       <option key={cat} value={cat}>{cat}</option>
@@ -247,7 +281,7 @@ export default function TambahFotoGaleriMitraPage() {
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="Ceritakan detail setup alat, kebersihan sensor, atau penggunaan pada event sebelumnya..."
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 transition text-slate-900"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-[#1683FF] focus:ring-2 focus:ring-blue-100 transition text-slate-900"
                   />
                 </div>
               </div>
@@ -256,7 +290,7 @@ export default function TambahFotoGaleriMitraPage() {
             {/* Sticky Action Footer */}
             <div className="sticky bottom-4 z-20 bg-white/95 backdrop-blur-md border border-slate-200 shadow-xl rounded-2xl p-4 flex items-center justify-between">
               <Link
-                href="/mitra/dashboard"
+                href="/mitra/dashboard?menu=gallery"
                 className="px-5 py-2.5 border border-slate-300 text-slate-700 font-semibold rounded-xl hover:bg-slate-100 transition text-sm"
               >
                 Batal
@@ -264,7 +298,7 @@ export default function TambahFotoGaleriMitraPage() {
               <button
                 type="submit"
                 disabled={saving || !photoUrl}
-                className="inline-flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl shadow-sm transition disabled:opacity-50 text-sm"
+                className="inline-flex items-center gap-2 px-6 py-2.5 bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-semibold rounded-xl shadow-sm transition disabled:opacity-50 text-sm cursor-pointer"
               >
                 {saving ? (
                   <>

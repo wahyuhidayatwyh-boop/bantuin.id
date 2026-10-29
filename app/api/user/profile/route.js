@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { verifyAccessToken } from "@/lib/auth/jwt";
+import { requireAuth, normalizePublicRole, resolveRole, maskIdNumber } from "@/lib/auth/session";
+import { isPersistableDocumentRef, normalizeToStorageRef, resolveDocumentUrl } from "@/lib/supabase/storage";
 import bcrypt from "bcryptjs";
 
 /**
@@ -10,43 +11,10 @@ import bcrypt from "bcryptjs";
  */
 export async function GET(req) {
   try {
-    const authHeader = req.headers.get("authorization");
-    let token = null;
+    const auth = await requireAuth(req);
+    if (auth.error) return auth.error;
 
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      token = authHeader.substring(7).trim();
-    }
-
-    if (!token) {
-      return NextResponse.json(
-        { success: false, error: "Akses ditolak. Token otentikasi tidak ditemukan." },
-        { status: 401 }
-      );
-    }
-
-    const decoded = verifyAccessToken(token);
-    if (!decoded || (!decoded.id && !decoded.email)) {
-      return NextResponse.json(
-        { success: false, error: "Sesi tidak valid atau telah kedaluwarsa." },
-        { status: 401 }
-      );
-    }
-
-    const userProfile = await prisma.profile.findFirst({
-      where: {
-        OR: [
-          ...(decoded.id ? [{ id: decoded.id }] : []),
-          ...(decoded.email ? [{ email: decoded.email.toLowerCase() }] : []),
-        ],
-      },
-    });
-
-    if (!userProfile) {
-      return NextResponse.json(
-        { success: false, error: "Profil pengguna tidak ditemukan." },
-        { status: 404 }
-      );
-    }
+    const userProfile = auth.profile;
 
     // Hitung statistik transaksi riil dari database
     const [completedRequestsCount, completedBookingsCount] = await Promise.all([
@@ -69,6 +37,11 @@ export async function GET(req) {
     ]);
 
     const totalCompleted = completedRequestsCount + completedBookingsCount;
+    const effectiveRole = resolveRole(userProfile);
+    const [idCardViewUrl, selfieViewUrl] = await Promise.all([
+      resolveDocumentUrl(userProfile.idCardUrl, 900),
+      resolveDocumentUrl(userProfile.selfieUrl, 900),
+    ]);
 
     const data = {
       id: userProfile.id,
@@ -77,19 +50,28 @@ export async function GET(req) {
       phoneNumber: userProfile.phoneNumber || "",
       avatarUrl: userProfile.avatarUrl && !userProfile.avatarUrl.includes("images.unsplash.com") ? userProfile.avatarUrl : null,
       bio: userProfile.bio || "",
-      campusName: userProfile.campusName || "Bekasi Barat, Kota Bekasi",
-      accountRole: userProfile.accountRole || "user",
-      isPartner: userProfile.isPartner || false,
-      isAdmin: userProfile.isAdmin || false,
+      campusName: userProfile.campusName || "",
+      role: effectiveRole,
+      accountRole: effectiveRole,
+      isPartner: effectiveRole === "partner" || Boolean(userProfile.isPartner),
+      isAdmin: Boolean(userProfile.isAdmin),
       partnerBusinessName: userProfile.partnerBusinessName || "",
       partnerAddress: userProfile.partnerAddress || "",
       verificationStatus: userProfile.verificationStatus || "unverified",
-      idNumber: userProfile.idNumber || "",
-      idCardUrl: userProfile.idCardUrl || null,
-      selfieUrl: userProfile.selfieUrl || null,
+      idNumber: maskIdNumber(userProfile.idNumber),
+      idNumberMasked: maskIdNumber(userProfile.idNumber),
+      hasKycDocument: Boolean(userProfile.idCardUrl),
+      hasSelfie: Boolean(userProfile.selfieUrl),
+      idCardViewUrl: idCardViewUrl || null,
+      selfieViewUrl: selfieViewUrl || null,
       payoutBank: userProfile.payoutBank || "",
       payoutAccountNumber: userProfile.payoutAccountNumber || "",
       payoutAccountHolder: userProfile.payoutAccountHolder || "",
+      bannerUrl: userProfile.bannerUrl || null,
+      coverBanner: userProfile.bannerUrl || null,
+      portfolioPhotos: Array.isArray(userProfile.portfolioPhotos) ? userProfile.portfolioPhotos : [],
+      packages: Array.isArray(userProfile.packages) ? userProfile.packages : [],
+      skills: Array.isArray(userProfile.skills) ? userProfile.skills : [],
       authProvider: userProfile.authProvider || (userProfile.password ? "local" : "google"),
       hasPassword: Boolean(userProfile.password),
       ratingAvg: Number(userProfile.ratingAvg) || 5.0,
@@ -119,49 +101,19 @@ export async function GET(req) {
  */
 export async function PUT(req) {
   try {
-    const authHeader = req.headers.get("authorization");
-    let token = null;
+    // SEC-02: Gunakan requireAuth untuk menolak token tidak valid maupun akun suspended
+    const auth = await requireAuth(req);
+    if (auth.error) return auth.error;
 
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      token = authHeader.substring(7).trim();
-    }
-
-    if (!token) {
-      return NextResponse.json(
-        { success: false, error: "Akses ditolak. Token otentikasi tidak ditemukan." },
-        { status: 401 }
-      );
-    }
-
-    const decoded = verifyAccessToken(token);
-    if (!decoded || (!decoded.id && !decoded.email)) {
-      return NextResponse.json(
-        { success: false, error: "Sesi tidak valid atau telah kedaluwarsa." },
-        { status: 401 }
-      );
-    }
-
-    const userProfile = await prisma.profile.findFirst({
-      where: {
-        OR: [
-          ...(decoded.id ? [{ id: decoded.id }] : []),
-          ...(decoded.email ? [{ email: decoded.email.toLowerCase() }] : []),
-        ],
-      },
-    });
-
-    if (!userProfile) {
-      return NextResponse.json(
-        { success: false, error: "Profil pengguna tidak ditemukan di database." },
-        { status: 404 }
-      );
-    }
+    const userProfile = auth.profile;
 
     const body = await req.json();
     const {
       fullName,
       phoneNumber,
+      phone,
       campusName,
+      city,
       bio,
       avatarUrl,
       payoutBank,
@@ -177,63 +129,129 @@ export async function PUT(req) {
       storeName,
       partnerAddress,
       address,
+      bannerUrl,
+      coverBanner,
+      portfolioPhotos,
+      packages,
+      skills,
       currentPassword,
       newPassword,
     } = body;
 
+    // SEC-02: Cegah eskalasi hak akses menjadi admin melalui endpoint profil publik
+    if (typeof accountRole === "string") {
+      const requestedRole = accountRole.trim().toLowerCase();
+      if (["admin", "superadmin", "super_admin"].includes(requestedRole) && !userProfile.isAdmin) {
+        return NextResponse.json(
+          { success: false, error: "Akses ditolak. Eskalasi peran ke Administrator tidak diizinkan." },
+          { status: 403 }
+        );
+      }
+    }
+
+    // SEC-02: Cegah manipulasi status verifikasi KYC secara mandiri
+    if (typeof verificationStatus === "string") {
+      const requestedStatus = verificationStatus.trim().toLowerCase();
+      if (["verified", "rejected", "suspended"].includes(requestedStatus) && !userProfile.isAdmin) {
+        return NextResponse.json(
+          { success: false, error: "Akses ditolak. Status verifikasi KYC hanya dapat disetujui oleh Administrator." },
+          { status: 403 }
+        );
+      }
+    }
+
     const updateData = {};
 
     // 1. Update info profil umum
-    if (typeof fullName === "string" && fullName.trim()) {
-      updateData.fullName = fullName.trim();
+    if (fullName !== undefined) {
+      updateData.fullName = typeof fullName === "string" ? fullName.trim() : "";
     }
-    if (typeof phoneNumber === "string") {
-      updateData.phoneNumber = phoneNumber.trim();
+    const targetPhone = phoneNumber !== undefined ? phoneNumber : phone;
+    if (targetPhone !== undefined) {
+      updateData.phoneNumber = typeof targetPhone === "string" ? targetPhone.trim() : "";
     }
-    if (typeof campusName === "string") {
-      updateData.campusName = campusName.trim();
+    const targetCampus = campusName !== undefined ? campusName : city;
+    if (targetCampus !== undefined) {
+      updateData.campusName = typeof targetCampus === "string" ? targetCampus.trim() : "";
     }
-    if (typeof bio === "string") {
-      updateData.bio = bio.trim();
+    if (bio !== undefined) {
+      updateData.bio = typeof bio === "string" ? bio.trim() : "";
     }
-    if (typeof avatarUrl === "string" && avatarUrl.trim()) {
-      updateData.avatarUrl = avatarUrl.trim();
+    if (avatarUrl !== undefined) {
+      updateData.avatarUrl = avatarUrl ? String(avatarUrl).trim() : null;
     }
-    const resolvedBusinessName = partnerBusinessName || brandTitle || storeName;
-    if (typeof resolvedBusinessName === "string") {
-      updateData.partnerBusinessName = resolvedBusinessName.trim();
+    if (partnerBusinessName !== undefined) {
+      updateData.partnerBusinessName = typeof partnerBusinessName === "string" ? partnerBusinessName.trim() : "";
+    } else if (brandTitle !== undefined) {
+      updateData.partnerBusinessName = typeof brandTitle === "string" ? brandTitle.trim() : "";
+    } else if (storeName !== undefined) {
+      updateData.partnerBusinessName = typeof storeName === "string" ? storeName.trim() : "";
     }
-    const resolvedAddress = partnerAddress || address;
-    if (typeof resolvedAddress === "string") {
-      updateData.partnerAddress = resolvedAddress.trim();
+    if (partnerAddress !== undefined) {
+      updateData.partnerAddress = typeof partnerAddress === "string" ? partnerAddress.trim() : "";
+    } else if (address !== undefined) {
+      updateData.partnerAddress = typeof address === "string" ? address.trim() : "";
+    }
+    const resolvedBanner = bannerUrl !== undefined ? bannerUrl : coverBanner;
+    if (resolvedBanner !== undefined) {
+      updateData.bannerUrl = resolvedBanner ? String(resolvedBanner).trim() : null;
+    }
+    if (portfolioPhotos !== undefined) {
+      updateData.portfolioPhotos = Array.isArray(portfolioPhotos) ? portfolioPhotos : [];
+    }
+    if (packages !== undefined) {
+      updateData.packages = Array.isArray(packages) ? packages : [];
+    }
+    if (skills !== undefined) {
+      updateData.skills = Array.isArray(skills)
+        ? skills.map((s) => String(s).trim()).filter(Boolean)
+        : typeof skills === "string"
+        ? skills.split(",").map((s) => s.trim()).filter(Boolean)
+        : [];
     }
 
     // 2. Update info rekening pencairan
-    if (typeof payoutBank === "string" && payoutBank.trim()) {
-      updateData.payoutBank = payoutBank.trim();
+    if (payoutBank !== undefined) {
+      updateData.payoutBank = typeof payoutBank === "string" ? payoutBank.trim() : "";
     }
-    if (typeof payoutAccountNumber === "string") {
-      updateData.payoutAccountNumber = payoutAccountNumber.trim();
+    if (payoutAccountNumber !== undefined) {
+      updateData.payoutAccountNumber = typeof payoutAccountNumber === "string" ? payoutAccountNumber.trim() : "";
     }
-    if (typeof payoutAccountHolder === "string") {
-      updateData.payoutAccountHolder = payoutAccountHolder.trim().toUpperCase();
+    if (payoutAccountHolder !== undefined) {
+      updateData.payoutAccountHolder = typeof payoutAccountHolder === "string" ? payoutAccountHolder.trim().toUpperCase() : "";
     }
 
-    // 3. Update info KYC dan Role Akun jika diberikan
-    if (typeof idNumber === "string" && idNumber.trim()) {
-      updateData.idNumber = idNumber.trim();
+    // 3. Update info KYC dan Role Akun Publik secara aman
+    let hasNewKycDoc = false;
+    if (typeof idNumber === "string" && idNumber.trim() && !idNumber.includes("*")) {
+      const cleanNik = idNumber.replace(/\D/g, "");
+      if (cleanNik.length === 16) {
+        updateData.idNumber = cleanNik;
+      }
     }
-    if (typeof idCardUrl === "string" && idCardUrl.trim()) {
-      updateData.idCardUrl = idCardUrl.trim();
+    if (typeof idCardUrl === "string" && isPersistableDocumentRef(idCardUrl)) {
+      const canonicalIdCardRef = normalizeToStorageRef(idCardUrl);
+      if (canonicalIdCardRef !== userProfile.idCardUrl) {
+        updateData.idCardUrl = canonicalIdCardRef;
+        hasNewKycDoc = true;
+      }
     }
-    if (typeof selfieUrl === "string" && selfieUrl.trim()) {
-      updateData.selfieUrl = selfieUrl.trim();
+    if (typeof selfieUrl === "string" && isPersistableDocumentRef(selfieUrl)) {
+      updateData.selfieUrl = normalizeToStorageRef(selfieUrl);
     }
-    if (typeof accountRole === "string" && ["user", "provider", "partner", "admin"].includes(accountRole.trim().toLowerCase())) {
-      updateData.accountRole = accountRole.trim().toLowerCase();
+    if (typeof accountRole === "string" && accountRole.trim() && !userProfile.isAdmin) {
+      const safeRole = normalizePublicRole(accountRole);
+      updateData.accountRole = safeRole;
+      if (safeRole === "partner") {
+        updateData.isPartner = true;
+      }
     }
-    if (typeof verificationStatus === "string" && ["unverified", "pending_review", "verified", "rejected", "suspended"].includes(verificationStatus.trim().toLowerCase())) {
-      updateData.verificationStatus = verificationStatus.trim().toLowerCase();
+    if (
+      hasNewKycDoc &&
+      userProfile.verificationStatus !== "verified" &&
+      userProfile.verificationStatus !== "suspended"
+    ) {
+      updateData.verificationStatus = "pending_review";
     }
 
     // 4. Update Kata Sandi jika diminta
@@ -294,19 +312,22 @@ export async function PUT(req) {
       console.warn("User table sync warning:", syncErr);
     }
 
+    const effectiveRole = resolveRole(updatedProfile);
     const updatedUserPayload = {
       id: updatedProfile.id,
       email: updatedProfile.email,
       fullName: updatedProfile.fullName,
       phone: updatedProfile.phoneNumber,
       phoneNumber: updatedProfile.phoneNumber,
-      role: updatedProfile.accountRole || "user",
-      accountRole: updatedProfile.accountRole || "user",
-      isPartner: updatedProfile.isPartner || false,
-      isAdmin: updatedProfile.isAdmin || false,
+      role: effectiveRole,
+      accountRole: effectiveRole,
+      isPartner: effectiveRole === "partner" || Boolean(updatedProfile.isPartner),
+      isAdmin: Boolean(updatedProfile.isAdmin),
       storeName: updatedProfile.partnerBusinessName || "",
-      campusName: updatedProfile.campusName || "Bekasi Barat, Kota Bekasi",
-      address: updatedProfile.partnerAddress || updatedProfile.campusName || "Bekasi Barat, Kota Bekasi",
+      partnerBusinessName: updatedProfile.partnerBusinessName || "",
+      campusName: updatedProfile.campusName || "",
+      address: updatedProfile.partnerAddress || updatedProfile.campusName || "",
+      partnerAddress: updatedProfile.partnerAddress || "",
       avatarUrl: updatedProfile.avatarUrl,
       verificationStatus: updatedProfile.verificationStatus || "unverified",
       authProvider: updatedProfile.authProvider || "local",
@@ -323,6 +344,11 @@ export async function PUT(req) {
       completedHelpsCount: updatedProfile.completedHelpsCount || 0,
       reliabilityScore: updatedProfile.reliabilityScore || 100,
       bio: updatedProfile.bio || "",
+      bannerUrl: updatedProfile.bannerUrl || null,
+      coverBanner: updatedProfile.bannerUrl || null,
+      portfolioPhotos: Array.isArray(updatedProfile.portfolioPhotos) ? updatedProfile.portfolioPhotos : [],
+      packages: Array.isArray(updatedProfile.packages) ? updatedProfile.packages : [],
+      skills: Array.isArray(updatedProfile.skills) ? updatedProfile.skills : [],
       createdAt: updatedProfile.createdAt,
     };
 
@@ -339,3 +365,6 @@ export async function PUT(req) {
     );
   }
 }
+
+export const PATCH = PUT;
+

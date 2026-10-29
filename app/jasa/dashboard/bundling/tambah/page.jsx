@@ -1,11 +1,13 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import RoleGuard from "@/components/auth/RoleGuard";
 import { useApp } from "@/lib/context/AppContext";
 import { getProviderById, saveProviderData } from "@/lib/mock/providersData";
+import { authService } from "@/lib/services/authService";
+import { saveFormDraft, getFormDraft, clearFormDraft, useBeforeUnload } from "@/lib/hooks/useFormDraft";
 import { 
   ArrowLeft, 
   Package, 
@@ -19,13 +21,45 @@ import {
 
 export default function TambahBundlingJasaPage() {
   const router = useRouter();
-  const { addToast } = useApp() || {};
+  const { currentUser, setCurrentUser, addToast } = useApp() || {};
 
   const [provider, setProvider] = useState(() => {
-    return getProviderById("fajar-ramadhan-desain") || {};
+    return currentUser || {};
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadLiveProfile() {
+      try {
+        const token = await authService.getValidAccessToken();
+        if (token) {
+          const res = await fetch("/api/user/profile", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const json = await res.json();
+          if (isMounted && res.ok && json.success && json.data) {
+            setProvider((prev) => ({
+              ...prev,
+              ...json.data,
+              packages: Array.isArray(json.data.packages) ? json.data.packages : [],
+            }));
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Could not load live packages in tambah bundling:", err);
+      }
+      if (isMounted && currentUser) {
+        setProvider(currentUser);
+      }
+    }
+    loadLiveProfile();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser]);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -38,7 +72,29 @@ export default function TambahBundlingJasaPage() {
     isPopular: false,
   });
 
-  const handleSubmit = (e) => {
+  const DRAFT_KEY = "bantuin_draft_jasa_bundling_tambah";
+  const hasLoadedDraftRef = useRef(false);
+
+  useEffect(() => {
+    if (hasLoadedDraftRef.current) return;
+    hasLoadedDraftRef.current = true;
+    const draft = getFormDraft(DRAFT_KEY, null);
+    if (draft) {
+      setFormData((prev) => ({ ...prev, ...draft }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedDraftRef.current) return;
+    if (formData.name || formData.description) {
+      saveFormDraft(DRAFT_KEY, formData);
+    }
+  }, [formData]);
+
+  const isFormDirty = Boolean(formData.name.trim().length > 0 || (formData.description && formData.description.trim().length > 0));
+  useBeforeUnload(isFormDirty, "Ada isian paket bundling jasa yang belum disimpan. Yakin ingin meninggalkan halaman?");
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name.trim()) {
       addToast?.("Form Belum Lengkap", "Silakan isi nama paket bundling.", "error");
@@ -57,27 +113,70 @@ export default function TambahBundlingJasaPage() {
       .filter(Boolean);
 
     const newPackage = {
-      id: `pkg-${Date.now()}`,
+      id: `pkg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       name: formData.name.trim(),
       tier: formData.tier,
       price: Number(formData.price),
-      duration: formData.duration.trim(),
-      description: formData.description.trim(),
+      duration: formData.duration.trim() || "1 - 2 Hari Kerja",
+      description: formData.description.trim() || "Paket pengerjaan profesional dengan jaminan kepuasan.",
       features: features.length > 0 ? features : ["Pengerjaan Sesuai Brief", "Revisi Bergaransi"],
-      isPopular: formData.isPopular,
+      isPopular: Boolean(formData.isPopular),
       createdAt: new Date().toISOString(),
     };
 
-    const currentPackages = provider.packages || [];
+    // Ambil daftar paket saat ini — usahakan card nya nambah baru, bukan menimpa yang lama
+    let currentPackages = Array.isArray(provider.packages) ? [...provider.packages] : [];
+    if (currentPackages.length === 0 && provider.id && typeof window !== "undefined") {
+      const localStored = localStorage.getItem(`bantuin_provider_packages_${provider.id}`);
+      if (localStored) {
+        try {
+          const parsed = JSON.parse(localStored);
+          if (Array.isArray(parsed) && parsed.length > 0) currentPackages = parsed;
+        } catch {}
+      }
+    }
+
+    const updatedPackages = [...currentPackages, newPackage];
     const updatedProvider = {
       ...provider,
-      packages: [...currentPackages, newPackage],
+      packages: updatedPackages,
     };
 
     saveProviderData(updatedProvider);
+    if (typeof window !== "undefined" && provider.id) {
+      localStorage.setItem(`bantuin_provider_packages_${provider.id}`, JSON.stringify(updatedPackages));
+    }
     setProvider(updatedProvider);
+
+    // Simpan ke PostgreSQL database
+    try {
+      const token = await authService.getValidAccessToken();
+      if (token) {
+        await fetch("/api/user/profile", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ packages: updatedPackages }),
+        });
+      }
+    } catch (err) {
+      console.error("Gagal simpan paket bundling ke database:", err);
+    }
+
+    if (typeof setCurrentUser === "function") {
+      setCurrentUser((prev) => ({ ...(prev || {}), packages: updatedPackages }));
+    }
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("bantuin_provider_updated"));
+      window.dispatchEvent(new Event("bantuin_service_updated"));
+    }
+
     setIsSubmitting(false);
 
+    clearFormDraft(DRAFT_KEY);
     addToast?.("Paket Tersimpan", `Paket bundling "${newPackage.name}" berhasil ditambahkan.`);
     router.push("/jasa/dashboard");
   };

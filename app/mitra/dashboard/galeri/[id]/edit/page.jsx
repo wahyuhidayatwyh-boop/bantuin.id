@@ -17,6 +17,8 @@ import RoleGuard from "@/components/auth/RoleGuard";
 import { useApp } from "@/lib/context/AppContext";
 import { getMitraStoreById, saveMitraStoreData } from "@/lib/mock/mitraData";
 import { imageService } from "@/lib/services/imageService";
+import { authService } from "@/lib/services/authService";
+import { saveFormDraft, getFormDraft, clearFormDraft, useBeforeUnload } from "@/lib/hooks/useFormDraft";
 
 const GALLERY_CATEGORIES = [
   "Kamera & Rig",
@@ -33,7 +35,7 @@ export default function EditFotoGaleriMitraPage({ params }) {
   const router = useRouter();
   const unwrappedParams = use(params);
   const photoId = unwrappedParams.id;
-  const { addToast } = useApp();
+  const { addToast, currentUser } = useApp();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -49,37 +51,98 @@ export default function EditFotoGaleriMitraPage({ params }) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   useEffect(() => {
-    const currentStore = getMitraStoreById("mitra-kamera");
-    if (!currentStore) {
-      setNotFound(true);
-      setLoading(false);
-      return;
+    let isMounted = true;
+    const fetchPhotoDetail = async () => {
+      try {
+        const token =
+          (await authService.getValidAccessToken?.()) ||
+          authService.getToken?.() ||
+          authService.getAccessToken?.() ||
+          (typeof window !== "undefined"
+            ? localStorage.getItem("bantuin_auth_access_token") ||
+              localStorage.getItem("bantuin_auth_session_token") ||
+              localStorage.getItem("bantuin_token")
+            : null);
+        const res = await fetch(`/api/mitra/gallery/${photoId}`, {
+          headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          if (json.success && json.data && isMounted) {
+            const item = json.data;
+            const draftKey = `bantuin_draft_mitra_galeri_edit_${photoId}`;
+            const savedDraft = typeof window !== "undefined" ? getFormDraft(draftKey, null) : null;
+
+            setTitle(savedDraft?.title || item.title || "");
+            setCategory(savedDraft?.category || item.category || "Kamera & Rig");
+            setDescription(savedDraft?.description || item.description || "");
+            setPhotoUrl(savedDraft?.photoUrl || item.url || "");
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to load photo via API, falling back:", err);
+      }
+
+      // Fallback to store if API fails
+      let currentStore = null;
+      if (currentUser?.id) {
+        currentStore = getMitraStoreById(currentUser.id);
+      }
+      if (!currentStore) {
+        currentStore = getMitraStoreById("mitra-kamera");
+      }
+      if (!currentStore) {
+        if (isMounted) {
+          setNotFound(true);
+          setLoading(false);
+        }
+        return;
+      }
+      if (isMounted) setStore(currentStore);
+
+      const portfolio = currentStore.portfolioPhotos || [];
+      const foundIndex = portfolio.findIndex((p, idx) => p.id === photoId || String(idx) === String(photoId));
+      const item = foundIndex !== -1 ? portfolio[foundIndex] : null;
+
+      if (!item) {
+        if (isMounted) {
+          setNotFound(true);
+          setLoading(false);
+        }
+        return;
+      }
+
+      if (isMounted) {
+        setPhotoIndex(foundIndex);
+        setTitle(item.title || "");
+        setCategory(item.category || "Kamera & Rig");
+        setDescription(item.description || "");
+        setPhotoUrl(item.url || "");
+        setLoading(false);
+      }
+    };
+
+    fetchPhotoDetail();
+    return () => { isMounted = false; };
+  }, [photoId, currentUser?.id]);
+
+  const DRAFT_KEY = `bantuin_draft_mitra_galeri_edit_${photoId}`;
+  useEffect(() => {
+    if (title || photoUrl) {
+      saveFormDraft(DRAFT_KEY, {
+        title,
+        category,
+        description,
+        photoUrl,
+      });
     }
-    setStore(currentStore);
+  }, [title, category, description, photoUrl, DRAFT_KEY]);
 
-    const portfolio = currentStore.portfolioPhotos || [];
-    let foundIndex = -1;
-    let item = null;
-
-    // Check by id or by index
-    foundIndex = portfolio.findIndex((p, idx) => p.id === photoId || String(idx) === String(photoId));
-    if (foundIndex !== -1) {
-      item = portfolio[foundIndex];
-    }
-
-    if (!item) {
-      setNotFound(true);
-      setLoading(false);
-      return;
-    }
-
-    setPhotoIndex(foundIndex);
-    setTitle(item.title || "");
-    setCategory(item.category || "Kamera & Rig");
-    setDescription(item.description || "");
-    setPhotoUrl(item.url || "");
-    setLoading(false);
-  }, [photoId]);
+  const isDirty = Boolean(title.trim() || photoUrl);
+  useBeforeUnload(isDirty, "Ada perubahan foto galeri yang belum disimpan. Yakin ingin meninggalkan halaman?");
 
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -102,71 +165,96 @@ export default function EditFotoGaleriMitraPage({ params }) {
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!photoUrl) {
-      alert("Foto tidak boleh kosong.");
+      addToast?.("Foto Kosong", "Foto tidak boleh kosong.", "error");
       return;
     }
     if (!title.trim()) {
-      alert("Mohon masukkan judul foto showcase.");
+      addToast?.("Judul Wajib Diisi", "Mohon masukkan judul foto showcase.", "error");
       return;
     }
 
     setSaving(true);
-    const portfolio = Array.isArray(store?.portfolioPhotos) ? [...store.portfolioPhotos] : [];
+    try {
+      const token =
+        (await authService.getValidAccessToken?.()) ||
+        authService.getToken?.() ||
+        authService.getAccessToken?.() ||
+        (typeof window !== "undefined"
+          ? localStorage.getItem("bantuin_auth_access_token") ||
+            localStorage.getItem("bantuin_auth_session_token") ||
+            localStorage.getItem("bantuin_token")
+          : null);
+      const res = await fetch(`/api/mitra/gallery/${photoId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          title: title.trim(),
+          category,
+          photoUrl: photoUrl.trim(),
+          description: description.trim(),
+        }),
+      });
 
-    if (photoIndex >= 0 && photoIndex < portfolio.length) {
-      portfolio[photoIndex] = {
-        ...portfolio[photoIndex],
-        title: title.trim(),
-        category,
-        url: photoUrl,
-        description: description.trim(),
-        updatedAt: new Date().toISOString()
-      };
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || "Gagal memperbarui foto galeri.");
+      }
+
+      addToast?.("Foto Diperbarui", `Perubahan untuk "${title}" berhasil disimpan.`);
+      clearFormDraft(DRAFT_KEY);
+      router.push("/mitra/dashboard?menu=gallery");
+    } catch (err) {
+      console.error("Gallery edit error:", err);
+      addToast?.("Gagal Menyimpan", err.message || "Terjadi kesalahan.", "error");
+    } finally {
+      setSaving(false);
     }
-
-    const updatedStore = {
-      ...store,
-      portfolioPhotos: portfolio
-    };
-
-    saveMitraStoreData(updatedStore);
-
-    if (addToast) {
-      addToast("Foto Diperbarui", `Perubahan untuk "${title}" berhasil disimpan.`);
-    }
-
-    router.push("/mitra/dashboard");
   };
 
-  const handleDelete = () => {
-    const portfolio = Array.isArray(store?.portfolioPhotos) ? [...store.portfolioPhotos] : [];
-    if (photoIndex >= 0 && photoIndex < portfolio.length) {
-      portfolio.splice(photoIndex, 1);
+  const handleDelete = async () => {
+    try {
+      const token =
+        (await authService.getValidAccessToken?.()) ||
+        authService.getToken?.() ||
+        authService.getAccessToken?.() ||
+        (typeof window !== "undefined"
+          ? localStorage.getItem("bantuin_auth_access_token") ||
+            localStorage.getItem("bantuin_auth_session_token") ||
+            localStorage.getItem("bantuin_token")
+          : null);
+      const res = await fetch(`/api/mitra/gallery/${photoId}`, {
+        method: "DELETE",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || "Gagal menghapus foto galeri.");
+      }
+
+      addToast?.("Foto Dihapus", "Foto berhasil dihapus dari galeri showcase.");
+      clearFormDraft(DRAFT_KEY);
+      router.push("/mitra/dashboard?menu=gallery");
+    } catch (err) {
+      console.error("Gallery delete error:", err);
+      addToast?.("Gagal Menghapus", err.message || "Terjadi kesalahan.", "error");
     }
-
-    const updatedStore = {
-      ...store,
-      portfolioPhotos: portfolio
-    };
-
-    saveMitraStoreData(updatedStore);
-
-    if (addToast) {
-      addToast("Foto Dihapus", "Foto berhasil dihapus dari galeri showcase.");
-    }
-
-    router.push("/mitra/dashboard");
   };
 
   if (loading) {
     return (
-      <RoleGuard allowedRoles={["mitra", "super_admin"]}>
+      <RoleGuard allowedRoles={["partner", "mitra", "super_admin", "admin"]}>
         <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
           <div className="text-center">
-            <Loader2 className="w-10 h-10 text-emerald-600 animate-spin mx-auto mb-3" />
+            <Loader2 className="w-10 h-10 text-[#1683FF] animate-spin mx-auto mb-3" />
             <p className="text-slate-600 font-medium">Memuat data foto galeri...</p>
           </div>
         </div>
@@ -176,7 +264,7 @@ export default function EditFotoGaleriMitraPage({ params }) {
 
   if (notFound) {
     return (
-      <RoleGuard allowedRoles={["mitra", "super_admin"]}>
+      <RoleGuard allowedRoles={["partner", "mitra", "super_admin"]}>
         <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 text-center max-w-md w-full">
             <AlertCircle className="w-12 h-12 text-rose-500 mx-auto mb-4" />
@@ -185,8 +273,8 @@ export default function EditFotoGaleriMitraPage({ params }) {
               Foto galeri dengan ID <strong>{photoId}</strong> tidak ditemukan pada toko Anda.
             </p>
             <Link
-              href="/mitra/dashboard"
-              className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl transition"
+              href="/mitra/dashboard?menu=gallery"
+              className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-semibold rounded-xl transition"
             >
               <ArrowLeft className="w-4 h-4" />
               Kembali ke Dashboard Mitra
@@ -198,21 +286,21 @@ export default function EditFotoGaleriMitraPage({ params }) {
   }
 
   return (
-    <RoleGuard allowedRoles={["mitra", "super_admin"]}>
+    <RoleGuard allowedRoles={["partner", "mitra", "super_admin"]}>
       <div className="min-h-screen bg-slate-50 pb-24">
         {/* Header with Breadcrumbs */}
         <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
           <div className="max-w-4xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
             <div>
               <nav className="flex items-center gap-2 text-xs text-slate-500 mb-1">
-                <Link href="/mitra/dashboard" className="hover:text-emerald-600 transition">
+                <Link href="/mitra/dashboard?menu=gallery" className="hover:text-[#1683FF] transition">
                   Dashboard Mitra
                 </Link>
                 <ChevronRight className="w-3.5 h-3.5" />
                 <span className="text-slate-800 font-semibold truncate max-w-[200px]">Edit {title}</span>
               </nav>
               <h1 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2.5">
-                <span className="w-2.5 h-6 bg-emerald-600 rounded-full inline-block"></span>
+                <span className="w-2.5 h-6 bg-[#1683FF] rounded-full inline-block"></span>
                 Edit Foto Galeri Showcase
               </h1>
             </div>
@@ -226,7 +314,7 @@ export default function EditFotoGaleriMitraPage({ params }) {
                 <span className="hidden sm:inline">Hapus</span>
               </button>
               <Link
-                href="/mitra/dashboard"
+                href="/mitra/dashboard?menu=gallery"
                 className="hidden sm:inline-flex items-center gap-2 px-4 py-2 border border-slate-300 text-slate-700 rounded-xl hover:bg-slate-100 font-medium text-sm transition"
               >
                 <ArrowLeft className="w-4 h-4" />
@@ -242,7 +330,7 @@ export default function EditFotoGaleriMitraPage({ params }) {
             {/* Card 1: Foto Preview & Ganti Foto */}
             <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 shadow-sm">
               <div className="flex items-center gap-3 border-b border-slate-100 pb-4 mb-6">
-                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#1683FF] flex items-center justify-center font-bold">
                   1
                 </div>
                 <div>
@@ -259,7 +347,7 @@ export default function EditFotoGaleriMitraPage({ params }) {
                     className="w-full h-full object-cover"
                   />
                   <div className="absolute top-3 right-3">
-                    <label className="px-3.5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition flex items-center gap-1.5 shadow-md cursor-pointer">
+                    <label className="px-3.5 py-2 bg-[#1683FF] text-white rounded-xl text-xs font-bold hover:bg-[#0F6FE5] transition flex items-center gap-1.5 shadow-md cursor-pointer">
                       <Upload className="w-3.5 h-3.5" />
                       Ganti Foto
                       <input
@@ -278,7 +366,7 @@ export default function EditFotoGaleriMitraPage({ params }) {
             {/* Card 2: Informasi Foto Showcase */}
             <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 shadow-sm">
               <div className="flex items-center gap-3 border-b border-slate-100 pb-4 mb-6">
-                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#1683FF] flex items-center justify-center font-bold">
                   2
                 </div>
                 <div>
@@ -298,7 +386,7 @@ export default function EditFotoGaleriMitraPage({ params }) {
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="Contoh: Rig Cinema Sony FX3 + Wireless Transmission Ready"
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 transition text-slate-900"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-[#1683FF] focus:ring-2 focus:ring-blue-100 transition text-slate-900"
                   />
                 </div>
 
@@ -309,7 +397,7 @@ export default function EditFotoGaleriMitraPage({ params }) {
                   <select
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 transition text-slate-900 bg-white"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-[#1683FF] focus:ring-2 focus:ring-blue-100 transition text-slate-900 bg-white"
                   >
                     {GALLERY_CATEGORIES.map((cat) => (
                       <option key={cat} value={cat}>{cat}</option>
@@ -326,7 +414,7 @@ export default function EditFotoGaleriMitraPage({ params }) {
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="Ceritakan detail setup alat, kebersihan sensor, atau penggunaan pada event sebelumnya..."
-                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100 transition text-slate-900"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-[#1683FF] focus:ring-2 focus:ring-blue-100 transition text-slate-900"
                   />
                 </div>
               </div>
@@ -335,7 +423,7 @@ export default function EditFotoGaleriMitraPage({ params }) {
             {/* Sticky Action Footer */}
             <div className="sticky bottom-4 z-20 bg-white/95 backdrop-blur-md border border-slate-200 shadow-xl rounded-2xl p-4 flex items-center justify-between">
               <Link
-                href="/mitra/dashboard"
+                href="/mitra/dashboard?menu=gallery"
                 className="px-5 py-2.5 border border-slate-300 text-slate-700 font-semibold rounded-xl hover:bg-slate-100 transition text-sm"
               >
                 Batal
@@ -343,7 +431,7 @@ export default function EditFotoGaleriMitraPage({ params }) {
               <button
                 type="submit"
                 disabled={saving || !photoUrl}
-                className="inline-flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl shadow-sm transition disabled:opacity-50 text-sm"
+                className="inline-flex items-center gap-2 px-6 py-2.5 bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-semibold rounded-xl shadow-sm transition disabled:opacity-50 text-sm cursor-pointer"
               >
                 {saving ? (
                   <>

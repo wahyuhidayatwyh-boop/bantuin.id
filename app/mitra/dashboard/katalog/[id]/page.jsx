@@ -8,6 +8,7 @@ import { useApp } from "@/lib/context/AppContext";
 import { getMitraStoreById, saveMitraStoreData } from "@/lib/mock/mitraData";
 import { formatIDR } from "@/lib/utils";
 import { resolveCategoryIcon } from "@/lib/services/categoryService";
+import { authService } from "@/lib/services/authService";
 import { 
   ArrowLeft, 
   Package, 
@@ -26,43 +27,116 @@ import {
 export default function DetailKatalogRentalPage() {
   const { id } = useParams();
   const router = useRouter();
-  const { setRentals, addToast } = useApp() || {};
+  const { currentUser, rentals, setRentals, addToast } = useApp() || {};
 
   const [store, setStore] = useState(() => {
+    if (currentUser?.id) {
+      return getMitraStoreById(currentUser.id) || {
+        id: currentUser.id,
+        name: currentUser.partnerBusinessName || currentUser.fullName || "Toko Mitra",
+        catalog: currentUser.rentals || []
+      };
+    }
     return getMitraStoreById("mitra-kamera") || {};
   });
 
+  const [dbItem, setDbItem] = useState(null);
+  const [isLoadingItem, setIsLoadingItem] = useState(false);
   const [activePhotoIdx, setActivePhotoIdx] = useState(0);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
-    const s = getMitraStoreById("mitra-kamera");
-    if (s) setStore(s);
-  }, []);
+    if (currentUser?.id) {
+      const s = getMitraStoreById(currentUser.id);
+      if (s) setStore(s);
+    }
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    const fetchFromDb = async () => {
+      if (!id) return;
+      setIsLoadingItem(true);
+      try {
+        const res = await fetch(`/api/rentals/${id}`);
+        const json = await res.json();
+        if (json.success && json.data) {
+          const r = json.data;
+          setDbItem({
+            id: r.id,
+            name: r.title,
+            category: r.category,
+            type: "sewa",
+            price: Number(r.dailyPrice),
+            depositAmount: Number(r.depositAmount || 0),
+            unit: "/ hari",
+            image: r.photoUrls?.[0] || "/logotab.png",
+            photos: (Array.isArray(r.photoUrls) && r.photoUrls.length > 0) ? r.photoUrls : [r.photoUrls?.[0] || "/logotab.png"],
+            stockStatus: r.stockStatus || (r.isAvailable ? "Siap Sewa" : "Sedang Disewa"),
+            desc: r.description,
+            stockCount: r.stockCount !== undefined ? Number(r.stockCount) : (r.stock !== undefined ? Number(r.stock) : 1),
+            tag: r.tag,
+            rating: Number(r.ratingAvg) || 5.0,
+            pickupLocation: r.pickupLocation,
+            packages: r.packages || [],
+            pricingMode: r.pricingMode || "single",
+            includedItems: r.includedItems || "",
+            securityDeposit: r.securityDeposit || "",
+          });
+        }
+      } catch (err) {
+        console.warn("Could not load item from DB API:", err);
+      } finally {
+        setIsLoadingItem(false);
+      }
+    };
+    fetchFromDb();
+  }, [id]);
 
   const catalog = store.catalog || [];
-  const item = catalog.find((c) => c.id === id);
+  const item = dbItem || catalog.find((c) => c.id === id) || rentals?.find((r) => r.id === id);
 
   const photos = (item?.photos && item.photos.length > 0)
     ? item.photos
-    : [item?.image || "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=800&q=80"];
+    : [item?.image || "/logotab.png"];
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     setIsDeleting(true);
-    const updatedCatalog = catalog.filter((c) => c.id !== id);
-    const updatedStore = { ...store, catalog: updatedCatalog };
-    saveMitraStoreData(updatedStore);
-    setStore(updatedStore);
+    try {
+      const token =
+        (await authService.getValidAccessToken?.()) ||
+        authService.getToken?.() ||
+        authService.getAccessToken?.() ||
+        (typeof window !== "undefined"
+          ? localStorage.getItem("bantuin_auth_access_token") ||
+            localStorage.getItem("bantuin_auth_session_token") ||
+            localStorage.getItem("bantuin_token")
+          : null);
+      const res = await fetch(`/api/rentals/${id}`, {
+        method: "DELETE",
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok && !json.success) {
+        throw new Error(json.error || "Gagal menghapus unit.");
+      }
+      const updatedCatalog = catalog.filter((c) => c.id !== id);
+      const updatedStore = { ...store, catalog: updatedCatalog };
+      saveMitraStoreData(updatedStore);
+      setStore(updatedStore);
 
-    if (setRentals) {
-      setRentals((prev) => prev.filter((r) => r.id !== id));
+      if (setRentals) {
+        setRentals((prev) => prev.filter((r) => r.id !== id));
+      }
+
+      addToast?.("Unit Dihapus", `Unit "${item?.name}" berhasil dihapus dari database.`);
+      router.push("/mitra/dashboard?menu=catalog");
+    } catch (err) {
+      addToast?.("Gagal Menghapus Unit", err.message || "Gagal menghapus unit sewa.", "error");
+    } finally {
+      setIsDeleting(false);
+      setIsDeleteModalOpen(false);
     }
-
-    setIsDeleting(false);
-    setIsDeleteModalOpen(false);
-    addToast?.("Unit Dihapus", `Unit "${item?.name}" berhasil dihapus.`);
-    router.push("/mitra/dashboard");
   };
 
   if (!item) {
@@ -176,10 +250,13 @@ export default function DetailKatalogRentalPage() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-[11px] font-extrabold border border-emerald-200/60 flex items-center gap-1">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Status: {item.stockStatus || "Siap Sewa"} ({item.stockCount || 2} Unit)</span>
+                    <span>Status: {item.stockStatus || "Siap Sewa"} ({item.stockCount !== undefined ? item.stockCount : 1} Unit)</span>
                   </span>
-
-                  <span className="text-xs text-slate-400 font-mono">ID: {item.id}</span>
+                  {item.tag && (
+                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500 text-white shadow-xs">
+                      {item.tag}
+                    </span>
+                  )}
                 </div>
 
                 <h2 className="text-xl sm:text-2xl font-black text-slate-900 leading-snug">
@@ -195,7 +272,7 @@ export default function DetailKatalogRentalPage() {
 
                   <div>
                     <span className="text-[10px] font-bold text-slate-500 uppercase block">Deposit Jaminan:</span>
-                    <span className="text-lg font-black text-slate-900">{formatIDR(item.depositAmount || 200000)}</span>
+                    <span className="text-lg font-black text-slate-900">{formatIDR(item.depositAmount ?? 0)}</span>
                     <span className="text-[10px] text-emerald-600 font-bold block">100% Refundable</span>
                   </div>
                 </div>
@@ -205,9 +282,20 @@ export default function DetailKatalogRentalPage() {
                     Kelengkapan Bawaan Unit
                   </h3>
                   <div className="p-3 rounded-xl bg-slate-50 border border-slate-100 text-xs text-slate-800 font-medium">
-                    {item.includedItems || "Unit Lengkap, Baterai, Charger & Tas Pelindung"}
+                    {item.includedItems || "Unit lengkap standar pabrikan & siap pakai."}
                   </div>
                 </div>
+
+                {item.securityDeposit && (
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-1">
+                      Ketentuan Jaminan / Kebijakan Titip ID
+                    </h3>
+                    <div className="p-3 rounded-xl bg-emerald-50/70 border border-emerald-100/90 text-xs text-emerald-900 font-medium">
+                      {item.securityDeposit}
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-1">
@@ -217,6 +305,64 @@ export default function DetailKatalogRentalPage() {
                     {item.desc || "Unit siap pakai dalam kondisi terawat."}
                   </p>
                 </div>
+
+                {/* Paket Sewa & Borongan jika ada */}
+                {Array.isArray(item.packages) && item.packages.length > 0 && (
+                  <div className="pt-2 border-t border-slate-100 space-y-2.5">
+                    <div className="flex items-center gap-1.5">
+                      <Layers className="w-4 h-4 text-[#1683FF]" />
+                      <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
+                        Pilihan Paket Sewa &amp; Borongan ({item.packages.length})
+                      </h3>
+                    </div>
+                    <div className="grid grid-cols-1 gap-2.5">
+                      {item.packages.map((pkg, pIdx) => (
+                        <div
+                          key={pkg.id || pIdx}
+                          className={`p-3 rounded-2xl border transition ${
+                            pkg.isPopular
+                              ? "bg-blue-50/60 border-blue-200 ring-1 ring-blue-200"
+                              : "bg-slate-50/80 border-slate-200/80"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-md bg-[#1683FF] text-white">
+                                  {pkg.tier || "Paket"}
+                                </span>
+                                <h4 className="text-xs font-bold text-slate-900">{pkg.name}</h4>
+                                {pkg.isPopular && (
+                                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-400 text-amber-950">
+                                    PALING LARIS
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-slate-600 mt-1">{pkg.description}</p>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <span className="text-xs font-black text-[#1683FF] block">{formatIDR(pkg.price)}</span>
+                              <span className="text-[10px] text-slate-500 block">{pkg.duration || "1 Hari (24 Jam)"}</span>
+                              {pkg.depositAmount > 0 && (
+                                <span className="text-[9px] text-slate-400 block font-medium">Dep: {formatIDR(pkg.depositAmount)}</span>
+                              )}
+                            </div>
+                          </div>
+                          {Array.isArray(pkg.features) && pkg.features.length > 0 && (
+                            <ul className="mt-2 pt-2 border-t border-slate-200/60 space-y-1">
+                              {pkg.features.map((feat, fIdx) => (
+                                <li key={fIdx} className="text-[10px] text-slate-700 flex items-center gap-1.5">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                                  <span>{feat}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div className="pt-2 flex items-center gap-3">
                   <Link

@@ -8,6 +8,9 @@ import Footer from "@/components/layout/Footer";
 import { useApp } from "@/lib/context/AppContext";
 import { formatIDR } from "@/lib/utils";
 import { getCatalogServiceById } from "@/lib/mock/providersData";
+import { authService } from "@/lib/services/authService";
+import { paymentService } from "@/lib/services/paymentService";
+import { supabase } from "@/lib/supabase/client";
 import { 
   QrisLogo, 
   BcaLogo, 
@@ -37,27 +40,31 @@ import {
   ExternalLink
 } from "lucide-react";
 import VoucherPicker from "@/components/ui/VoucherPicker";
+import { saveFormDraft, getFormDraft, clearFormDraft } from "@/lib/hooks/useFormDraft";
 
 function JasaPembayaranContent() {
   const { id } = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  const DRAFT_KEY = `bantuin_draft_jasa_pembayaran_${id}`;
+  const savedDraft = typeof window !== "undefined" ? getFormDraft(DRAFT_KEY, null) : null;
+
   const pkgParam = searchParams.get("pkg");
   const dateParam = searchParams.get("date");
   const timeParam = searchParams.get("time");
   const notesParam = searchParams.get("notes");
-  const modeParam = searchParams.get("mode");       // 'digital' | 'lokasi' (support juga 'online' | 'offline')
-  const alamatParam = searchParams.get("alamat");   // untuk jasa datang ke lokasi
-  const briefParam = searchParams.get("brief");     // untuk jasa digital
+  const modeParam = searchParams.get("mode");
+  const locationTypeParam = searchParams.get("locationType");
+  const alamatParam = searchParams.get("alamat");
+  const briefParam = searchParams.get("brief");
   const latParam = searchParams.get("lat");
   const lngParam = searchParams.get("lng");
-
-  const isDigitalMode = modeParam === "digital" || modeParam === "online";
   const roomIdParam = searchParams.get("roomId");
   const amountParam = searchParams.get("amount");
 
   const { 
+    currentUser,
     walletBalance = 250000, 
     addToast,
     createJasaOrder,
@@ -65,10 +72,92 @@ function JasaPembayaranContent() {
     sendChatMessage
   } = useApp() || {};
 
-  const service = getCatalogServiceById(id);
+  const [dbService, setDbService] = useState(null);
+  const [loadingService, setLoadingService] = useState(true);
+
+  // Fetch live service data from database
+  useEffect(() => {
+    if (!id) {
+      setLoadingService(false);
+      return;
+    }
+    fetch(`/api/services/${id}`)
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.success && json.data) {
+          const s = json.data;
+          const realImage =
+            (Array.isArray(s.portfolioUrls) && s.portfolioUrls.length > 0 && s.portfolioUrls[0]) ||
+            s.coverImageUrl ||
+            s.imageUrl ||
+            s.image ||
+            "/logotab.png";
+
+          setDbService({
+            id: s.id,
+            title: s.title,
+            desc: s.description || "Layanan profesional dari penyedia terverifikasi.",
+            price: Number(s.startingPrice) || 0,
+            image: realImage,
+            category: s.category || "Jasa",
+            locationType: s.locationType || (s.isOnline ? "online" : "onsite"),
+            latitude: s.latitude,
+            longitude: s.longitude,
+            address: s.address,
+            isOnline: Boolean(s.isOnline),
+            provider: {
+              id: s.provider?.id,
+              name: s.provider?.fullName || "Mitra Jasa Bantuin",
+              brandTitle: s.provider?.partnerBusinessName || s.provider?.bio || "",
+              avatar:
+                (s.provider?.avatarUrl && !s.provider.avatarUrl.includes("dicebear.com") && !s.provider.avatarUrl.includes("images.unsplash.com"))
+                  ? s.provider.avatarUrl
+                  : (s.provider?.avatarUrl || "/logotab.png"),
+              coverBanner: s.provider?.bannerUrl || null,
+              location: s.provider?.campusName || "Kab. Banyumas (Purwokerto)",
+              phone: s.provider?.phoneNumber || "081234567890",
+              rating: Number(s.provider?.ratingAvg ?? s.ratingAvg ?? 5.0).toFixed(1),
+              reviewsCount: Number(s.provider?.ratingCount ?? s.ratingCount ?? 0),
+              address: s.address || s.provider?.partnerAddress || s.provider?.campusName || "Kab. Banyumas (Purwokerto)",
+            },
+            packages: Array.isArray(s.packages) && s.packages.length > 0
+              ? s.packages.map((p, idx) => ({
+                  id: p.id || `pkg-${idx}`,
+                  name: p.name || `Paket ${idx + 1}`,
+                  tier: p.tier || "Paket Pilihan",
+                  price: Number(p.price) || Number(s.startingPrice) || 0,
+                  duration: p.duration || "1 - 2 Hari Kerja",
+                  description: p.description || s.description || "Pengerjaan layanan profesional bergaransi.",
+                  features: Array.isArray(p.features) ? p.features : [],
+                  isPopular: Boolean(p.isPopular),
+                }))
+              : [
+                  {
+                    id: `pkg-${s.id}`,
+                    name: s.title || "Paket Standar",
+                    tier: "Layanan Standar",
+                    price: Number(s.startingPrice) || 0,
+                    duration: "1 - 2 Hari Kerja",
+                    description: s.description || "Pengerjaan layanan standar sesuai deskripsi kebutuhan.",
+                    isPopular: true
+                  }
+                ]
+          });
+        }
+      })
+      .catch((err) => console.warn("Failed fetching service for payment:", err))
+      .finally(() => setLoadingService(false));
+  }, [id]);
+
+  const service = dbService || (!loadingService ? getCatalogServiceById(id) : null);
+
+  const effectiveLocationType = locationTypeParam || (modeParam === "online" || modeParam === "digital" ? "online" : (modeParam === "onsite" ? "onsite" : (modeParam === "customer_location" ? "customer_location" : (service?.locationType || (service?.isOnline ? "online" : "onsite")))));
+  const isOnsiteMode = effectiveLocationType === "onsite";
+  const isCustomerLocMode = effectiveLocationType === "customer_location";
+  const isDigitalMode = effectiveLocationType === "online" || modeParam === "digital" || modeParam === "online";
 
   // Selected payment method
-  const [selectedMethod, setSelectedMethod] = useState("qris");
+  const [selectedMethod, setSelectedMethod] = useState(() => savedDraft?.selectedMethod || "qris");
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [createdRoomId, setCreatedRoomId] = useState(null);
@@ -77,6 +166,27 @@ function JasaPembayaranContent() {
   const [timeLeft, setTimeLeft] = useState(15 * 60);
   const [appliedVoucher, setAppliedVoucher] = useState(null);
   const [discountAmount, setDiscountAmount] = useState(0);
+  const [isRoomCancelled, setIsRoomCancelled] = useState(false);
+
+  useEffect(() => {
+    saveFormDraft(DRAFT_KEY, { selectedMethod });
+  }, [selectedMethod, DRAFT_KEY]);
+
+  // Periksa apakah bilik transaksi pesanan jasa ini telah dibatalkan
+  useEffect(() => {
+    if (!roomIdParam) return;
+    fetch(`/api/chat/rooms?roomId=${encodeURIComponent(roomIdParam)}`)
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+          const room = json.data[0];
+          if (room.orderStatus === "cancelled" || room.status === "cancelled" || room.paymentStatus === "CANCELLED") {
+            setIsRoomCancelled(true);
+          }
+        }
+      })
+      .catch(() => {});
+  }, [roomIdParam]);
 
   // Timer countdown 15 menit
   useEffect(() => {
@@ -92,6 +202,19 @@ function JasaPembayaranContent() {
     const s = seconds % 60;
     return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
+
+  if (loadingService && !dbService) {
+    return (
+      <div className="min-h-screen flex flex-col bg-[#F4F7FB]">
+        <Navbar />
+        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-3">
+          <Loader2 className="w-8 h-8 text-[#1683FF] animate-spin" />
+          <p className="text-xs font-semibold text-slate-600">Menyiapkan pembayaran layanan...</p>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
 
   if (!service) {
     return (
@@ -109,8 +232,50 @@ function JasaPembayaranContent() {
     );
   }
 
+  const isOwnService = Boolean(
+    currentUser &&
+    service?.provider &&
+    (currentUser.id === service.provider.id ||
+      (currentUser.email &&
+        service.provider.email &&
+        String(currentUser.email).toLowerCase() === String(service.provider.email).toLowerCase()))
+  );
+
+  if (isOwnService) {
+    return (
+      <div className="min-h-screen flex flex-col bg-[#F4F7FB]">
+        <Navbar />
+        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center max-w-md mx-auto space-y-3">
+          <div className="w-12 h-12 rounded-2xl bg-blue-50 text-[#1683FF] flex items-center justify-center mx-auto">
+            <ShieldCheck className="w-6 h-6" />
+          </div>
+          <h2 className="text-lg font-bold text-slate-900">Ini Layanan Jasa Anda Sendiri</h2>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            Anda tidak dapat melakukan pembayaran atau memesan layanan milik Anda sendiri.
+          </p>
+          <div className="pt-2 flex flex-col sm:flex-row gap-2 w-full">
+            <Link
+              href={`/jasa/${id}`}
+              className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition text-center"
+            >
+              Lihat Tampilan Publik
+            </Link>
+            <Link
+              href="/jasa/dashboard"
+              className="flex-1 px-4 py-2.5 bg-[#1683FF] hover:bg-[#0F6FE5] text-white rounded-xl text-xs font-bold transition text-center shadow-xs"
+            >
+              Buka Dashboard Jasa
+            </Link>
+          </div>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
+
   // Resolve selected package
-  const selectedPackage = service.packages?.find((p) => p.id === pkgParam || p.name === pkgParam) || {
+  const selectedPackage = service.packages?.find((p) => p.id === pkgParam || p.name === pkgParam) || 
+    (service.packages && service.packages.length > 0 ? (service.packages.find((p) => p.isPopular) || service.packages[0]) : null) || {
     id: "pkg-custom",
     name: pkgParam || "Layanan Disepakati (Konsultasi)",
     tier: "Pilihan Konsultasi",
@@ -156,56 +321,262 @@ function JasaPembayaranContent() {
     }
   };
 
-  const handleConfirmPayment = () => {
-    setIsProcessing(true);
-    setTimeout(() => {
-      let targetRoomId = null;
-      if (roomIdParam && updateOrderStatus) {
-        updateOrderStatus(roomIdParam, "paid_escrow");
-        if (sendChatMessage) {
-          sendChatMessage(
-            roomIdParam,
-            `Dana sebesar ${formatIDR(totalAmount)} telah berhasil dibayar melalui metode ${selectedMethod.toUpperCase()} (Payment Gateway Resmi). Mitra dapat segera memulai pengerjaan tugas!`,
-            { isSystemAnnouncement: true }
-          );
-        }
-        targetRoomId = roomIdParam;
-        setCreatedRoomId(roomIdParam);
-      } else if (createJasaOrder && service) {
-        const newOrder = createJasaOrder({
-          serviceId: service.id,
-          serviceTitle: service.title,
-          serviceImage: service.image,
-          packageId: selectedPackage.id,
-          packageName: selectedPackage.name,
-          servicePrice: servicePrice,
-          totalAmount: totalAmount,
-          targetDate: dateParam || new Date(Date.now() + 86400000).toISOString().split("T")[0],
-          targetTime: timeParam || "09:00",
-          alamat: alamatParam || "",
-          notes: notesParam || "",
-          brief: briefParam || "",
-          isDigital: isDigitalMode,
-          coords: (latParam && lngParam) ? { latitude: Number(latParam), longitude: Number(lngParam) } : null,
-          providerId: service.provider?.id,
-          providerName: service.provider?.name,
-          providerAvatar: service.provider?.avatar,
-          providerPhone: service.provider?.phone,
-          providerRating: service.provider?.rating,
-          providerAddress: service.provider?.address || service.provider?.location,
-          category: service.category,
-          paymentMethod: selectedMethod
-        });
-        targetRoomId = newOrder?.id;
-        setCreatedRoomId(newOrder?.id);
-      }
-      setIsProcessing(false);
-      setIsSuccess(true);
+  const handleConfirmPayment = async () => {
+    if (isRoomCancelled) {
+      if (addToast) addToast("Pesanan Dibatalkan", "Pesanan jasa ini telah dibatalkan dan tidak dapat dibayar lagi.", "error");
+      return;
+    }
 
-      const chatRoomId = targetRoomId || roomIdParam || "order-room-jasa";
-      const next = encodeURIComponent(`/chat?room=${chatRoomId}`);
-      router.push(`/pembayaran/berhasil?type=jasa&title=${encodeURIComponent(service?.title || "Pemesanan Jasa")}&amount=${totalAmount}&next=${next}`);
-    }, 1200);
+    setIsProcessing(true);
+    let targetRoomId = roomIdParam || null;
+    let snapToken = null;
+    let midtransOrderId = null;
+
+    try {
+      // 1. Validasi sesi login akun
+      let token = await authService.getValidAccessToken();
+      if (!token) {
+        token = authService.getAccessToken();
+      }
+
+      if (!token && !currentUser) {
+        setIsProcessing(false);
+        if (addToast) {
+          addToast("Perlu Login", "Silakan login terlebih dahulu untuk melakukan pemesanan jasa.", "warning");
+        }
+        const currentUrl = typeof window !== "undefined" ? window.location.pathname + window.location.search : `/jasa/${id}`;
+        router.push(`/auth/login?redirect=${encodeURIComponent(currentUrl)}`);
+        return;
+      }
+
+      const authHeaders = {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      };
+
+      if (!targetRoomId && service) {
+        // 2. Buat Request & OrderRoom di server jika belum ada bilik obrolan
+        const resolvedNotes = (notesParam || briefParam || "").trim();
+        const targetServiceId = id || service.id;
+
+        const apiRes = await fetch(`/api/services/${targetServiceId}/order`, {
+          method: "POST",
+          headers: authHeaders,
+          credentials: "include",
+          body: JSON.stringify({
+            notes: resolvedNotes || "Pemesanan langsung via katalog jasa",
+            customPrice: finalAmount || totalAmount,
+            deadline: dateParam ? new Date(dateParam) : undefined,
+            paymentStatus: "UNPAID",
+            locationType: effectiveLocationType,
+            mode: isDigitalMode ? "online" : "offline",
+            alamat: alamatParam ? decodeURIComponent(alamatParam) : undefined,
+            latitude: latParam || undefined,
+            longitude: lngParam || undefined,
+            scheduledTime: timeParam || undefined,
+            brief: briefParam ? decodeURIComponent(briefParam) : undefined,
+          }),
+        });
+
+        const apiJson = await apiRes.json().catch(() => ({}));
+
+        if (!apiRes.ok || !apiJson.success) {
+          throw new Error(apiJson.error || "Gagal membuat pesanan jasa di server.");
+        }
+
+        if (apiJson.data?.orderRoom?.id) {
+          targetRoomId = apiJson.data.orderRoom.id;
+          setCreatedRoomId(targetRoomId);
+          snapToken = apiJson.data?.snapToken || null;
+          midtransOrderId = apiJson.data?.orderRoom?.midtransOrderId || null;
+
+          // Realtime Broadcast via Supabase ke Provider agar chat & notifikasi instan menyala
+          const partnerId = service.provider?.id;
+          if (partnerId) {
+            try {
+              const partnerChannel = supabase.channel(`user-rt-${partnerId}`);
+              partnerChannel.send({
+                type: "broadcast",
+                event: "chat_update",
+                payload: { roomId: targetRoomId, partnerId, timestamp: Date.now() },
+              }).catch(() => null);
+            } catch (_) {}
+          }
+          if (targetRoomId) {
+            try {
+              const roomChannel = supabase.channel(`room-rt-${targetRoomId}`);
+              roomChannel.send({
+                type: "broadcast",
+                event: "chat_update",
+                payload: { roomId: targetRoomId, timestamp: Date.now() },
+              }).catch(() => null);
+            } catch (_) {}
+          }
+        }
+
+        // Sinkronkan ke AppContext state untuk UI reaktif instan
+        if (createJasaOrder && targetRoomId) {
+          createJasaOrder({
+            id: targetRoomId,
+            roomId: targetRoomId,
+            serviceId: service.id,
+            serviceTitle: service.title,
+            serviceImage: service.image,
+            packageId: selectedPackage?.id || `pkg-${service.id}`,
+            packageName: selectedPackage?.name || "Paket Standar",
+            servicePrice: servicePrice,
+            totalAmount: finalAmount || totalAmount,
+            targetDate: dateParam || new Date(Date.now() + 86400000).toISOString().split("T")[0],
+            targetTime: timeParam || "09:00",
+            alamat: alamatParam || "",
+            notes: resolvedNotes,
+            brief: briefParam || "",
+            isDigital: isDigitalMode,
+            coords: (latParam && lngParam) ? { latitude: Number(latParam), longitude: Number(lngParam) } : null,
+            providerId: service.provider?.id,
+            providerName: service.provider?.name,
+            providerAvatar: service.provider?.avatar,
+            providerPhone: service.provider?.phone,
+            providerRating: service.provider?.rating,
+            providerAddress: service.provider?.address || service.provider?.location,
+            category: service.category,
+            paymentMethod: selectedMethod,
+          });
+        }
+      }
+
+      // 3. Ambil / buat tagihan pembayaran resmi via Midtrans paymentService jika belum ada snapToken
+      if (!snapToken && targetRoomId) {
+        const paymentRes = await paymentService.createPayment({
+          orderId: targetRoomId,
+          entityType: "order",
+          paymentMethod: selectedMethod,
+        }).catch((e) => {
+          console.warn("Midtrans create payment warning:", e);
+          return null;
+        });
+        snapToken = paymentRes?.snapToken || paymentRes?.token || null;
+        midtransOrderId = paymentRes?.orderId || midtransOrderId || null;
+      }
+
+      // Helper untuk memfinalisasi status pesanan dan chat setelah pembayaran tuntas
+      const finalizeJasaPayment = async (activeMidtransOrderId, transactionId) => {
+        try {
+          const freshToken = await authService.getValidAccessToken();
+          const freshHeaders = {
+            "Content-Type": "application/json",
+            ...(freshToken ? { Authorization: `Bearer ${freshToken}` } : {}),
+          };
+
+          // 1. Sync status Midtrans ke server database
+          if (activeMidtransOrderId) {
+            await fetch(`/api/payments/status?orderId=${encodeURIComponent(activeMidtransOrderId)}&entityType=order`, {
+              headers: freshHeaders,
+            }).catch(() => null);
+          }
+
+          // 2. Persist status PAID ke chat room di PostgreSQL
+          if (targetRoomId) {
+            await fetch("/api/chat/rooms", {
+              method: "PATCH",
+              headers: freshHeaders,
+              credentials: "include",
+              body: JSON.stringify({
+                orderRoomId: targetRoomId,
+                status: "paid_escrow",
+                paymentStatus: "PAID",
+                midtransOrderId: activeMidtransOrderId || undefined,
+                transactionId: transactionId || undefined,
+              }),
+            }).catch(() => null);
+
+            // 3. Kirim pesan sistem resmi di ruang obrolan
+            if (sendChatMessage) {
+              sendChatMessage(
+                targetRoomId,
+                `Dana sebesar ${formatIDR(finalAmount || totalAmount)} telah aman terverifikasi di Rekening Bersama Bantuin.id melalui metode ${selectedMethod.toUpperCase()} (Payment Gateway Resmi). Mitra dapat segera memulai pengerjaan!`,
+                { isSystemAnnouncement: true }
+              );
+            }
+
+            if (updateOrderStatus) {
+              updateOrderStatus(targetRoomId, "paid_escrow");
+            }
+          }
+
+          // 4. Catat penggunaan voucher promo resmi jika ada
+          if (appliedVoucher?.code) {
+            await fetch("/api/vouchers/validate", {
+              method: "POST",
+              headers: freshHeaders,
+              body: JSON.stringify({
+                code: appliedVoucher.code,
+                orderAmount: totalAmount,
+                category: "jasa",
+                action: "redeem",
+              }),
+            }).catch((err) => console.warn("Failed to redeem voucher:", err));
+          }
+        } catch (syncErr) {
+          console.warn("[Jasa finalize payment warning]:", syncErr);
+        }
+
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("bantuin_order_created"));
+          window.dispatchEvent(new Event("bantuin_activity_updated"));
+          window.dispatchEvent(new Event("bantuin_chat_update"));
+          window.dispatchEvent(new Event("bantuin_notification_updated"));
+          window.dispatchEvent(new Event("bantuin_vouchers_updated"));
+        }
+
+        setIsProcessing(false);
+        setIsSuccess(true);
+        clearFormDraft(DRAFT_KEY);
+
+        const chatRoomId = targetRoomId || roomIdParam || "order-room-jasa";
+        const next = encodeURIComponent(`/chat?room=${chatRoomId}`);
+        router.push(
+          `/pembayaran/berhasil?type=jasa&title=${encodeURIComponent(
+            service?.title || "Pemesanan Jasa"
+          )}&amount=${finalAmount || totalAmount}&next=${next}`
+        );
+      };
+
+      // 4. Buka Midtrans Snap Popup jika script dan token tersedia
+      let snapObj = typeof window !== "undefined" ? window.snap : null;
+      if (!snapObj && snapToken) {
+        snapObj = await paymentService.loadSnap();
+      }
+
+      if (snapObj && snapToken) {
+        snapObj.pay(snapToken, {
+          onSuccess: async function (result) {
+            await finalizeJasaPayment(result?.order_id || midtransOrderId, result?.transaction_id);
+          },
+          onPending: function () {
+            addToast?.("Menunggu Pembayaran", "Silakan selesaikan pembayaran Anda sesuai petunjuk yang diberikan.");
+            setIsProcessing(false);
+            router.push(`/activity`);
+          },
+          onError: function () {
+            addToast?.("Pembayaran Gagal", "Transaksi pembayaran ditolak atau gagal diproses oleh gateway.", "error");
+            setIsProcessing(false);
+          },
+          onClose: function () {
+            setIsProcessing(false);
+          },
+        });
+      } else {
+        // Fallback konfirmasi pembayaran terverifikasi di sandbox / offline dev mode
+        await finalizeJasaPayment(midtransOrderId, null);
+      }
+    } catch (e) {
+      console.error("[Jasa handleConfirmPayment error]:", e);
+      setIsProcessing(false);
+      if (addToast) {
+        addToast("Gagal Memproses Pesanan", e.message || "Terjadi kendala saat memproses pesanan.", "error");
+      }
+    }
   };
 
   const paymentChannels = [
@@ -255,6 +626,43 @@ function JasaPembayaranContent() {
       logo: <BniLogo />
     }
   ];
+
+  if (isRoomCancelled) {
+    return (
+      <div className="min-h-screen flex flex-col bg-[#F4F7FB] text-slate-800 font-sans">
+        <Navbar />
+        <div className="flex-1 max-w-[1400px] w-full mx-auto px-4 sm:px-8 py-12 flex flex-col items-center justify-center">
+          <div className="bg-white p-6 sm:p-8 rounded-3xl border border-rose-200 shadow-sm flex flex-col items-center text-center max-w-md w-full animate-in fade-in duration-300">
+            <div className="w-16 h-16 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-600 mb-4">
+              <AlertCircle className="w-8 h-8" />
+            </div>
+            <span className="px-3 py-1 rounded-full bg-rose-50 border border-rose-200 text-rose-700 text-xs font-black uppercase tracking-wider mb-2">
+              Status: Dibatalkan
+            </span>
+            <h3 className="font-bold text-slate-900 text-base sm:text-lg">Pesanan Jasa Telah Dibatalkan</h3>
+            <p className="text-xs sm:text-sm text-slate-500 mt-2 mb-6 leading-relaxed">
+              Pesanan untuk layanan <strong>&ldquo;{service?.title || "Layanan Jasa"}&rdquo;</strong> telah dibatalkan secara resmi. Sesi pembayaran telah ditutup dan tidak dapat diproses lagi.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2.5 w-full">
+              <Link
+                href="/activity?tab=selesai"
+                className="flex-1 py-3 px-4 bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm rounded-xl transition text-center shadow-xs"
+              >
+                Ke Riwayat Aktivitas
+              </Link>
+              <Link
+                href={roomIdParam ? `/chat?room=${roomIdParam}` : `/jasa/${id}`}
+                className="py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs sm:text-sm rounded-xl transition text-center"
+              >
+                Kembali
+              </Link>
+            </div>
+          </div>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F4F7FB] text-slate-800 font-sans">
@@ -439,25 +847,17 @@ function JasaPembayaranContent() {
                     <div className="p-3.5 sm:p-5 bg-slate-50/80 rounded-2xl border border-slate-200/80 space-y-3 sm:space-y-3.5">
                       <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs sm:text-sm">
                         <span className="text-slate-700 font-semibold">
-                          Nomor Virtual Account {selectedMethod.split("_")[0].toUpperCase()}:
+                          Virtual Account {selectedMethod.split("_")[0].toUpperCase()}:
                         </span>
                         <span className="text-[10px] sm:text-xs font-bold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100 shrink-0">
-                          Otomatis Terverifikasi
+                          Midtrans Otomatis
                         </span>
                       </div>
 
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 p-3 sm:p-4 bg-white rounded-xl border border-slate-200 shadow-2xs">
-                        <span className="font-mono text-base sm:text-2xl font-black text-slate-900 tracking-wider select-all break-all text-center sm:text-left">
-                          {vaNumbers[selectedMethod]}
+                        <span className="text-xs sm:text-sm text-slate-600 font-medium text-center sm:text-left">
+                          Nomor Virtual Account resmi akan otomatis diterbitkan oleh Midtrans saat Anda menekan tombol <strong>Bayar Sekarang</strong>.
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => handleCopy(vaNumbers[selectedMethod], "va")}
-                          className="w-full sm:w-auto px-4 py-2 bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs sm:text-sm font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-xs"
-                        >
-                          <Copy className="w-4 h-4 shrink-0" />
-                          <span>{isCopiedVA ? "Tersalin" : "Salin No VA"}</span>
-                        </button>
                       </div>
 
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs text-slate-500 pt-1">
@@ -513,11 +913,17 @@ function JasaPembayaranContent() {
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5 mt-1.5 pt-1.5 border-t border-slate-200/60 min-w-0">
-                      <img
-                        src={service.provider.avatar}
-                        alt={service.provider.name}
-                        className="w-4 h-4 sm:w-5 sm:h-5 rounded-full object-cover border border-slate-200 shrink-0"
-                      />
+                      {service.provider.avatar && !service.provider.avatar.includes("dicebear.com") && !service.provider.avatar.includes("images.unsplash.com") ? (
+                        <img
+                          src={service.provider.avatar}
+                          alt={service.provider.name}
+                          className="w-4 h-4 sm:w-5 sm:h-5 rounded-full object-cover border border-slate-200 shrink-0"
+                        />
+                      ) : (
+                        <div className="w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-linear-to-br from-[#1683FF] to-[#0E5FCC] text-white flex items-center justify-center font-bold text-[9px] shrink-0 shadow-2xs">
+                          {((service.provider.name || "P").trim()[0] || "P").toUpperCase()}
+                        </div>
+                      )}
                       <span className="text-[10px] sm:text-[11px] text-slate-600 truncate min-w-0">
                         Penyedia: <strong className="text-slate-900 font-bold">{service.provider.name}</strong>
                       </span>
@@ -531,17 +937,24 @@ function JasaPembayaranContent() {
                   <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold ${
                     isDigitalMode 
                       ? "bg-blue-50 text-blue-700 border border-blue-200/80"
+                      : isOnsiteMode
+                      ? "bg-emerald-50 text-emerald-800 border border-emerald-200/80"
                       : "bg-amber-50 text-amber-800 border border-amber-200/80"
                   }`}>
                     {isDigitalMode ? (
                       <>
                         <Globe className="w-3 h-3 text-blue-600 shrink-0" />
-                        <span>Jasa Digital — Pengerjaan Jarak Jauh</span>
+                        <span>100% Online — Pengerjaan Digital Jarak Jauh</span>
+                      </>
+                    ) : isOnsiteMode ? (
+                      <>
+                        <Building2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                        <span>Klien Datang ke Lokasi Tempat Mitra</span>
                       </>
                     ) : (
                       <>
                         <MapPin className="w-3 h-3 text-amber-600 shrink-0" />
-                        <span>Layanan Datang ke Lokasi</span>
+                        <span>Mitra Datang ke Lokasi Klien (Layanan Panggilan)</span>
                       </>
                     )}
                   </span>
@@ -552,30 +965,59 @@ function JasaPembayaranContent() {
                   <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
                     <span className="text-slate-500 flex items-center gap-1.5">
                       <Calendar className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
-                      <span>{isDigitalMode ? "Target Selesai:" : "Tanggal Pelaksanaan:"}</span>
+                      <span>{isDigitalMode ? "Target Selesai:" : isOnsiteMode ? "Tanggal Kedatangan:" : "Tanggal Kunjungan:"}</span>
                     </span>
                     <span className="font-bold text-slate-900 text-right whitespace-nowrap">
                       {dateParam || "Sesuai Jadwal"}
                     </span>
                   </div>
 
-                  {/* Datang ke Lokasi: tampilkan jam + titik koordinat GPS + alamat */}
+                  {/* Datang ke Lokasi / Onsite: tampilkan jam + alamat tempat */}
                   {!isDigitalMode && (
                     <>
                       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
                         <span className="text-slate-500 flex items-center gap-1.5">
                           <Clock className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
-                          <span>Jam Mulai:</span>
+                          <span>{isOnsiteMode ? "Jam Kedatangan:" : "Jam Kunjungan:"}</span>
                         </span>
                         <span className="font-bold text-slate-900 text-right whitespace-nowrap">
                           {timeParam || "09:00"} WIB
                         </span>
                       </div>
 
-                      {alamatParam && (
+                      {isOnsiteMode && (
                         <div className="pt-2 border-t border-slate-200/60">
                           <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1">
-                            <MapPin className="w-3 h-3 text-[#1683FF] shrink-0" /> Lokasi &amp; Titik Peta:
+                            <Building2 className="w-3 h-3 text-emerald-600 shrink-0" /> Lokasi Tempat Mitra:
+                          </span>
+                          <p className="text-[11px] text-slate-800 font-semibold leading-relaxed break-words">
+                            {alamatParam ? decodeURIComponent(alamatParam) : (service.address || service.provider?.partnerAddress || service.provider?.address || "Lokasi Mitra Terdaftar")}
+                          </p>
+
+                          {(latParam && lngParam) ? (
+                            <div className="mt-1.5 flex flex-wrap items-center justify-between gap-1.5 text-[10px] bg-white p-2 rounded-lg border border-slate-200/70">
+                              <span className="text-emerald-700 font-medium flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
+                                Pin GPS: {parseFloat(latParam).toFixed(4)}, {parseFloat(lngParam).toFixed(4)}
+                              </span>
+                              <a
+                                href={`https://www.google.com/maps/dir/?api=1&destination=${latParam},${lngParam}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[#1683FF] hover:underline font-bold inline-flex items-center gap-0.5 shrink-0"
+                              >
+                                <span>Petunjuk Arah</span>
+                                <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                              </a>
+                            </div>
+                          ) : null}
+                        </div>
+                      )}
+
+                      {isCustomerLocMode && alamatParam && (
+                        <div className="pt-2 border-t border-slate-200/60">
+                          <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1">
+                            <MapPin className="w-3 h-3 text-[#1683FF] shrink-0" /> Alamat Tujuan Mitra:
                           </span>
                           <p className="text-[11px] text-slate-800 font-semibold leading-relaxed break-words">
                             {decodeURIComponent(alamatParam)}

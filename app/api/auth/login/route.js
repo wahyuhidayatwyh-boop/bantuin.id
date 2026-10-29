@@ -24,6 +24,32 @@ export async function POST(req) {
 
     const normalizedEmail = email.trim().toLowerCase();
 
+    // 0. Anti-Brute Force & Rate Limiter Guard
+    const { getClientIp, checkRateLimit, resetRateLimit, RATE_LIMIT_RULES } = await import("@/lib/security/rateLimiter");
+    const clientIp = getClientIp(req);
+
+    const ipLimit = checkRateLimit(`login:ip:${clientIp}`, RATE_LIMIT_RULES.LOGIN);
+    if (!ipLimit.allowed) {
+      return NextResponse.json(
+        {
+          error: ipLimit.message,
+          retryAfter: ipLimit.resetInSeconds,
+        },
+        { status: 429, headers: { "Retry-After": String(ipLimit.resetInSeconds) } }
+      );
+    }
+
+    const emailLimit = checkRateLimit(`login:email:${normalizedEmail}`, RATE_LIMIT_RULES.LOGIN);
+    if (!emailLimit.allowed) {
+      return NextResponse.json(
+        {
+          error: `Terlalu banyak percobaan masuk untuk akun ${normalizedEmail}. Demi perlindungan akun, silakan tunggu ${Math.ceil(emailLimit.resetInSeconds / 60)} menit lagi.`,
+          retryAfter: emailLimit.resetInSeconds,
+        },
+        { status: 429, headers: { "Retry-After": String(emailLimit.resetInSeconds) } }
+      );
+    }
+
     // 1. Cari profil di database berdasarkan email
     let profile = await prisma.profile.findUnique({
       where: { email: normalizedEmail },
@@ -55,26 +81,52 @@ export async function POST(req) {
       );
     }
 
-    // 2. Verifikasi kata sandi
-    if (profile.password) {
-      let isMatch = false;
-      // Periksa jika password adalah bcrypt hash
-      if (profile.password.startsWith("$2a$") || profile.password.startsWith("$2b$")) {
-        isMatch = await bcrypt.compare(password, profile.password);
-      } else {
-        // Plain text fallback untuk akun demo
-        isMatch = profile.password === password;
-      }
+    // 2. Cek apakah akun ditangguhkan (suspended)
+    if (profile.verificationStatus === "suspended") {
+      const { suspendedResponse } = await import("@/lib/auth/session");
+      return suspendedResponse(profile);
+    }
 
-      if (!isMatch) {
-        return NextResponse.json(
-          { error: "Kata sandi yang Anda masukkan salah." },
-          { status: 401 }
-        );
+    // 3. Verifikasi kata sandi (Bcrypt) - Wajib memiliki password hash (SEC-01 hardening)
+    if (!profile.password) {
+      return NextResponse.json(
+        {
+          error:
+            "Akun ini terdaftar melalui Google OAuth dan belum memiliki kata sandi. Silakan masuk menggunakan tombol Login Google.",
+        },
+        { status: 401 }
+      );
+    }
+
+    let isMatch = false;
+    if (profile.password.startsWith("$2a$") || profile.password.startsWith("$2b$")) {
+      isMatch = await bcrypt.compare(password, profile.password);
+    } else {
+      // Fallback untuk legacy record lalu otomatis upgrade ke bcrypt
+      isMatch = profile.password === password;
+      if (isMatch) {
+        const upgradedHash = await bcrypt.hash(password, 10);
+        await prisma.profile.update({
+          where: { id: profile.id },
+          data: { password: upgradedHash },
+        });
       }
     }
 
-    // 3. Update waktu login terakhir
+    if (!isMatch) {
+      return NextResponse.json(
+        {
+          error: `Kata sandi salah. Sisa percobaan: ${emailLimit.remaining} sebelum akun dikunci sementara.`,
+        },
+        { status: 401 }
+      );
+    }
+
+    // Login Sukses: Reset counter percobaan gagal untuk email dan IP ini
+    resetRateLimit(`login:email:${normalizedEmail}`);
+    resetRateLimit(`login:ip:${clientIp}`);
+
+    // 4. Update waktu login terakhir
     try {
       await prisma.profile.update({
         where: { id: profile.id },
@@ -82,38 +134,28 @@ export async function POST(req) {
       });
     } catch {}
 
-    // 4. Susun payload user untuk sesi
-    const userPayload = {
-      id: profile.id,
-      email: profile.email,
-      fullName: profile.fullName,
-      phone: profile.phoneNumber,
-      phoneNumber: profile.phoneNumber,
-      role: profile.accountRole || "user",
-      isPartner: profile.isPartner || false,
-      isAdmin: profile.isAdmin || false,
-      storeName: profile.partnerBusinessName || "",
-      campusName: profile.campusName || "Universitas Indonesia",
-      address: profile.partnerAddress || profile.campusName || "",
-      avatarUrl: profile.avatarUrl && !profile.avatarUrl.includes("images.unsplash.com") ? profile.avatarUrl : null,
-      verificationStatus: profile.verificationStatus || "unverified",
-      authProvider: profile.authProvider || "local",
-      ratingAvg: Number(profile.ratingAvg) || 5.0,
-      completedHelpsCount: profile.completedHelpsCount || 0,
-      reliabilityScore: profile.reliabilityScore || 100,
-      createdAt: profile.createdAt,
-    };
+    // 5. Susun payload user untuk sesi secara konsisten
+    const { buildUserPayload } = await import("@/lib/auth/session");
+    const userPayload = buildUserPayload(profile);
 
-    // 5. Generate JWT Access Token & Refresh Token
+    // 6. Generate JWT Access Token & Refresh Token
     const tokens = generateTokens(userPayload);
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       message: "Login berhasil.",
       user: userPayload,
       ...tokens,
       token: tokens.accessToken, // Backward compatibility
     });
+
+    response.cookies.set("bantuin_auth_token", tokens.accessToken, {
+      path: "/",
+      maxAge: 7 * 86400,
+      sameSite: "lax",
+    });
+
+    return response;
   } catch (error) {
     console.error("Login Error:", error);
     return NextResponse.json(

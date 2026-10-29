@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   Flag, 
   X, 
@@ -12,6 +12,7 @@ import {
   Loader2 
 } from "lucide-react";
 import { useApp } from "@/lib/context/AppContext";
+import { saveFormDraft, getFormDraft, clearFormDraft } from "@/lib/hooks/useFormDraft";
 
 const REPORT_CATEGORIES = [
   { id: "fraud", label: "Penipuan / Indikasi Fraud", desc: "Ketidaksesuaian uang muka, barang tidak dikirim, atau akun mencurigakan" },
@@ -25,12 +26,29 @@ const REPORT_CATEGORIES = [
 
 export default function ReportModal({ isOpen, onClose, targetRoom, targetUser }) {
   const { submitReport, addToast } = useApp();
+  const DRAFT_KEY = `bantuin_draft_report_modal_${targetRoom?.id || targetUser?.id || "general"}`;
 
   const [category, setCategory] = useState("fraud");
   const [description, setDescription] = useState("");
   const [evidencePhotos, setEvidencePhotos] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      const saved = getFormDraft(DRAFT_KEY, null);
+      if (saved) {
+        if (saved.category) setCategory(saved.category);
+        if (saved.description) setDescription(saved.description);
+      }
+    }
+  }, [isOpen, DRAFT_KEY]);
+
+  useEffect(() => {
+    if (isOpen && description) {
+      saveFormDraft(DRAFT_KEY, { category, description });
+    }
+  }, [isOpen, category, description, DRAFT_KEY]);
 
   if (!isOpen) return null;
 
@@ -52,7 +70,7 @@ export default function ReportModal({ isOpen, onClose, targetRoom, targetUser })
     setEvidencePhotos((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!description.trim() || description.length < 10) {
       addToast?.("Deskripsi Kurang Lengkap", "Mohon jelaskan rincian kronologi minimal 10 karakter.", "warning");
@@ -60,10 +78,10 @@ export default function ReportModal({ isOpen, onClose, targetRoom, targetUser })
     }
 
     setIsSubmitting(true);
-    setTimeout(() => {
-      submitReport({
-        targetUserId: targetUser?.id || targetRoom?.helper?.id,
-        targetRoomId: targetRoom?.id,
+    try {
+      await submitReport({
+        targetUserId: targetUser?.id || targetRoom?.helper?.id || targetRoom?.helperId || targetRoom?.requesterId,
+        targetRoomId: targetRoom?.id || targetRoom?.orderRoomId,
         targetRequestId: targetRoom?.requestId,
         category: REPORT_CATEGORIES.find((c) => c.id === category)?.label || category,
         description: description.trim(),
@@ -72,6 +90,7 @@ export default function ReportModal({ isOpen, onClose, targetRoom, targetUser })
 
       setIsSubmitting(false);
       setIsSuccess(true);
+      clearFormDraft(DRAFT_KEY);
 
       setTimeout(() => {
         setIsSuccess(false);
@@ -79,7 +98,10 @@ export default function ReportModal({ isOpen, onClose, targetRoom, targetUser })
         setDescription("");
         setEvidencePhotos([]);
       }, 1500);
-    }, 600);
+    } catch (err) {
+      setIsSubmitting(false);
+      addToast?.("Gagal Mengirim", err.message || "Terjadi kesalahan saat mengirim laporan.", "error");
+    }
   };
 
   return (

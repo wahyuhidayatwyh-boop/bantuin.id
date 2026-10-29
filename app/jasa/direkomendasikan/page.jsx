@@ -7,6 +7,7 @@ import Footer from "@/components/layout/Footer";
 import PromotedCard from "@/components/promotion/PromotedCard";
 import { useApp } from "@/lib/context/AppContext";
 import { promotionService } from "@/lib/services/promotionService";
+import { JasaCardSkeleton } from "@/components/skeletons/ItemGridSkeleton";
 import { JASA_CATEGORIES } from "@/lib/categories";
 import {
   Search,
@@ -19,45 +20,68 @@ import {
 export default function JasaDirekomendasikanPage() {
   const { activeKabupaten } = useApp();
   const [promotedServices, setPromotedServices] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("Semua");
 
   // ─── Fetch promoted services ─────────────────────────────────────────────────
   useEffect(() => {
-    const active = promotionService.getActivePromotionsSync({
-      targetType: "service",
-      placement: "jasa",
-    });
+    let isMounted = true;
+    setIsLoading(true);
 
-    const mapped = active.map((promo) => ({
-      promoId: promo.id,
-      id: promo.targetId || promo.id,
-      targetId: promo.targetId || promo.id,
-      title: promo.targetTitle || "Layanan Jasa",
-      targetTitle: promo.targetTitle || "Layanan Jasa",
-      category: promo.targetCategory || "Jasa",
-      targetCategory: promo.targetCategory || "Jasa",
-      price: promo.targetPrice || null,
-      targetPrice: promo.targetPrice || null,
-      image:
-        promo.targetImage ||
-        "https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=800&auto=format&fit=crop&q=80",
-      targetImage: promo.targetImage || null,
-      targetLocation: promo.targetLocation || "Banyumas",
-      ownerName: promo.ownerName || "Mitra Jasa",
-      rating: 5.0,
-      reviewCount: 24,
-      targetType: "service",
-    }));
+    const loadPromotions = async () => {
+      try {
+        await promotionService.fetchLivePromotions();
+      } catch (e) {
+        console.warn("Could not fetch live promotions:", e);
+      }
 
-    setPromotedServices(mapped);
-    active.forEach((p) => promotionService.recordImpression(p.id));
+      if (!isMounted) return;
+
+      const active = promotionService.getActivePromotionsSync({
+        targetType: "service",
+        placement: "jasa",
+      });
+
+      const mapped = active.map((promo) => ({
+        promoId: promo.id,
+        id: promo.targetId || promo.id,
+        targetId: promo.targetId || promo.id,
+        title: promo.targetTitle || "Layanan Jasa",
+        targetTitle: promo.targetTitle || "Layanan Jasa",
+        category: promo.targetCategory || "Jasa",
+        targetCategory: promo.targetCategory || "Jasa",
+        price: promo.targetPrice || null,
+        targetPrice: promo.targetPrice || null,
+        image: promo.targetImage || "/logotab.png",
+        targetImage: promo.targetImage || null,
+        targetLocation: promo.targetLocation || "Banyumas",
+        ownerName: promo.ownerName || "Mitra Jasa",
+        rating: Number(promo.ratingAvg || promo.rating || promo.ownerRating || 5.0),
+        ratingAvg: Number(promo.ratingAvg || promo.rating || promo.ownerRating || 5.0),
+        reviewCount: Number(promo.reviewCount || promo.ratingCount || 0),
+        ratingCount: Number(promo.reviewCount || promo.ratingCount || 0),
+        completedOrders: Number(promo.completedOrders || promo.completedCount || promo.completedJobs || 0),
+        completedJobs: Number(promo.completedOrders || promo.completedCount || promo.completedJobs || 0),
+        completedCount: Number(promo.completedOrders || promo.completedCount || promo.completedJobs || 0),
+        targetType: "service",
+      }));
+
+      setPromotedServices(mapped);
+      setIsLoading(false);
+      active.forEach((p) => promotionService.recordImpression(p.id));
+    };
+
+    loadPromotions();
+    return () => {
+      isMounted = false;
+    };
   }, [activeKabupaten]);
 
   // ─── Filter ───────────────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     return promotedServices.filter((item) => {
-      const q = searchQuery.toLowerCase().trim();
+      const q = String(searchQuery || "").toLowerCase().trim();
       const matchQuery =
         !q ||
         item.title?.toLowerCase().includes(q) ||
@@ -66,7 +90,7 @@ export default function JasaDirekomendasikanPage() {
 
       const matchCat =
         selectedCategory === "Semua" ||
-        (item.category || "").toLowerCase().includes(selectedCategory.toLowerCase());
+        String(item.category || "").toLowerCase().includes(String(selectedCategory || "").toLowerCase());
 
       return matchQuery && matchCat;
     });
@@ -80,7 +104,7 @@ export default function JasaDirekomendasikanPage() {
         cat.id === "Semua"
           ? promotedServices.length
           : promotedServices.filter((item) =>
-              (item.category || "").toLowerCase().includes(cat.id.toLowerCase())
+              String(item.category || "").toLowerCase().includes(String(cat.id || "").toLowerCase())
             ).length,
     })).filter((cat) => cat.id === "Semua" || cat.count > 0);
   }, [promotedServices]);
@@ -201,7 +225,13 @@ export default function JasaDirekomendasikanPage() {
         )}
 
         {/* ─── Grid List ────────────────────────────────────────────────────────── */}
-        {filtered.length > 0 ? (
+        {isLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <JasaCardSkeleton key={`skeleton-${i}`} />
+            ))}
+          </div>
+        ) : filtered.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
             {filtered.map((item) => (
               <PromotedCard
@@ -268,4 +298,3 @@ export default function JasaDirekomendasikanPage() {
     </div>
   );
 }
-

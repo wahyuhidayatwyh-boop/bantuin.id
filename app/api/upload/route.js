@@ -1,15 +1,47 @@
 import { NextResponse } from "next/server";
-import { uploadToSupabaseStorage, isSupabaseConfigured } from "@/lib/supabase/storage";
+import { uploadToSupabaseStorage, isSupabaseConfigured, SUPABASE_BUCKETS, resolveBucketName } from "@/lib/supabase/storage";
 import { validateFile } from "@/lib/utils/fileValidation";
+import { requireAuth } from "@/lib/auth/session";
+
+const ALLOWED_BUCKET_VALUES = new Set(Object.values(SUPABASE_BUCKETS));
 
 export async function POST(req) {
   try {
+    // SEC-06: Wajib autentikasi sesi aktif untuk seluruh unggahan file
+    const auth = await requireAuth(req);
+    if (auth.error) return auth.error;
+
     const formData = await req.formData();
     const files = formData.getAll("files");
     const singleFile = formData.get("file");
-    const folder = formData.get("folder") !== null ? formData.get("folder") : "";
-    const bucket = formData.get("bucket") || formData.get("bucketName") || "bantuin-assets";
+    const rawFolder = formData.get("folder") !== null ? String(formData.get("folder")) : "";
+    const rawBucket = String(formData.get("bucket") || formData.get("bucketName") || "bantuin-assets").trim();
     const isPrivate = formData.get("isPrivate") === "true" || formData.get("private") === "true";
+
+    // SEC-06: Batasi bucket hanya ke allowlist resmi SUPABASE_BUCKETS
+    let bucket;
+    try {
+      bucket = resolveBucketName(rawBucket);
+    } catch {
+      return NextResponse.json(
+        { error: `Bucket penyimpanan '${rawBucket}' tidak diizinkan.` },
+        { status: 400 }
+      );
+    }
+    if (!ALLOWED_BUCKET_VALUES.has(bucket)) {
+      return NextResponse.json(
+        { error: `Bucket penyimpanan '${rawBucket}' tidak diizinkan.` },
+        { status: 400 }
+      );
+    }
+
+    // Sanitasi parameter folder untuk mencegah path traversal
+    const folder = rawFolder
+      .replace(/\\/g, "/")
+      .split("/")
+      .map((seg) => seg.replace(/[^a-zA-Z0-9_-]/g, ""))
+      .filter(Boolean)
+      .join("/");
 
     const allFiles = files.length > 0 ? files : (singleFile ? [singleFile] : []);
 
@@ -33,7 +65,7 @@ export async function POST(req) {
     // 1. Validasi MIME Type & Ukuran File untuk semua file input
     for (const file of allFiles) {
       if (!(file instanceof Blob)) continue;
-      
+
       const validation = validateFile(file, bucket);
       if (!validation.valid) {
         return NextResponse.json(
@@ -43,7 +75,13 @@ export async function POST(req) {
       }
     }
 
+    const isKyc = bucket === "bantuin-kyc";
+    const forcePrivate = isPrivate || isKyc;
+
+    const { toStorageRef } = await import("@/lib/supabase/storage");
+
     const uploadedUrls = [];
+    const uploadedRefs = [];
     const uploadedDetails = [];
 
     // 2. Lakukan upload setelah lolos verifikasi MIME type
@@ -61,11 +99,14 @@ export async function POST(req) {
         contentType,
         folder,
         bucket,
-        isPrivate,
+        isPrivate: forcePrivate,
       });
 
+      const storageRef = toStorageRef(result.bucket, result.key);
+
       uploadedUrls.push(result.url);
-      uploadedDetails.push(result);
+      uploadedRefs.push(storageRef);
+      uploadedDetails.push({ ...result, storageRef });
     }
 
     return NextResponse.json({
@@ -73,7 +114,15 @@ export async function POST(req) {
       message: `${uploadedUrls.length} file berhasil diunggah ke bucket [${bucket}].`,
       urls: uploadedUrls,
       url: uploadedUrls[0] || null,
+      storageRef: uploadedRefs[0] || null,
+      storageRefs: uploadedRefs,
       details: uploadedDetails,
+      data: {
+        url: uploadedUrls[0] || null,
+        urls: uploadedUrls,
+        storageRef: uploadedRefs[0] || null,
+        storageRefs: uploadedRefs,
+      },
       bucket,
     });
   } catch (error) {

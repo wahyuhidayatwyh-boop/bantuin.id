@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState, Suspense } from "react";
+import React, { useState, useEffect, useRef, Suspense } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import logoImg from "@/components/image/logo.png";
 import { useApp } from "@/lib/context/AppContext";
 import { INDONESIA_REGION_DATA, PROVINCE_LIST } from "@/lib/data/indonesiaRegions";
@@ -11,6 +11,11 @@ import { detectRealtimeLocation } from "@/lib/services/gpsService";
 import CustomSelect from "@/components/ui/CustomSelect";
 import { validateFile, getAcceptAttribute } from "@/lib/utils/fileValidation";
 import AuthSkeleton from "@/components/skeletons/AuthSkeleton";
+import { authService } from "@/lib/services/authService";
+import { RENTAL_STORE_CATEGORIES } from "@/lib/categories";
+import { saveFormDraft, getFormDraft, clearFormDraft, useBeforeUnload } from "@/lib/hooks/useFormDraft";
+import GoogleSignInButton from "@/components/auth/GoogleSignInButton";
+import GoogleIcon from "@/components/common/GoogleIcon";
 import {
   Store,
   ShieldCheck,
@@ -22,6 +27,7 @@ import {
   CreditCard,
   Phone,
   Mail,
+  Lock,
   CheckCircle2,
   Trash2,
   Navigation,
@@ -35,23 +41,27 @@ import CategoryIcon from "@/components/common/CategoryIcon";
 
 function MitraRegisterPageContent() {
   const router = useRouter();
-  const { addToast } = useApp();
+  const searchParams = useSearchParams();
+  const { currentUser, setCurrentUser, addToast, setIsAuthenticated } = useApp();
+  const hasNotifiedGoogleRef = useRef(false);
 
   const [step, setStep] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
   const [isDetectingGps, setIsDetectingGps] = useState(false);
   const [gpsSuccessMsg, setGpsSuccessMsg] = useState("");
   const [gpsErrorMsg, setGpsErrorMsg] = useState("");
-  const [mitraKycChoice, setMitraKycChoice] = useState("later"); // 'later' (Buka Toko Dulu) or 'now' (Lengkapi Sekarang)
 
   const [formData, setFormData] = useState({
     // Step 1: Profil Usaha
     storeName: "",
-    businessCategory: "Rental Kamera & Lensa",
+    businessCategory: RENTAL_STORE_CATEGORIES[0],
     customCategory: "",
     email: "",
     phone: "",
+    password: "",
+    authProvider: "local", // 'local' | 'google'
     operatingHours: "08.00 - 21.00 WIB",
+    storePhotoFile: null,
     storePhotoPreview: null,
     storePhotoFileName: "",
 
@@ -65,6 +75,7 @@ function MitraRegisterPageContent() {
     // Step 3: Legalitas Pemilik & Rekening Payout
     ownerName: "",
     ownerNik: "",
+    ktpPhotoFile: null,
     ktpPhotoPreview: null,
     ktpPhotoFileName: "",
     bankName: "BCA",
@@ -73,16 +84,96 @@ function MitraRegisterPageContent() {
     agreeToS: true,
   });
 
-  const categories = [
-    "Rental Kamera & Lensa",
-    "Rental Audio & Podcast",
-    "Percetakan & Digital Printing",
-    "Studio Foto & Lighting",
-    "Rental Proyektor & Display",
-    "Alat Perkakas & Pertukangan",
-    "Vendor Event & Bazar",
-    "Lainnya (Kategori Usaha Lain)",
-  ];
+  const DRAFT_KEY = "bantuin_draft_mitra_register";
+  const hasLoadedDraftRef = useRef(false);
+
+  useEffect(() => {
+    if (hasLoadedDraftRef.current) return;
+    hasLoadedDraftRef.current = true;
+    const draft = getFormDraft(DRAFT_KEY, null);
+    if (draft) {
+      if (draft.formData) {
+        setFormData((prev) => ({ ...prev, ...draft.formData }));
+      }
+      if (draft.step && Number(draft.step) >= 1) {
+        setStep(Number(draft.step));
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedDraftRef.current) return;
+    if (formData.storeName || formData.ownerName || formData.phone || step > 1) {
+      const { password, storePhotoFile, ktpPhotoFile, ...safeDraft } = formData;
+      saveFormDraft(DRAFT_KEY, { formData: safeDraft, step });
+    }
+  }, [formData, step]);
+
+  const isFormDirty = Boolean(formData.storeName.trim() || formData.ownerName.trim() || formData.phone.trim());
+  useBeforeUnload(isFormDirty, "Ada isian pendaftaran mitra toko yang belum disimpan. Yakin ingin meninggalkan halaman?");
+
+  const isLoggedIn = Boolean(currentUser && currentUser.email);
+  const isGoogleAuth = formData.authProvider === "google" || (isLoggedIn && currentUser?.authProvider === "google");
+
+  // Sinkronisasi data jika pengguna sudah login di landingpage
+  useEffect(() => {
+    if (currentUser) {
+      setFormData((prev) => ({
+        ...prev,
+        email: currentUser.email || prev.email,
+        phone: currentUser.phoneNumber || currentUser.phone || prev.phone,
+        ownerName: currentUser.fullName || currentUser.name || prev.ownerName,
+        address: currentUser.partnerAddress || currentUser.address || prev.address,
+        storeName: currentUser.partnerBusinessName || prev.storeName,
+        authProvider: currentUser.authProvider || prev.authProvider,
+      }));
+    }
+  }, [currentUser]);
+
+  // Handle integrasi Google OAuth atau redirect dari Google
+  useEffect(() => {
+    let emailParam = searchParams.get("email");
+    let nameParam = searchParams.get("name");
+    let avatarParam = searchParams.get("avatar");
+    let connectedParam = searchParams.get("connected");
+    let fromParam = searchParams.get("from");
+
+    if (typeof window !== "undefined") {
+      try {
+        const storedGoogle = JSON.parse(
+          sessionStorage.getItem("bantuin_google_profile") ||
+          localStorage.getItem("bantuin_google_profile") ||
+          "{}"
+        );
+        if (storedGoogle.email && !emailParam) emailParam = storedGoogle.email;
+        if (storedGoogle.fullName && !nameParam) nameParam = storedGoogle.fullName;
+        if (storedGoogle.avatarUrl && !avatarParam) avatarParam = storedGoogle.avatarUrl;
+        if (storedGoogle.email) connectedParam = "google";
+      } catch {}
+    }
+
+    const isFromGoogle = connectedParam === "google" || fromParam === "google";
+
+    if (emailParam || nameParam || isFromGoogle) {
+      setFormData((prev) => ({
+        ...prev,
+        email: emailParam || prev.email,
+        ownerName: nameParam || prev.ownerName,
+        authProvider: isFromGoogle ? "google" : prev.authProvider,
+      }));
+    }
+
+    if ((connectedParam === "google" || fromParam === "google") && !hasNotifiedGoogleRef.current) {
+      hasNotifiedGoogleRef.current = true;
+      addToast?.(
+        "Akun Google Terhubung",
+        "Data profil Google Anda berhasil disinkronkan untuk pendaftaran Mitra Toko.",
+        "success"
+      );
+    }
+  }, [searchParams, addToast]);
+
+  const categories = RENTAL_STORE_CATEGORIES;
 
   // Dynamic Cities from selected Province
   const currentProvinceData = INDONESIA_REGION_DATA[formData.province] || INDONESIA_REGION_DATA["Kalimantan Selatan"] || {};
@@ -127,6 +218,7 @@ function MitraRegisterPageContent() {
       const previewUrl = URL.createObjectURL(file);
       setFormData({
         ...formData,
+        storePhotoFile: file,
         storePhotoPreview: previewUrl,
         storePhotoFileName: file.name
       });
@@ -145,49 +237,152 @@ function MitraRegisterPageContent() {
       const previewUrl = URL.createObjectURL(file);
       setFormData({
         ...formData,
+        ktpPhotoFile: file,
         ktpPhotoPreview: previewUrl,
         ktpPhotoFileName: file.name
       });
     }
   };
 
-  const handleNext = (e) => {
+  const handleNext = async (e) => {
     e.preventDefault();
+
+    if (step === 1) {
+      if (!formData.storeName.trim()) {
+        addToast?.("Nama Toko Wajib Diisi", "Harap masukkan nama toko atau brand usaha Anda.", "error");
+        return;
+      }
+      if (formData.businessCategory?.startsWith("Lainnya") && !formData.customCategory.trim()) {
+        addToast?.("Kategori Belum Diisi", "Harap tuliskan kategori usaha toko Anda.", "error");
+        return;
+      }
+      if (!formData.email.trim() || !formData.email.includes("@")) {
+        addToast?.("Email Belum Valid", "Harap masukkan alamat email aktif.", "error");
+        return;
+      }
+      if (!formData.phone.trim()) {
+        addToast?.("Nomor WhatsApp Wajib Diisi", "Harap masukkan nomor kontak toko Anda.", "error");
+        return;
+      }
+      if (!isLoggedIn && !isGoogleAuth && (!formData.password || formData.password.length < 8)) {
+        addToast?.("Kata Sandi Kurang", "Kata sandi akun toko minimal 8 karakter.", "error");
+        return;
+      }
+    }
+
+    if (step === 2) {
+      if (!formData.address.trim()) {
+        addToast?.("Alamat Toko Wajib Diisi", "Harap masukkan alamat fisik toko tempat serah terima barang.", "error");
+        return;
+      }
+    }
 
     if (step === 3) {
       if (!formData.ownerName.trim()) {
         addToast?.("Nama Pemilik Belum Diisi", "Harap isi nama lengkap pemilik toko/usaha.", "error");
         return;
       }
-      if (mitraKycChoice === "now") {
-        if (!formData.ownerNik || formData.ownerNik.length < 16) {
-          addToast?.("NIK Belum Valid", "Harap masukkan 16 digit NIK pemilik toko yang valid.", "error");
-          return;
-        }
-        if (!formData.ktpPhotoPreview) {
-          addToast?.("Foto KTP Belum Diunggah", "Harap unggah foto KTP asli pemilik untuk validasi legalitas toko.", "error");
-          return;
-        }
-        if (!formData.accountNumber) {
-          addToast?.("Nomor Rekening Belum Diisi", "Harap masukkan nomor rekening untuk pencairan hak sewa.", "error");
-          return;
-        }
+      if (!formData.ownerNik || formData.ownerNik.trim().length !== 16 || !/^\d{16}$/.test(formData.ownerNik.trim())) {
+        addToast?.("NIK Belum Valid", "Harap masukkan 16 digit NIK KTP pemilik toko yang valid.", "error");
+        return;
+      }
+      if (!formData.ktpPhotoFile) {
+        addToast?.("Foto KTP Belum Diunggah", "Foto KTP asli pemilik wajib diunggah untuk verifikasi identitas dan legalitas toko.", "error");
+        return;
+      }
+      if (!formData.accountNumber || !formData.accountHolder) {
+        addToast?.("Rekening Belum Lengkap", "Harap masukkan nomor rekening dan nama pemilik rekening untuk pencairan hak sewa.", "error");
+        return;
       }
     }
 
     if (step < 3) {
       setStep(step + 1);
     } else {
+      if (!formData.agreeToS) {
+        addToast?.("Persetujuan Diperlukan", "Harap centang persetujuan Dokumen Syarat & Ketentuan.", "error");
+        return;
+      }
+
       setIsLoading(true);
-      setTimeout(() => {
+      try {
+        let uploadedKtpUrl = "";
+        if (formData.ktpPhotoFile) {
+          addToast?.("Mengunggah Dokumen Legalitas", "Mengunggah foto KTP pemilik ke brankas KYC aman...", "info");
+          const uploadBody = new FormData();
+          uploadBody.append("file", formData.ktpPhotoFile);
+          uploadBody.append("bucket", "bantuin-kyc");
+
+          const upRes = await fetch("/api/upload", {
+            method: "POST",
+            body: uploadBody,
+          });
+          const upJson = await upRes.json();
+          if (!upRes.ok || !upJson.success) {
+            throw new Error(upJson.error || "Gagal mengunggah foto KTP pemilik.");
+          }
+          uploadedKtpUrl = upJson.data?.storageRef || upJson.data?.url || "";
+        }
+
+        const effectiveStatus = "pending_review";
+        const selectedCategory = formData.businessCategory.startsWith("Lainnya")
+          ? (formData.customCategory.trim() || "Rental Umum")
+          : formData.businessCategory;
+
+        const authResult = await authService.register({
+          fullName: formData.ownerName || currentUser?.fullName || "Mitra Toko Sewa",
+          email: formData.email,
+          phone: formData.phone,
+          password: formData.password || undefined,
+          role: "partner",
+          authProvider: isGoogleAuth ? "google" : "local",
+          isLoggedInUser: isLoggedIn,
+          isUpgrade: isLoggedIn,
+          address: formData.address,
+          province: formData.province,
+          city: formData.city,
+          district: formData.district,
+          storeName: formData.storeName,
+          storeCategory: selectedCategory,
+          operatingHours: formData.operatingHours || "08.00 - 21.00 WIB",
+          idNumber: formData.ownerNik || "",
+          idCardUrl: uploadedKtpUrl,
+          bankInfo: {
+            bankName: formData.bankName,
+            accountNumber: formData.accountNumber,
+            accountHolder: formData.accountHolder || formData.ownerName,
+          },
+          verificationStatus: effectiveStatus,
+        });
+
+        if (authResult?.user) {
+          setCurrentUser(authResult.user);
+        }
+        setIsAuthenticated?.(true);
+
+        try {
+          sessionStorage.removeItem("bantuin_google_profile");
+          localStorage.removeItem("bantuin_google_profile");
+          sessionStorage.removeItem("bantuin_oauth_role");
+          localStorage.removeItem("bantuin_oauth_role");
+          sessionStorage.removeItem("bantuin_oauth_mode");
+          localStorage.removeItem("bantuin_oauth_mode");
+        } catch {}
+
+        clearFormDraft(DRAFT_KEY);
+
         addToast?.(
-          "Pendaftaran Mitra Berhasil!",
-          mitraKycChoice === "now"
-            ? "Toko Anda telah terdaftar. Dokumen legalitas sedang dalam verifikasi admin."
-            : "Toko Anda berhasil aktif! Anda dapat mulai mengunggah alat rental dan melengkapi KTP nanti di dashboard."
+          "Pendaftaran Mitra Berhasil Dikirim!",
+          "Toko Anda telah terdaftar dan berkas KYC sedang dalam antrean verifikasi Admin Bantuin. Toko akan aktif setelah disetujui.",
+          "success"
         );
         router.push("/mitra/dashboard");
-      }, 1000);
+      } catch (err) {
+        console.error("Mitra register error:", err);
+        addToast?.("Pendaftaran Gagal", err.message || "Terjadi kesalahan saat mendaftarkan toko.", "error");
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -276,9 +471,80 @@ function MitraRegisterPageContent() {
                   </div>
                 </div>
 
+                {/* 1. Kondisi jika Pengguna SUDAH LOGIN di platform */}
+                {isLoggedIn && (
+                  <div className="p-4 bg-gradient-to-r from-blue-50/90 to-sky-50/80 border border-blue-200/90 rounded-2xl flex items-center justify-between gap-3 shadow-2xs">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-[#1683FF] text-white flex items-center justify-center font-bold text-sm shrink-0 shadow-xs">
+                        {currentUser.fullName ? currentUser.fullName.charAt(0).toUpperCase() : "U"}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs font-bold text-slate-900 truncate">
+                            {currentUser.fullName || "Pengguna Aktif"}
+                          </p>
+                          <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
+                            {currentUser.authProvider === "google" ? "Google Terhubung" : "Akun Aktif"}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 truncate mt-0.5">{currentUser.email}</p>
+                      </div>
+                    </div>
+                    <div className="text-[11px] font-bold text-[#1683FF] bg-white px-3 py-1.5 rounded-xl border border-blue-100 shadow-2xs shrink-0">
+                      Aktivasi Mitra Toko
+                    </div>
+                  </div>
+                )}
+
+                {/* 2. Kondisi jika BELUM LOGIN: Opsi Google Auth atau Banner Otentikasi Google Aktif */}
+                {!isLoggedIn && (
+                  <>
+                    {!isGoogleAuth ? (
+                      <div className="space-y-3">
+                        <GoogleSignInButton
+                          role="partner"
+                          mode="register"
+                          label="Daftar Cepat dengan Google"
+                          className="rounded-2xl py-3 w-full"
+                        />
+                        <div className="relative flex items-center justify-center my-3">
+                          <div className="absolute inset-0 flex items-center">
+                            <div className="w-full border-t border-slate-200" />
+                          </div>
+                          <span className="relative bg-white px-3 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                            atau isi formulir manual
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-3.5 bg-emerald-50/90 border border-emerald-200 rounded-2xl flex items-center justify-between gap-3 animate-in fade-in">
+                        <div className="flex items-center gap-2.5">
+                          <GoogleIcon className="w-5 h-5 shrink-0" />
+                          <div>
+                            <p className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                              <span>Otentikasi Akun Google Aktif</span>
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600 inline" />
+                            </p>
+                            <p className="text-[11px] text-emerald-700 mt-0.5">
+                              Masuk instan tanpa perlu membuat kata sandi manual Bantuin.
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setFormData((prev) => ({ ...prev, authProvider: "local" }))}
+                          className="text-[11px] font-bold text-slate-600 hover:text-slate-900 px-2.5 py-1 rounded-lg hover:bg-white border border-slate-200 transition shrink-0"
+                        >
+                          Ganti ke Sandi
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Nama Toko / Nama Usaha Vendor
+                    Nama Toko / Nama Usaha Vendor <span className="text-rose-500 font-bold">*</span>
                   </label>
                   <input
                     type="text"
@@ -292,7 +558,7 @@ function MitraRegisterPageContent() {
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Kategori Utama Bisnis Toko
+                    Kategori Utama Bisnis Toko <span className="text-rose-500 font-bold">*</span>
                   </label>
                   <select
                     value={formData.businessCategory}
@@ -307,10 +573,10 @@ function MitraRegisterPageContent() {
                   </select>
                 </div>
 
-                {formData.businessCategory.startsWith("Lainnya") && (
+                {formData.businessCategory?.startsWith("Lainnya") && (
                   <div className="p-3.5 bg-blue-50/60 rounded-2xl border border-blue-200 animate-in fade-in space-y-2">
                     <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Tuliskan Kategori Usaha Anda:
+                      Tuliskan Kategori Usaha Anda: <span className="text-rose-500 font-bold">*</span>
                     </label>
                     <input
                       type="text"
@@ -331,25 +597,35 @@ function MitraRegisterPageContent() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      Email Bisnis / Toko
-                    </label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        Email Bisnis / Toko <span className="text-rose-500 font-bold">*</span>
+                      </label>
+                      {isGoogleAuth && (
+                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                          Google Terhubung
+                        </span>
+                      )}
+                    </div>
                     <div className="relative">
                       <Mail className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
                       <input
                         type="email"
                         required
+                        disabled={isLoggedIn}
                         placeholder="toko@bisnis.com"
                         value={formData.email}
                         onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                        className="w-full bg-white border border-slate-200 text-slate-900 placeholder-slate-400 rounded-2xl pl-11 pr-4 py-3 text-xs sm:text-sm focus:outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/20"
+                        className={`w-full bg-white border border-slate-200 text-slate-900 placeholder-slate-400 rounded-2xl pl-11 pr-4 py-3 text-xs sm:text-sm focus:outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/20 ${
+                          isLoggedIn ? "bg-slate-50 text-slate-600 cursor-not-allowed" : ""
+                        }`}
                       />
                     </div>
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      Nomor WhatsApp Toko
+                      Nomor WhatsApp Toko <span className="text-rose-500 font-bold">*</span>
                     </label>
                     <div className="relative">
                       <Phone className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
@@ -364,6 +640,27 @@ function MitraRegisterPageContent() {
                     </div>
                   </div>
                 </div>
+
+                {/* Password field HANYA untuk pendaftar baru manual (non-Google, non-logged in) */}
+                {!isLoggedIn && !isGoogleAuth && (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                      Kata Sandi Akun Toko (Minimal 8 Karakter) <span className="text-rose-500 font-bold">*</span>
+                    </label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="password"
+                        required
+                        minLength={8}
+                        placeholder="Masukkan kata sandi aman (min. 8 karakter)"
+                        value={formData.password}
+                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                        className="w-full bg-white border border-slate-200 text-slate-900 placeholder-slate-400 rounded-2xl pl-11 pr-4 py-3 text-xs sm:text-sm focus:outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/20"
+                      />
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
@@ -574,109 +871,62 @@ function MitraRegisterPageContent() {
               </div>
             )}
 
-            {/* STEP 3: LEGALITAS PEMILIK & VERIFIKASI FLEKSIBEL (PROGRESSIVE KYC) */}
+            {/* STEP 3: LEGALITAS PEMILIK & VERIFIKASI KYC RESMI */}
             {step === 3 && (
               <div className="space-y-4 animate-in fade-in duration-200">
                 <div className="flex items-center gap-3.5 mb-2">
                   <div className="w-12 h-12 rounded-2xl bg-blue-100 text-[#1683FF] flex items-center justify-center font-bold shrink-0">
-                    <Store className="w-6 h-6" />
+                    <ShieldCheck className="w-6 h-6" />
                   </div>
                   <div>
                     <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-                      Kepemilikan Toko &amp; Verifikasi Fleksibel
+                      Legalitas Pemilik &amp; Verifikasi KYC Toko
                     </h2>
                     <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-                      Pilih kemudahan registrasi. Anda dapat membuka toko sekarang dan melengkapi KTP nanti.
+                      Lengkapi identitas penanggung jawab usaha dan dokumen legalitas. Toko Anda akan diverifikasi oleh Admin Bantuin sebelum pesanan dapat diproses secara penuh.
                     </p>
+                  </div>
+                </div>
+
+                {/* Banner Status Antrean Verifikasi */}
+                <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200/80 flex items-start gap-2.5 text-xs text-amber-900">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="leading-relaxed">
+                    <span className="font-bold">Wajib Verifikasi KYC:</span> Seluruh data KTP asli dan informasi rekening bank dienkripsi aman. Akun mitra toko memerlukan persetujuan resmi dari Admin Bantuin guna menjamin keamanan penyewaan barang bernilai tinggi.
                   </div>
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Nama Lengkap Pemilik Usaha / Penanggung Jawab
+                    Nama Lengkap Pemilik Usaha / Penanggung Jawab <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"
                     required
                     placeholder="Contoh: Budi Prasetyo"
                     value={formData.ownerName}
-                    onChange={(e) => setFormData({ ...formData, ownerName: e.target.value })}
+                    onChange={(e) => setFormData({ ...formData, ownerName: e.target.value, accountHolder: formData.accountHolder || e.target.value })}
                     className="w-full bg-white border border-slate-200 text-slate-900 placeholder-slate-400 rounded-2xl px-4 py-3 text-xs sm:text-sm focus:outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/20"
                   />
                 </div>
 
-                {/* DUA PILIHAN VERIFIKASI FLEKSIBEL UNTUK MITRA (WARNA KONSISTEN) */}
-                <div className="pt-1">
-                  <label className="block text-xs font-bold text-slate-800 mb-2">
-                    Pilihan Kelengkapan Dokumen:
-                  </label>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {/* Opsi 1: Buka Toko Dulu */}
-                    <div
-                      onClick={() => setMitraKycChoice("later")}
-                      className={`p-4 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${mitraKycChoice === "later"
-                          ? "border-[#1683FF] bg-blue-50/60 shadow-2xs ring-2 ring-[#1683FF]/20"
-                          : "border-slate-200 hover:border-slate-300 bg-white"
-                        }`}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-[#1683FF] flex items-center gap-1">
-                          <Zap className="w-3 h-3 text-[#1683FF]" />
-                          Rekomendasi Mitra
-                        </span>
-                        {mitraKycChoice === "later" && <CheckCircle2 className="w-4 h-4 text-[#1683FF]" />}
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-xs text-slate-900">Buka Toko Dulu (KTP Nanti)</h4>
-                        <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                          Daftarkan toko dan langsung upload etalase alat rental Anda hari ini. Foto KTP asli dan rekening bank dapat dilengkapi nanti di dashboard sebelum pesanan pertama selesai.
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Opsi 2: Lengkapi KTP Sekarang */}
-                    <div
-                      onClick={() => setMitraKycChoice("now")}
-                      className={`p-4 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${mitraKycChoice === "now"
-                          ? "border-[#1683FF] bg-blue-50/60 shadow-2xs ring-2 ring-[#1683FF]/20"
-                          : "border-slate-200 hover:border-slate-300 bg-white"
-                        }`}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 flex items-center gap-1">
-                          <ShieldCheck className="w-3 h-3 text-slate-600" />
-                          Verifikasi Lengkap
-                        </span>
-                        {mitraKycChoice === "now" && <CheckCircle2 className="w-4 h-4 text-[#1683FF]" />}
-                      </div>
-                      <div>
-                        <h4 className="font-bold text-xs text-slate-900">Unggah KTP Pemilik Sekarang</h4>
-                        <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
-                          Bagi Anda yang sudah memiliki file foto KTP &amp; rekening bank siap unggah untuk mendapatkan badge Toko Resmi sejak awal.
-                        </p>
-                      </div>
-                    </div>
+                {/* Form Dokumen KTP & Rekening Wajib */}
+                <div className="p-4 rounded-2xl bg-slate-50/90 border border-slate-200 space-y-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Nomor Induk Kependudukan (NIK Pemilik 16 Digit) <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={16}
+                      placeholder="Contoh: 3201234567890001"
+                      value={formData.ownerNik}
+                      onChange={(e) => setFormData({ ...formData, ownerNik: e.target.value.replace(/\D/g, "") })}
+                      className="w-full bg-white border border-slate-200 text-slate-900 placeholder-slate-400 rounded-xl px-4 py-2.5 text-xs font-mono focus:outline-none focus:border-[#1683FF]"
+                    />
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">Wajib 16 digit angka sesuai KTP asli pemilik usaha</span>
                   </div>
-                </div>
-
-                {/* Form Dokumen KTP jika memilih 'now' */}
-                {mitraKycChoice === "now" && (
-                  <div className="p-4 rounded-2xl bg-slate-50/90 border border-slate-200 space-y-3 animate-in fade-in">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Nomor Induk Kependudukan (NIK Pemilik 16 Digit)
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        maxLength={16}
-                        placeholder="Contoh: 3201234567890001"
-                        value={formData.ownerNik}
-                        onChange={(e) => setFormData({ ...formData, ownerNik: e.target.value })}
-                        className="w-full bg-white border border-slate-200 text-slate-900 placeholder-slate-400 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-[#1683FF]"
-                      />
-                    </div>
 
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -766,7 +1016,6 @@ function MitraRegisterPageContent() {
                       </div>
                     </div>
                   </div>
-                )}
 
                 <div className="bg-blue-50 p-4 rounded-2xl border border-blue-200 flex items-start gap-3 text-xs text-slate-700">
                   <ShieldCheck className="w-5 h-5 text-[#1683FF] shrink-0 mt-0.5" />
@@ -819,7 +1068,7 @@ function MitraRegisterPageContent() {
 
       {/* Footer Info */}
       <div className="max-w-3xl w-full mx-auto text-center text-xs text-slate-400 z-10 mt-4">
-        &copy; {new Date().getFullYear()} Bantuin.id &middot; Portal Resmi Mitra &amp; Merchant Rental Komunitas
+        &copy; {new Date().getFullYear()} BantuinAja.id &middot; Portal Resmi Mitra &amp; Merchant Rental Komunitas
       </div>
 
     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   INITIAL_USER,
   INITIAL_REQUESTS,
@@ -24,8 +24,50 @@ import { formatIDR, formatExternalUrl } from "@/lib/utils";
 import { authService } from "@/lib/services/authService";
 import LocationPermissionModal from "@/components/modals/LocationPermissionModal";
 import { X } from "lucide-react";
+import { mergeRoomsPreservingOptimistic, markMessageAsDeleted } from "@/lib/chat/roomSync";
+import { supabase } from "@/lib/supabase/client";
 
 const AppContext = createContext(null);
+
+export function broadcastChatUpdate(targetRoomId) {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("bantuin_activity_updated"));
+    window.dispatchEvent(new Event("bantuin_chat_update"));
+    window.dispatchEvent(new Event("bantuin_notification_updated"));
+    try {
+      if (targetRoomId) {
+        const roomChannel = supabase.channel(`room-rt-${targetRoomId}`);
+        roomChannel.send({
+          type: "broadcast",
+          event: "chat_update",
+          payload: { roomId: targetRoomId, timestamp: Date.now() },
+        }).catch(() => null);
+      }
+    } catch (_) {}
+  }
+}
+
+
+function formatNotificationItem(n) {
+  return {
+    id: n.id,
+    title: n.title,
+    message: n.message,
+    desc: n.message,
+    type: n.type || "general",
+    category: n.type || "general",
+    link: n.link || "/activity",
+    unread: !n.isRead,
+    isRead: Boolean(n.isRead),
+    time: new Date(n.createdAt).toLocaleDateString("id-ID", {
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    createdAt: n.createdAt,
+  };
+}
 
 export function AppProvider({ children }) {
   // Current logged in user (null by default for guests)
@@ -42,9 +84,9 @@ export function AppProvider({ children }) {
     try {
       const token = await authService.getValidAccessToken();
       if (!token) {
-        setUserActivities([]);
-        setActiveActivitiesCount(0);
-        setCompletedActivitiesCount(0);
+        setUserActivities((prev) => (prev.length === 0 ? prev : []));
+        setActiveActivitiesCount((prev) => (prev === 0 ? prev : 0));
+        setCompletedActivitiesCount((prev) => (prev === 0 ? prev : 0));
         return;
       }
       const res = await fetch("/api/user/activities", {
@@ -53,20 +95,27 @@ export function AppProvider({ children }) {
       const json = await res.json();
       if (res.ok && json.success) {
         const items = json.data || [];
-        setUserActivities(items);
         const ongoing = items.filter((i) => i.isOngoing).length;
         const completed = items.filter((i) => i.isCompleted).length;
-        setActiveActivitiesCount(ongoing);
-        setCompletedActivitiesCount(completed);
+
+        setUserActivities((prev) => {
+          if (prev.length !== items.length) return items;
+          const isIdentical = prev.every((p, idx) => {
+            const item = items[idx];
+            return p.id === item?.id && p.status === item?.status && p.updatedAt === item?.updatedAt;
+          });
+          return isIdentical ? prev : items;
+        });
+
+        setActiveActivitiesCount((prev) => (prev === ongoing ? prev : ongoing));
+        setCompletedActivitiesCount((prev) => (prev === completed ? prev : completed));
       } else {
-        setUserActivities([]);
-        setActiveActivitiesCount(0);
-        setCompletedActivitiesCount(0);
+        setUserActivities((prev) => (prev.length === 0 ? prev : []));
+        setActiveActivitiesCount((prev) => (prev === 0 ? prev : 0));
+        setCompletedActivitiesCount((prev) => (prev === 0 ? prev : 0));
       }
     } catch {
-      setUserActivities([]);
-      setActiveActivitiesCount(0);
-      setCompletedActivitiesCount(0);
+      // silent fallback
     }
   };
 
@@ -74,7 +123,7 @@ export function AppProvider({ children }) {
     try {
       const token = await authService.getValidAccessToken();
       if (!token) {
-        setNotifications([]);
+        setNotifications((prev) => (prev.length === 0 ? prev : []));
         return;
       }
       const notifRes = await fetch("/api/notifications", {
@@ -87,25 +136,17 @@ export function AppProvider({ children }) {
           : Array.isArray(notifJson.data)
           ? notifJson.data
           : [];
-        const formatted = rawList.map((n) => ({
-          id: n.id,
-          title: n.title,
-          message: n.message,
-          desc: n.message,
-          type: n.type || "general",
-          category: n.type || "general",
-          link: n.link || "/activity",
-          unread: !n.isRead,
-          isRead: Boolean(n.isRead),
-          time: new Date(n.createdAt).toLocaleDateString("id-ID", {
-            day: "numeric",
-            month: "short",
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
-          createdAt: n.createdAt,
-        }));
-        setNotifications(formatted);
+
+        setNotifications((prev) => {
+          if (prev.length !== rawList.length) {
+            return rawList.map(formatNotificationItem);
+          }
+          const isIdentical = prev.every((p, idx) => {
+            const n = rawList[idx];
+            return p.id === n?.id && p.isRead === Boolean(n?.isRead);
+          });
+          return isIdentical ? prev : rawList.map(formatNotificationItem);
+        });
       }
     } catch {
       // silent fallback
@@ -180,7 +221,7 @@ export function AppProvider({ children }) {
           if (roomRes.ok) {
             const roomJson = await roomRes.json();
             if (roomJson.success && Array.isArray(roomJson.data) && isMounted) {
-              setOrderRooms(roomJson.data);
+              setOrderRooms((prev) => mergeRoomsPreservingOptimistic(roomJson.data, prev));
             }
           }
         } else if (isMounted) {
@@ -270,11 +311,57 @@ export function AppProvider({ children }) {
 
       // Sinkronkan data Sewa (rentals) resmi dari database
       try {
-        const rentRes = await fetch("/api/rentals?limit=50");
+        const rentRes = await fetch("/api/rentals?limit=100");
         if (rentRes.ok) {
           const rentJson = await rentRes.json();
-          if (rentJson.success && Array.isArray(rentJson.data) && rentJson.data.length > 0 && isMounted) {
-            setRentals(rentJson.data);
+          const rawRentals = Array.isArray(rentJson.data?.rentals)
+            ? rentJson.data.rentals
+            : Array.isArray(rentJson.data)
+            ? rentJson.data
+            : [];
+          if (rentJson.success && isMounted) {
+            const mapped = rawRentals.map((r) => ({
+              id: r.id,
+              title: r.title,
+              category: r.category,
+              dailyPrice: Number(r.dailyPrice),
+              pricePerDay: Number(r.dailyPrice),
+              depositAmount: Number(r.depositAmount || 0),
+              unit: r.unit || "/ hari",
+              photoUrl: r.photoUrls?.[0] || null,
+              photos: r.photoUrls || [],
+              ownerName: r.owner?.partnerBusinessName || r.owner?.fullName || "Mitra Sewa",
+              owner: {
+                id: r.owner?.id,
+                name: r.owner?.partnerBusinessName || r.owner?.fullName || "Mitra Sewa",
+                avatar: r.owner?.avatarUrl || null,
+                rating: Number(r.owner?.ratingAvg) || 5.0,
+                completedOrders: 0,
+              },
+              location: r.pickupLocation || r.owner?.campusName || "Indonesia",
+              address: r.pickupLocation || r.owner?.campusName || "Indonesia",
+              pickupLocation: r.pickupLocation || r.location || r.owner?.campusName || "Indonesia",
+              latitude: r.latitude,
+              longitude: r.longitude,
+              isVerifiedPartner: r.owner?.verificationStatus === "verified",
+              isSafeEscrow: true,
+              description: r.description,
+              stock: r.stockCount !== undefined ? Number(r.stockCount) : (r.stock !== undefined ? Number(r.stock) : 1),
+              stockCount: r.stockCount !== undefined ? Number(r.stockCount) : (r.stock !== undefined ? Number(r.stock) : 1),
+              stockStatus: r.stockStatus || (r.isAvailable !== false ? "Siap Sewa" : "Sedang Disewa"),
+              tag: r.tag || undefined,
+              includedItems: r.includedItems || "",
+              securityDeposit: r.securityDeposit || "",
+              ratingAvg: Number(r.ratingAvg) || 5.0,
+              ratingCount: r.ratingCount || 0,
+              totalRentedCount: r.totalRentedCount || r.completedRentals || r._count?.bookings || 0,
+              completedRentals: r.totalRentedCount || r.completedRentals || r._count?.bookings || 0,
+              reviews: [],
+              isPromoted: r.isPromoted || false,
+              packages: r.packages || [],
+              pricingMode: r.pricingMode || "single",
+            }));
+            setRentals(mapped);
           }
         }
       } catch (e) {
@@ -299,15 +386,30 @@ export function AppProvider({ children }) {
     window.addEventListener("bantuin_activity_updated", refreshUserActivities);
     window.addEventListener("bantuin_notification_updated", refreshNotifications);
 
-    // Polling periodik (12 detik) agar lonceng notifikasi & status aktivitas selalu segar
+    // Polling cerdas (15 detik): hanya berjalan saat tab aktif dan layar terlihat
     const pollInterval = setInterval(() => {
-      refreshNotifications();
-      refreshUserActivities();
-    }, 12000);
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        refreshNotifications();
+        refreshUserActivities();
+      }
+    }, 15000);
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        refreshNotifications();
+        refreshUserActivities();
+      }
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
 
     return () => {
       isMounted = false;
       clearInterval(pollInterval);
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      }
       window.removeEventListener("bantuin_auth_changed", syncAuthSession);
       window.removeEventListener("bantuin_activity_updated", refreshUserActivities);
       window.removeEventListener("bantuin_notification_updated", refreshNotifications);
@@ -317,13 +419,43 @@ export function AppProvider({ children }) {
   // ─── Voucher State ──────────────────────────────────────────────────────────
   const [vouchers, setVouchers] = useState(initialVouchers);
 
+  // Live voucher synchronization from PostgreSQL Database
+  const refreshVouchers = useCallback(async () => {
+    try {
+      const res = await fetch("/api/vouchers");
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+          setVouchers(json.data);
+          return json.data;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not fetch db vouchers:", e);
+    }
+    return [];
+  }, []);
+
+  useEffect(() => {
+    refreshVouchers();
+    if (typeof window !== "undefined") {
+      const handleVouchersUpdate = () => refreshVouchers();
+      window.addEventListener("bantuin_vouchers_updated", handleVouchersUpdate);
+      return () => {
+        window.removeEventListener("bantuin_vouchers_updated", handleVouchersUpdate);
+      };
+    }
+  }, [refreshVouchers]);
+
   /** Validate & apply a voucher. Returns { ok, discount, voucher, error } */
   const redeemVoucher = (code, category, amount, location = null) => {
-    const vc = vouchers.find((v) => v.code.toUpperCase() === code.trim().toUpperCase());
+    const vc = vouchers.find((v) => (v.code || "").toUpperCase() === (code || "").trim().toUpperCase());
     if (!vc) return { ok: false, error: "Kode voucher tidak ditemukan." };
     if (!vc.isActive) return { ok: false, error: "Voucher ini sudah tidak aktif." };
-    if (vc.quota - vc.usedCount <= 0) return { ok: false, error: "Kuota voucher sudah habis." };
-    if (new Date(vc.expiresAt) < new Date()) return { ok: false, error: "Voucher sudah kadaluarsa." };
+    const quota = vc.quota ?? 100;
+    const used = vc.usedCount ?? 0;
+    if (quota - used <= 0) return { ok: false, error: "Kuota voucher sudah habis." };
+    if (vc.expiresAt && new Date(vc.expiresAt) < new Date()) return { ok: false, error: "Voucher sudah kadaluarsa." };
     if (vc.appliesTo !== "all" && vc.appliesTo !== category)
       return { ok: false, error: `Voucher ini hanya berlaku untuk layanan ${vc.appliesTo}.` };
 
@@ -336,16 +468,20 @@ export function AppProvider({ children }) {
       };
     }
 
-    if (amount < vc.minOrder)
-      return { ok: false, error: `Minimum transaksi Rp ${vc.minOrder.toLocaleString("id-ID")} untuk voucher ini.` };
+    const minAmount = Number(vc.minOrder ?? vc.minTransaction ?? 0);
+    if (amount < minAmount)
+      return { ok: false, error: `Minimum transaksi Rp ${minAmount.toLocaleString("id-ID")} untuk voucher ini.` };
 
-    const rawDiscount =
-      vc.type === "percent" ? Math.round((vc.value / 100) * amount) : vc.value;
-    const discount = Math.min(rawDiscount, vc.maxDiscount);
+    const discountType = vc.type || (vc.discountType === "percentage" ? "percent" : "fixed");
+    const val = Number(vc.value ?? vc.discountValue ?? 0);
+    const maxDisc = Number(vc.maxDiscount ?? (discountType === "fixed" ? val : 50000));
+
+    const rawDiscount = discountType === "percent" ? Math.round((val / 100) * amount) : val;
+    const discount = Math.min(rawDiscount, maxDisc);
 
     // Increment usedCount
     setVouchers((prev) =>
-      prev.map((v) => (v.id === vc.id ? { ...v, usedCount: v.usedCount + 1 } : v))
+      prev.map((v) => (v.id === vc.id ? { ...v, usedCount: (v.usedCount || 0) + 1 } : v))
     );
     return { ok: true, discount, voucher: vc, error: null };
   };
@@ -361,6 +497,9 @@ export function AppProvider({ children }) {
       ...data,
     };
     setVouchers((prev) => [newVc, ...prev]);
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("bantuin_vouchers_updated"));
+    }
     return newVc;
   };
 
@@ -369,11 +508,17 @@ export function AppProvider({ children }) {
     setVouchers((prev) =>
       prev.map((v) => (v.id === id ? { ...v, isActive: !v.isActive } : v))
     );
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("bantuin_vouchers_updated"));
+    }
   };
 
   /** Admin: hapus voucher */
   const adminDeleteVoucher = (id) => {
     setVouchers((prev) => prev.filter((v) => v.id !== id));
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("bantuin_vouchers_updated"));
+    }
   };
   // ────────────────────────────────────────────────────────────────────────────
 
@@ -439,47 +584,137 @@ export function AppProvider({ children }) {
   // Datasets
   const [requests, setRequests] = useState(INITIAL_REQUESTS);
 
+  // Live requests synchronization from PostgreSQL Database
+  const refreshRequests = useCallback(async () => {
+    try {
+      const res = await fetch("/api/requests");
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setRequests(json.data);
+          return json.data;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not fetch db requests:", e);
+    }
+    return [];
+  }, []);
+
+  useEffect(() => {
+    refreshRequests();
+    if (typeof window !== "undefined") {
+      const handleRequestsUpdate = () => refreshRequests();
+      window.addEventListener("bantuin_requests_updated", handleRequestsUpdate);
+      return () => {
+        window.removeEventListener("bantuin_requests_updated", handleRequestsUpdate);
+      };
+    }
+  }, [refreshRequests]);
+
   // Helper to initialize initial rental reviews and stats
   const getInitialRentals = () => {
-    return INITIAL_RENTALS.map((r) => ({
+    return (INITIAL_RENTALS || []).map((r) => ({
       ...r,
-      totalRentedCount: r.totalRentedCount ?? r.owner?.completedOrders ?? 86,
-      ratingAvg: r.ratingAvg ?? 4.95,
-      ratingCount: r.ratingCount ?? 38,
-      stock: typeof r.stock === "number" ? r.stock : 3,
-      reviews: r.reviews && r.reviews.length > 0 ? r.reviews : [
-        {
-          id: `rev-init-${r.id}-1`,
-          userName: "Dimas Anggoro",
-          avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80",
-          rating: 5,
-          date: "2 hari yang lalu",
-          item: r.title,
-          comment: "Unit bersih banget, sensor kinclong no debu. Baterai dikasih 2 buah awet seharian buat hunting wisuda. Pelayanan ramah dan tempatnya gampang dicari!",
-        },
-        {
-          id: `rev-init-${r.id}-2`,
-          userName: "Natasha Caroline",
-          avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=120&q=80",
-          rating: 5,
-          date: "1 minggu yang lalu",
-          item: r.title,
-          comment: "Sangat terbantu buat sewa perlengkapan tugas dan wisuda kampus. Rekber Bantuin bikin tenang gak takut uang hilang. Tokonya amanah dan tepat waktu!",
-        },
-        {
-          id: `rev-init-${r.id}-3`,
-          userName: "Rifky Fauzi",
-          avatar: "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=120&q=80",
-          rating: 5,
-          date: "2 minggu yang lalu",
-          item: r.title,
-          comment: "Unit dalam kondisi sangat prima. Dipandu cara penggunaan dan pengecekan fisik bersama mas-mas tokonya. Top rekomen buat vendor sewa di sini.",
-        }
-      ]
+      totalRentedCount: r.totalRentedCount ?? r.owner?.completedOrders ?? 0,
+      ratingAvg: r.ratingAvg ?? 5.0,
+      ratingCount: r.ratingCount ?? 0,
+      stock: typeof r.stock === "number" ? r.stock : 1,
+      reviews: Array.isArray(r.reviews) ? r.reviews : [],
+      packages: r.packages || [],
+      pricingMode: r.pricingMode || "single",
     }));
   };
 
   const [rentals, setRentals] = useState(getInitialRentals);
+
+  // Live rental catalog synchronization from PostgreSQL Database
+  const refreshRentals = useCallback(async () => {
+    try {
+      const res = await fetch("/api/rentals?limit=100");
+      if (res.ok) {
+        const json = await res.json();
+        const rawRentals = Array.isArray(json.data?.rentals)
+          ? json.data.rentals
+          : Array.isArray(json.data)
+          ? json.data
+          : [];
+
+        if (json.success) {
+          const dbRentals = rawRentals.map((r) => ({
+            id: r.id,
+            title: r.title,
+            category: r.category,
+            dailyPrice: Number(r.dailyPrice),
+            pricePerDay: Number(r.dailyPrice),
+            depositAmount: Number(r.depositAmount || 0),
+            unit: r.unit || "/ hari",
+            photoUrl: r.photoUrls?.[0] || null,
+            photos: r.photoUrls || [],
+            ownerName: r.owner?.partnerBusinessName || r.owner?.fullName || "Mitra Sewa",
+            owner: {
+              id: r.owner?.id,
+              name: r.owner?.partnerBusinessName || r.owner?.fullName || "Mitra Sewa",
+              avatar: r.owner?.avatarUrl || null,
+              rating: Number(r.owner?.ratingAvg) || 5.0,
+              completedOrders: 0,
+            },
+            location: r.pickupLocation || r.owner?.campusName || "Indonesia",
+            address: r.pickupLocation || r.owner?.campusName || "Indonesia",
+            pickupLocation: r.pickupLocation || r.location || r.owner?.campusName || "Indonesia",
+            latitude: r.latitude,
+            longitude: r.longitude,
+            isVerifiedPartner: r.owner?.verificationStatus === "verified",
+            isSafeEscrow: true,
+            description: r.description,
+            stock: r.stockCount !== undefined ? Number(r.stockCount) : (r.stock !== undefined ? Number(r.stock) : 1),
+            stockCount: r.stockCount !== undefined ? Number(r.stockCount) : (r.stock !== undefined ? Number(r.stock) : 1),
+            stockStatus: r.stockStatus || (r.isAvailable !== false ? "Siap Sewa" : "Sedang Disewa"),
+            tag: r.tag || undefined,
+            includedItems: r.includedItems || "",
+            securityDeposit: r.securityDeposit || "",
+            ratingAvg: Number(r.ratingAvg) || 5.0,
+            ratingCount: r.ratingCount || 0,
+            totalRentedCount: r.totalRentedCount || r.completedRentals || r._count?.bookings || 0,
+            completedRentals: r.totalRentedCount || r.completedRentals || r._count?.bookings || 0,
+            reviews: [],
+            isPromoted: r.isPromoted || false,
+            packages: r.packages || [],
+            pricingMode: r.pricingMode || "single",
+          }));
+
+          setRentals((prev) => {
+            const map = new Map();
+            (prev || []).forEach((item) => map.set(item.id, item));
+            dbRentals.forEach((item) => {
+              const existing = map.get(item.id) || {};
+              map.set(item.id, { ...existing, ...item });
+            });
+            return Array.from(map.values()).filter(
+              (item) => !String(item.id).startsWith("rent-") && !String(item.photoUrl || "").includes("images.unsplash.com")
+            );
+          });
+          return dbRentals;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not fetch db rentals:", e);
+    }
+    return [];
+  }, []);
+
+  useEffect(() => {
+    refreshRentals();
+    if (typeof window !== "undefined") {
+      const handleRentalsUpdate = () => refreshRentals();
+      window.addEventListener("bantuin_rentals_updated", handleRentalsUpdate);
+      window.addEventListener("bantuin_rental_updated", handleRentalsUpdate);
+      return () => {
+        window.removeEventListener("bantuin_rentals_updated", handleRentalsUpdate);
+        window.removeEventListener("bantuin_rental_updated", handleRentalsUpdate);
+      };
+    }
+  }, [refreshRentals]);
 
   // Hydrate rentals from localStorage on mount (hanya jika bukan mock dummy)
   useEffect(() => {
@@ -489,7 +724,10 @@ export function AppProvider({ children }) {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const hasDummy = parsed.some((r) => r.id === "rent-1" || r.id === "rent-2");
+          const hasDummy = parsed.some((r) => 
+            String(r.id).startsWith("rent-") || 
+            String(r.photoUrl || "").includes("images.unsplash.com")
+          );
           if (!hasDummy) {
             setRentals(parsed);
           } else {
@@ -537,8 +775,10 @@ export function AppProvider({ children }) {
     if (typeof window !== "undefined") {
       const handleServiceUpdate = () => refreshServices();
       window.addEventListener("bantuin_service_updated", handleServiceUpdate);
+      window.addEventListener("bantuin_services_updated", handleServiceUpdate);
       return () => {
         window.removeEventListener("bantuin_service_updated", handleServiceUpdate);
+        window.removeEventListener("bantuin_services_updated", handleServiceUpdate);
       };
     }
   }, [refreshServices]);
@@ -584,6 +824,41 @@ export function AppProvider({ children }) {
       console.warn("Could not sync orderRooms state:", e);
     }
   }, [orderRooms]);
+
+  const refreshChatRooms = useCallback(async () => {
+    try {
+      const token = await authService.getValidAccessToken();
+      if (!token) return [];
+      const res = await fetch("/api/chat/rooms", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setOrderRooms((prev) => mergeRoomsPreservingOptimistic(json.data, prev));
+          return json.data;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not fetch database chat rooms:", e);
+    }
+    return [];
+  }, []);
+
+  useEffect(() => {
+    refreshChatRooms();
+    if (typeof window !== "undefined") {
+      const handleChatUpdate = () => refreshChatRooms();
+      window.addEventListener("bantuin_chat_update", handleChatUpdate);
+      window.addEventListener("bantuin_order_created", handleChatUpdate);
+      window.addEventListener("bantuin_activity_updated", handleChatUpdate);
+      return () => {
+        window.removeEventListener("bantuin_chat_update", handleChatUpdate);
+        window.removeEventListener("bantuin_order_created", handleChatUpdate);
+        window.removeEventListener("bantuin_activity_updated", handleChatUpdate);
+      };
+    }
+  }, [refreshChatRooms]);
 
   const [activeOrderRoomId, setActiveOrderRoomId] = useState("order-room-dedi");
   const [bantuinPoints] = useState(BANTUIN_POINTS);
@@ -799,7 +1074,7 @@ export function AppProvider({ children }) {
     }
   };
 
-  const markChatRoomAsRead = (roomId) => {
+  const markChatRoomAsRead = async (roomId) => {
     setOrderRooms((prev) =>
       prev.map((room) => {
         if (room.id === roomId || room.orderRoomId === roomId) {
@@ -809,6 +1084,16 @@ export function AppProvider({ children }) {
         return room;
       })
     );
+    try {
+      const token = await authService.getValidAccessToken();
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      await fetch("/api/chat/messages", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ action: "mark_read", roomId }),
+      });
+    } catch (_) {}
   };
 
   const markAllChatRoomsAsRead = () => {
@@ -1237,12 +1522,14 @@ export function AppProvider({ children }) {
   // 4. Update Order Room Status
   const updateOrderStatus = async (orderRoomId, newStatus) => {
     const isPaid = newStatus === "paid_escrow";
+    const isStart = newStatus === "in_progress";
     setOrderRooms((prev) =>
       prev.map((room) => {
-        if (room.id === orderRoomId) {
+        if (room.id === orderRoomId || room.orderRoomId === orderRoomId) {
           return {
             ...room,
             orderStatus: newStatus,
+            ...(isStart ? { startedAt: new Date().toISOString() } : {}),
             ...(isPaid ? { paymentStatus: "PAID", paidAt: new Date().toISOString() } : {}),
           };
         }
@@ -1299,17 +1586,30 @@ export function AppProvider({ children }) {
         : [];
     const digitalFiles = isObj ? proofData.digitalFiles || [] : [];
     const submissionUrl = isObj ? proofData.submissionUrl || "" : "";
-    const finalNotes = notes || (isObj ? proofData.notes : "") || "Bukti pengerjaan berhasil diserahkan.";
+    const rawNotes = notes || (isObj ? proofData.notes : "") || "Bukti pengerjaan berhasil diserahkan.";
+
+    const fileUrls = digitalFiles.map((f) => f.url || f.dataUrl).filter((u) => u && typeof u === "string" && !u.startsWith("data:"));
+    const combinedPhotoUrls = Array.from(new Set([...allPhotoUrls, ...fileUrls]));
+
+    let completeNotes = rawNotes;
+    if (submissionUrl && submissionUrl !== "-" && !completeNotes.includes(submissionUrl)) {
+      completeNotes = `${submissionUrl}\n${completeNotes}`;
+    }
 
     setOrderRooms((prev) =>
       prev.map((room) => {
-        if (room.id === orderRoomId) {
+        if (
+          room.id === orderRoomId ||
+          room.orderRoomId === orderRoomId ||
+          room.requestId === orderRoomId ||
+          (Array.isArray(room.aliases) && room.aliases.includes(orderRoomId))
+        ) {
           return {
             ...room,
-            proofPhotos: allPhotoUrls.length > 0 ? [...allPhotoUrls, ...(room.proofPhotos || [])] : (room.proofPhotos || []),
+            proofPhotos: combinedPhotoUrls.length > 0 ? Array.from(new Set(combinedPhotoUrls)) : (room.proofPhotos || []),
             digitalFiles: digitalFiles.length > 0 ? digitalFiles : (room.digitalFiles || []),
-            submissionUrl: submissionUrl || room.submissionUrl || "",
-            proofNotes: finalNotes,
+            submissionUrl: submissionUrl && submissionUrl !== "-" ? submissionUrl : (room.submissionUrl || ""),
+            proofNotes: completeNotes,
             orderStatus: "proof_submitted",
           };
         }
@@ -1327,15 +1627,19 @@ export function AppProvider({ children }) {
         headers,
         body: JSON.stringify({
           orderRoomId,
+          requestId: (isObj && proofData.requestId) || undefined,
           status: "proof_submitted",
-          proofPhotoUrls: allPhotoUrls,
-          proofNotes: finalNotes,
+          proofPhotoUrls: combinedPhotoUrls,
+          proofNotes: completeNotes,
+          submissionUrl: submissionUrl && submissionUrl !== "-" ? submissionUrl : undefined,
+          digitalFiles: digitalFiles.length > 0 ? digitalFiles : undefined,
         }),
       });
 
       if (typeof window !== "undefined") {
         window.dispatchEvent(new Event("bantuin_activity_updated"));
         window.dispatchEvent(new Event("bantuin_notification_updated"));
+        window.dispatchEvent(new Event("bantuin_chat_update"));
       }
     } catch (err) {
       console.warn("Could not sync proof_submitted status:", err);
@@ -1376,7 +1680,7 @@ export function AppProvider({ children }) {
               feedback: reviewFeedback,
               createdAt: new Date().toISOString(),
             },
-            messages: [
+            messages: reviewData?.skipChat ? (room.messages || []) : [
               ...(room.messages || []),
               {
                 id: `msg-${Date.now()}`,
@@ -1414,6 +1718,8 @@ export function AppProvider({ children }) {
       if (typeof window !== "undefined") {
         window.dispatchEvent(new Event("bantuin_activity_updated"));
         window.dispatchEvent(new Event("bantuin_notification_updated"));
+        window.dispatchEvent(new Event("bantuin_chat_update"));
+        broadcastChatUpdate(orderRoomId);
       }
     } catch (err) {
       console.warn("Could not sync completed status:", err);
@@ -1815,7 +2121,7 @@ export function AppProvider({ children }) {
       })
     );
 
-    // Build attachmentUrls from proofPhotos, photos, or attachment in extraData
+    // Build attachmentUrls from proofPhotos, photos, attachment, or proofData files in extraData
     const attachmentUrls = extraData?.attachmentUrls?.length
       ? extraData.attachmentUrls
       : extraData?.photos?.length
@@ -1824,19 +2130,30 @@ export function AppProvider({ children }) {
           ? extraData.proofPhotos
           : extraData?.attachment?.url
             ? [extraData.attachment.url]
-            : [];
+            : extraData?.proofData?.files?.map((f) => f.url).filter(Boolean) || [];
 
-    // Encode metadata flags into message for retrieval
     const metaFields = {};
     if (clientMessageId) metaFields.clientMessageId = clientMessageId;
     if (extraData?.isTaskProof) metaFields.isTaskProof = true;
     if (extraData?.isHandoverProof) metaFields.isHandoverProof = true;
+    if (extraData?.isReturnProof) metaFields.isReturnProof = true;
     if (extraData?.isTaskCompletion) metaFields.isTaskCompletion = true;
+    if (extraData?.isJasaDeliverablesProof) metaFields.isJasaDeliverablesProof = true;
+    if (extraData?.proofData) metaFields.proofData = extraData.proofData;
+    if (extraData?.isRevisionRequest) metaFields.isRevisionRequest = true;
+    if (extraData?.isJasaCompletion) metaFields.isJasaCompletion = true;
+    if (extraData?.completionData) metaFields.completionData = extraData.completionData;
+    if (extraData?.isSystemAnnouncement) metaFields.isSystemAnnouncement = true;
     if (extraData?.notes) metaFields.notes = extraData.notes;
     if (extraData?.proofPhotos) metaFields.proofPhotos = extraData.proofPhotos;
     if (extraData?.photos) metaFields.photos = extraData.photos;
+    if (extraData?.digitalFiles) metaFields.digitalFiles = extraData.digitalFiles;
+    if (extraData?.submissionUrl) metaFields.submissionUrl = extraData.submissionUrl;
+    if (extraData?.isOnline !== undefined) metaFields.isOnline = extraData.isOnline;
     if (extraData?.attachment) metaFields.attachment = extraData.attachment;
     if (extraData?.imageUrl) metaFields.photos = [extraData.imageUrl];
+    if (extraData?.rating) metaFields.rating = extraData.rating;
+    if (extraData?.comment) metaFields.comment = extraData.comment;
 
     const metaSuffix = Object.keys(metaFields).length > 0
       ? `||META||${JSON.stringify(metaFields)}`
@@ -1867,12 +2184,29 @@ export function AppProvider({ children }) {
           // Rekonsiliasi: ganti ID optimistik sementara dengan ID UUID permanen dari PostgreSQL
           setOrderRooms((prev) =>
             prev.map((room) => {
-              if (room.id === orderRoomId || room.orderRoomId === orderRoomId) {
+              if (
+                room.id === orderRoomId ||
+                room.orderRoomId === orderRoomId ||
+                room.requestId === orderRoomId ||
+                (Array.isArray(room.aliases) && room.aliases.includes(orderRoomId))
+              ) {
                 const updatedMessages = (room.messages || []).map((m) => {
                   if (m.clientMessageId === clientMessageId || m.id === clientMessageId) {
                     return {
                       ...m,
                       ...serverMsg,
+                      isTaskProof: m.isTaskProof || serverMsg.isTaskProof || false,
+                      isHandoverProof: m.isHandoverProof || serverMsg.isHandoverProof || false,
+                      isJasaDeliverablesProof: m.isJasaDeliverablesProof || serverMsg.isJasaDeliverablesProof || false,
+                      proofData: m.proofData || serverMsg.proofData || null,
+                      isRevisionRequest: m.isRevisionRequest || serverMsg.isRevisionRequest || false,
+                      isJasaCompletion: m.isJasaCompletion || serverMsg.isJasaCompletion || false,
+                      completionData: m.completionData || serverMsg.completionData || null,
+                      isOnline: m.isOnline !== undefined ? m.isOnline : (serverMsg.isOnline !== undefined ? serverMsg.isOnline : false),
+                      digitalFiles: (Array.isArray(m.digitalFiles) && m.digitalFiles.length > 0) ? m.digitalFiles : (serverMsg.digitalFiles || []),
+                      submissionUrl: m.submissionUrl || serverMsg.submissionUrl || "",
+                      proofPhotos: (Array.isArray(m.proofPhotos) && m.proofPhotos.length > 0) ? m.proofPhotos : (serverMsg.proofPhotos || []),
+                      notes: m.notes || serverMsg.notes || "",
                       id: serverMsg.id, // UUID resmi dari database
                       clientMessageId,
                       isOptimistic: false,
@@ -1885,6 +2219,14 @@ export function AppProvider({ children }) {
               return room;
             })
           );
+          broadcastChatUpdate(orderRoomId);
+          return serverMsg;
+        }
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        console.warn("POST /api/chat/messages failed:", res.status, errJson);
+        if (errJson?.error) {
+          addToast("Gagal Mengirim Pesan", errJson.error, "error");
         }
       }
     } catch (err) {
@@ -1898,45 +2240,76 @@ export function AppProvider({ children }) {
 
   // 7b. Delete Chat Message
   const deleteChatMessage = async (orderRoomId, messageId) => {
+    // Record tombstone immediately to prevent asynchronous background sync from resurrecting it
+    markMessageAsDeleted(messageId);
+
+    // Optimistically remove from state immediately
     setOrderRooms((prev) =>
       prev.map((room) => {
-        if (room.id === orderRoomId) {
+        if (
+          room.id === orderRoomId ||
+          room.orderRoomId === orderRoomId ||
+          room.requestId === orderRoomId ||
+          (Array.isArray(room.aliases) && room.aliases.includes(orderRoomId))
+        ) {
           return {
             ...room,
-            messages: (room.messages || []).filter((msg) => msg.id !== messageId),
+            messages: (room.messages || []).filter((msg) => msg.id !== messageId && msg.clientMessageId !== messageId),
           };
         }
         return room;
       })
     );
-    addToast("Pesan Dihapus", "Pesan telah berhasil dihapus.");
 
     try {
       const token = await authService.getValidAccessToken();
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      await fetch(`/api/chat/messages?messageId=${encodeURIComponent(messageId)}`, {
+      const res = await fetch(`/api/chat/messages?messageId=${encodeURIComponent(messageId)}`, {
         method: "DELETE",
         headers,
       });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) {
+        addToast("Gagal Menghapus", json.error || "Pesan tidak dapat dihapus.", "warning");
+        return { success: false, error: json.error };
+      }
+
+      addToast("Pesan Dihapus", "Pesan telah berhasil dihapus.", "success");
+      return { success: true };
     } catch (e) {
       console.warn("deleteChatMessage API error:", e);
+      addToast("Gagal Menghapus", "Terjadi kesalahan koneksi saat menghapus pesan.", "error");
+      return { success: false, error: e.message };
     }
   };
 
   // 7c. Delete Entire Chat Room / Conversation (Hapus Khusus Satu Pihak)
   const deleteChatRoom = async (orderRoomId) => {
-    setOrderRooms((prev) => prev.filter((room) => room.id !== orderRoomId && room.orderRoomId !== orderRoomId));
-    addToast("Obrolan Dihapus", "Obrolan berhasil dihapus dari daftar Anda.");
+    if (!orderRoomId) return { success: false, error: "ID obrolan tidak valid." };
 
     try {
       const token = await authService.getValidAccessToken();
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      await fetch(`/api/chat/rooms?roomId=${encodeURIComponent(orderRoomId)}`, {
+      const res = await fetch(`/api/chat/rooms?roomId=${encodeURIComponent(orderRoomId)}`, {
         method: "DELETE",
         headers,
       });
+
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok || !json.success) {
+        const errorMsg = json.error || "Gagal menghapus ruang obrolan.";
+        addToast("Tidak Dapat Dihapus", errorMsg, "warning");
+        return { success: false, error: errorMsg };
+      }
+
+      setOrderRooms((prev) => prev.filter((room) => room.id !== orderRoomId && room.orderRoomId !== orderRoomId));
+      addToast("Obrolan Dihapus", "Obrolan berhasil dihapus dari daftar Anda.", "success");
+      return { success: true };
     } catch (e) {
       console.warn("deleteChatRoom API error:", e);
+      addToast("Gagal Menghapus", "Terjadi kesalahan koneksi saat menghapus obrolan.", "error");
+      return { success: false, error: e.message };
     }
   };
 
@@ -2245,47 +2618,30 @@ export function AppProvider({ children }) {
     return newRoom;
   };
 
-  const confirmRentalHandover = (roomId, handoverProof = {}) => {
+  const confirmRentalHandover = async (roomId, handoverProof = {}, options = {}) => {
+    const shouldSkipChat = Boolean(handoverProof?.skipChat || options?.skipChat);
+    const defaultPhotos = [
+      "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=800&q=80"
+    ];
+
+    const nowDate = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+    const nowTime = new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }).replace(".", ":");
+
+    const currentRoom = (orderRooms || []).find((r) => r.id === roomId || r.orderRoomId === roomId || (Array.isArray(r.aliases) && r.aliases.includes(roomId)));
+
+    const rawPhotos = handoverProof.photos && handoverProof.photos.length > 0
+      ? handoverProof.photos
+      : (currentRoom?.rentalDetails?.photoUrl ? [currentRoom.rentalDetails.photoUrl] : defaultPhotos);
+    const notes = handoverProof.notes || "Kondisi fisik alat, fungsi tombol/sensor, dan kelengkapan aksesoris (baterai, charger, tas) telah diverifikasi bersama pihak toko dalam kondisi prima.";
+
     setOrderRooms((prev) =>
       prev.map((r) => {
-        if (r.id === roomId) {
-          const defaultPhotos = [
-            r.rentalDetails?.photoUrl || "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=800&q=80"
-          ];
-          const rawPhotos = handoverProof.photos && handoverProof.photos.length > 0
-            ? handoverProof.photos
-            : defaultPhotos;
-          const notes = handoverProof.notes || "Kondisi fisik alat, fungsi tombol/sensor, dan kelengkapan aksesoris (baterai, charger, tas) telah diverifikasi bersama pihak toko dalam kondisi prima.";
-
-          const nowDate = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
-          const nowTime = new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
-
-          const updatedMessages = [
-            ...r.messages,
-            {
-              id: `msg-hnd-${Date.now()}`,
-              senderId: "system",
-              senderName: "Bantuin System",
-              message: `Serah terima alat berhasil dikonfirmasi!\nKondisi fisik unit telah diverifikasi bersama pihak toko. Masa sewa sekarang berstatus AKTIF. Bukti foto baseline kondisi fisik alat tersimpan permanen di ruang obrolan ini sebagai dokumen serah terima resmi.`,
-              timestamp: nowTime,
-              isSystem: true,
-              isHandoverProof: true,
-              proofData: {
-                title: "Bukti Baseline Serah Terima Fisik",
-                unitName: r.rentalDetails?.unitName || r.requestTitle || "Unit Alat Sewa",
-                photos: rawPhotos,
-                notes: notes,
-                confirmedAt: `${nowDate}, ${nowTime}`,
-                depositHeld: r.depositAmount || 500000,
-                idHeld: "1 Identitas Fisik Asli (KTP/KTM/SIM) dititipkan di toko",
-                storeName: r.helper?.name || "Toko Mitra",
-                renterName: r.requester?.name || currentUser.fullName || "Penyewa"
-              }
-            }
-          ];
+        if (r.id === roomId || r.orderRoomId === roomId || (Array.isArray(r.aliases) && r.aliases.includes(roomId))) {
           return {
             ...r,
             orderStatus: "item_handed_over",
+            status: "item_handed_over",
+            stage: "active",
             lastUpdated: "Baru saja",
             handoverProof: {
               photos: rawPhotos,
@@ -2293,75 +2649,80 @@ export function AppProvider({ children }) {
               timestamp: new Date().toISOString(),
               confirmedAt: `${nowDate}, ${nowTime}`
             },
-            messages: updatedMessages,
           };
         }
         return r;
       })
     );
 
-    (async () => {
+    // 1. Sinkronisasi status order ke DB terlebih dahulu
+    try {
+      const token = await authService.getValidAccessToken();
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      await fetch("/api/chat/rooms", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          orderRoomId: roomId,
+          status: "item_handed_over",
+          proofPhotoUrls: rawPhotos,
+          proofNotes: notes,
+        }),
+      });
+      broadcastChatUpdate(roomId);
+    } catch (err) {
+      console.warn("Could not sync rental handover to DB:", err);
+    }
+
+    // 2. Kirim pesan bukti serah terima resmi jika tidak di-skip (jika dipanggil via modal, modal akan mengirim setelah tertutup)
+    if (!shouldSkipChat) {
+      const handoverMsg = `Serah terima alat berhasil dikonfirmasi!\nKondisi fisik unit telah diverifikasi bersama pihak toko. Masa sewa sekarang berstatus AKTIF. Bukti foto baseline kondisi fisik alat tersimpan permanen di ruang obrolan ini sebagai dokumen serah terima resmi.`;
       try {
-        const token = await authService.getValidAccessToken();
-        const headers = { "Content-Type": "application/json" };
-        if (token) headers.Authorization = `Bearer ${token}`;
-        await fetch("/api/chat/rooms", {
-          method: "PATCH",
-          headers,
-          body: JSON.stringify({
-            orderRoomId: roomId,
-            status: "item_handed_over",
-          }),
+        await sendChatMessage(roomId, handoverMsg, {
+          isSystem: true,
+          senderName: "Bantuin System",
+          isHandoverProof: true,
+          proofData: {
+            title: "Bukti Baseline Serah Terima Fisik",
+            unitName: currentRoom?.rentalDetails?.unitName || currentRoom?.requestTitle || "Unit Alat Sewa",
+            photos: rawPhotos,
+            notes: notes,
+            confirmedAt: `${nowDate}, ${nowTime}`,
+            depositHeld: Number(currentRoom?.depositAmount ?? currentRoom?.rentalDetails?.depositFee ?? 0),
+            idHeld: "1 Identitas Fisik Asli (KTP/KTM/SIM) dititipkan di toko",
+            storeName: currentRoom?.helper?.name || "Toko Mitra",
+            renterName: currentRoom?.requester?.name || currentUser?.fullName || "Penyewa"
+          },
+          photos: rawPhotos,
+          proofPhotos: rawPhotos,
         });
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new Event("bantuin_activity_updated"));
-          window.dispatchEvent(new Event("bantuin_chat_update"));
-          window.dispatchEvent(new Event("bantuin_notification_updated"));
-        }
-      } catch (err) {
-        console.warn("Could not sync rental handover to DB:", err);
+      } catch (e) {
+        console.warn("Could not send handover chat message:", e);
       }
-    })();
+    }
 
     addToast("Serah Terima Dikonfirmasi!", "Foto bukti fisik tersimpan di obrolan & masa sewa aktif.");
   };
 
-  const confirmRentalReturn = (roomId, returnProof = {}) => {
-    let refundAmount = 0;
+  const confirmRentalReturn = async (roomId, returnProof = {}, options = {}) => {
+    const shouldSkipChat = Boolean(returnProof?.skipChat || options?.skipChat);
+    const nowDate = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+    const nowTime = new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }).replace(".", ":");
+
+    const currentRoom = (orderRooms || []).find((r) => r.id === roomId || r.orderRoomId === roomId || (Array.isArray(r.aliases) && r.aliases.includes(roomId)));
+    const handoverMsg = (currentRoom?.messages || []).find((m) => m.isHandoverProof && m.proofData?.depositHeld);
+    const refundAmount = Number(currentRoom?.depositAmount ?? currentRoom?.rentalDetails?.depositFee ?? handoverMsg?.proofData?.depositHeld ?? 0);
+    const returnPhotos = returnProof.photos || [];
+    const returnNotes = returnProof.notes || "Pemeriksaan akhir selesai. Unit dikembalikan lengkap & tanpa kerusakan.";
+
     setOrderRooms((prev) =>
       prev.map((r) => {
-        if (r.id === roomId) {
-          refundAmount = r.depositAmount || 0;
-          const returnPhotos = returnProof.photos || [];
-          const returnNotes = returnProof.notes || "Pemeriksaan akhir selesai. Unit dikembalikan lengkap & tanpa kerusakan.";
-
-          const nowDate = new Date().toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
-          const nowTime = new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
-
-          const updatedMessages = [
-            ...r.messages,
-            {
-              id: `msg-ret-${Date.now()}`,
-              senderId: "system",
-              senderName: "Bantuin System",
-              message: `Pengembalian alat telah selesai diperiksa & diverifikasi oleh pihak toko mitra.\nHak sewa toko sebesar Rp${((r.rentalFeeAmount || 150000) - Math.round((r.rentalFeeAmount || 150000) * 0.08)).toLocaleString('id-ID')} telah beralih ke status AVAILABLE (siap ditarik).\nDeposit jaminan sebesar ${formatIDR(refundAmount)} berstatus REFUND_PENDING menunggu transfer manual admin ke rekening bank Anda.`,
-              timestamp: nowTime,
-              isSystem: true,
-              isReturnProof: true,
-              proofData: {
-                title: "Bukti Pengembalian & Verifikasi Alat",
-                unitName: r.rentalDetails?.unitName || r.requestTitle || "Unit Alat Sewa",
-                refundAmount: refundAmount,
-                notes: returnNotes,
-                photos: returnPhotos,
-                confirmedAt: `${nowDate}, ${nowTime}`,
-                idReturned: "Identitas Fisik Asli (KTP/KTM) telah diserahkan kembali ke penyewa"
-              }
-            }
-          ];
+        if (r.id === roomId || r.orderRoomId === roomId || (Array.isArray(r.aliases) && r.aliases.includes(roomId))) {
           return {
             ...r,
             orderStatus: "returned",
+            status: "returned",
             xenditStatus: "PAYOUT_RELEASED",
             lastUpdated: "Baru saja",
             returnProof: {
@@ -2370,16 +2731,13 @@ export function AppProvider({ children }) {
               timestamp: new Date().toISOString(),
               confirmedAt: `${nowDate}, ${nowTime}`
             },
-            messages: updatedMessages,
           };
         }
         return r;
       })
     );
 
-    // Release owner rental fee to AVAILABLE balance
-    const targetRoom = orderRooms.find((r) => r.id === roomId);
-    const rentFee = targetRoom?.rentalFeeAmount || 150000;
+    const rentFee = Number(currentRoom?.rentalFeeAmount ?? currentRoom?.rentalDetails?.rentalFee ?? (currentRoom?.lockedAmount && currentRoom.lockedAmount > refundAmount ? currentRoom.lockedAmount - refundAmount : currentRoom?.lockedAmount) ?? 0);
     const platFee = Math.round(rentFee * 0.08);
     const ownerPayout = rentFee - platFee;
     setMitraPendingBalance((prev) => Math.max(0, prev - ownerPayout));
@@ -2393,33 +2751,56 @@ export function AppProvider({ children }) {
       )
     );
 
-    (async () => {
+    // 1. Sinkronisasi status order ke DB terlebih dahulu
+    try {
+      const token = await authService.getValidAccessToken();
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      await fetch("/api/chat/rooms", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          orderRoomId: roomId,
+          status: "returned",
+          proofPhotoUrls: returnPhotos,
+          proofNotes: returnNotes,
+        }),
+      });
+      broadcastChatUpdate(roomId);
+    } catch (err) {
+      console.warn("Could not sync rental return to DB:", err);
+    }
+
+    // 2. Kirim pesan bukti pengembalian jika tidak di-skip
+    if (!shouldSkipChat) {
+      const returnMsg = `Pengembalian alat telah selesai diperiksa & diverifikasi oleh pihak toko mitra.\nHak sewa toko sebesar Rp${ownerPayout.toLocaleString('id-ID')} telah beralih ke status AVAILABLE (siap ditarik).\nDeposit jaminan sebesar ${formatIDR(refundAmount)} berstatus REFUND_PENDING menunggu transfer manual admin ke rekening bank Anda.`;
       try {
-        const token = await authService.getValidAccessToken();
-        const headers = { "Content-Type": "application/json" };
-        if (token) headers.Authorization = `Bearer ${token}`;
-        await fetch("/api/chat/rooms", {
-          method: "PATCH",
-          headers,
-          body: JSON.stringify({
-            orderRoomId: roomId,
-            status: "returned",
-          }),
+        await sendChatMessage(roomId, returnMsg, {
+          isSystem: true,
+          senderName: "Bantuin System",
+          isReturnProof: true,
+          proofData: {
+            title: "Bukti Pengembalian & Verifikasi Alat",
+            unitName: currentRoom?.rentalDetails?.unitName || currentRoom?.requestTitle || "Unit Alat Sewa",
+            refundAmount: refundAmount,
+            notes: returnNotes,
+            photos: returnPhotos,
+            confirmedAt: `${nowDate}, ${nowTime}`,
+            idReturned: "Identitas Fisik Asli (KTP/KTM) telah diserahkan kembali ke penyewa"
+          },
+          photos: returnPhotos,
+          proofPhotos: returnPhotos,
         });
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new Event("bantuin_activity_updated"));
-          window.dispatchEvent(new Event("bantuin_chat_update"));
-          window.dispatchEvent(new Event("bantuin_notification_updated"));
-        }
-      } catch (err) {
-        console.warn("Could not sync rental return to DB:", err);
+      } catch (e) {
+        console.warn("Could not send return chat message:", e);
       }
-    })();
+    }
 
     addToast("Pemeriksaan Selesai!", `Hak sewa pemilik kini dapat dicairkan. Deposit ${formatIDR(refundAmount)} siap direfund oleh admin.`);
   };
 
-  const submitRentalReview = (roomId, rating, comment, aspectRatings = null) => {
+  const submitRentalReview = async (roomId, rating, comment, aspectRatings = null, options = {}) => {
+    const shouldSkipChat = Boolean(options?.skipChat);
     const numRating = Math.max(1, Math.min(5, Number(rating) || 5));
     const finalComment = comment?.trim() || "Pelayanan toko sangat ramah, alat terawat dan berfungsi sangat baik!";
 
@@ -2427,34 +2808,59 @@ export function AppProvider({ children }) {
 
     setOrderRooms((prev) =>
       prev.map((r) => {
-        if (r.id === roomId) {
+        if (r.id === roomId || r.orderRoomId === roomId || (Array.isArray(r.aliases) && r.aliases.includes(roomId))) {
           targetRentalId = r.requestId;
-          const updatedMessages = [
-            ...r.messages,
-            {
-              id: `msg-rev-${Date.now()}`,
-              senderId: "system",
-              senderName: "Bantuin System",
-              message: `Penyewa memberikan rating ${numRating}/5 bintang: "${finalComment}". Transaksi sewa selesai sepenuhnya. Terima kasih!`,
-              timestamp: "Sekarang",
-              isSystem: true,
-            }
-          ];
           return {
             ...r,
             orderStatus: "completed",
+            status: "completed",
             review: {
               rating: numRating,
               comment: finalComment,
               createdAt: new Date().toISOString(),
               reviewerName: currentUser?.fullName || "Penyewa",
             },
-            messages: updatedMessages,
           };
         }
         return r;
       })
     );
+
+    // 1. Sinkronisasi ulasan ke DB terlebih dahulu
+    try {
+      const token = await authService.getValidAccessToken();
+      const headers = { "Content-Type": "application/json" };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      await fetch("/api/chat/rooms", {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          orderRoomId: roomId,
+          status: "completed",
+          rating: numRating,
+          feedback: finalComment,
+          reviewComment: finalComment,
+        }),
+      });
+      broadcastChatUpdate(roomId);
+    } catch (err) {
+      console.warn("Could not sync rental completion to DB:", err);
+    }
+
+    // 2. Kirim pesan ulasan ke PostgreSQL jika tidak di-skip
+    if (!shouldSkipChat) {
+      const revMsg = `Penyewa memberikan rating ${numRating}/5 bintang: "${finalComment}". Transaksi sewa selesai sepenuhnya. Terima kasih!`;
+      try {
+        await sendChatMessage(roomId, revMsg, {
+          isSystem: true,
+          senderName: "Bantuin System",
+          rating: numRating,
+          comment: finalComment,
+        });
+      } catch (e) {
+        console.warn("Could not send review chat message:", e);
+      }
+    }
 
     // Dynamic rating algorithm for rentals:
     // newCount = oldCount + 1
@@ -2463,7 +2869,7 @@ export function AppProvider({ children }) {
     setRentals((prevRentals) =>
       prevRentals.map((item) => {
         if (item.id === targetRentalId || (!targetRentalId && item.id === "rent-1")) {
-          const oldCount = Number(item.ratingCount) || 38;
+          const oldCount = Number(item.ratingCount) || 0;
           const oldAvg = Number(item.ratingAvg) || 4.95;
           const newCount = oldCount + 1;
           const totalStars = (oldAvg * oldCount) + numRating;
@@ -2531,10 +2937,17 @@ export function AppProvider({ children }) {
       });
     } catch (e) {}
 
-    addToast(
-      "Penilaian Berhasil!",
-      `Rating ${numRating} bintang tercatat secara dinamis pada produk & profil toko mitra.`
-    );
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("bantuin_activity_updated"));
+        window.dispatchEvent(new Event("bantuin_chat_update"));
+        window.dispatchEvent(new Event("bantuin_notification_updated"));
+        window.dispatchEvent(new Event("bantuin_order_created"));
+      }
+
+      addToast(
+        "Penilaian Berhasil!",
+        `Rating ${numRating} bintang tercatat secara dinamis pada produk & profil toko mitra.`
+      );
   };
 
   // 8c. Start Rental Inquiry (Chat Toko Terlebih Dahulu sebelum bayar)
@@ -2632,18 +3045,10 @@ export function AppProvider({ children }) {
         {
           id: `msg-inq-2`,
           senderId: currentUser.id || "user-current-01",
-          senderName: currentUser.fullName || "Rian Prasetya",
+          senderName: currentUser.fullName || "Pengguna",
           message: initialQuestion || `Halo ${storeName}, apakah unit ${rentalTitle} ready untuk disewa? Boleh info kondisi fisik & kelengkapan aksesorisnya?`,
           timestamp: "Sekarang",
           isMe: true,
-        },
-        {
-          id: `msg-inq-3`,
-          senderId: storeId || "mitra-rental",
-          senderName: storeName || "Toko Mitra",
-          senderAvatar: storeAvatar || photoUrl,
-          message: `Halo Kak Rian! Unit ${rentalTitle} kami siap sewa dan dalam kondisi prima (sensor bersih & fungsi normal 100%). Sudah include baterai + charger + tas. Jaminan cukup titip 1 KTP/KTM asli saat ambil alat + deposit jaminan sewa. Kakak bisa langsung klik "Bayar Tagihan Sewa" di atas jika tanggal sudah fix ya!`,
-          timestamp: "Sekarang",
         }
       ]
     };
@@ -2734,14 +3139,6 @@ export function AppProvider({ children }) {
           message: initialQuestion || `Halo kak ${providerName || "mitra"}, saya tertarik dengan layanan "${serviceTitle || "jasa"}". Boleh konsultasi terlebih dahulu mengenai estimasi dan teknis pengerjaannya?`,
           timestamp: "Sekarang",
           isMe: true,
-        },
-        {
-          id: `msg-jasa-inq-3`,
-          senderId: providerId || "mitra-jasa",
-          senderName: providerName || "Mitra Jasa",
-          senderAvatar: providerAvatar || serviceImage,
-          message: `Halo ${currentUser?.fullName ? `Kak ${currentUser.fullName.split(" ")[0]}` : "Kak"}! Terima kasih sudah menghubungi kami di Bantuin. Tentu sangat bisa! Silakan sampaikan detail kebutuhan atau referensi yang Kakak inginkan ya. Setelah sepakat, Kakak bisa langsung klik "Pesan Layanan" untuk konfirmasi jadwal.`,
-          timestamp: "Sekarang",
         }
       ]
     };
@@ -2775,9 +3172,11 @@ export function AppProvider({ children }) {
     providerRating,
     providerAddress,
     category,
-    paymentMethod = "qris"
+    paymentMethod = "qris",
+    id,
+    roomId: customRoomId,
   }) => {
-    const roomId = `order-room-jasa-${Date.now()}`;
+    const roomId = id || customRoomId || `order-room-jasa-${Date.now()}`;
     const basePrice = Number(servicePrice) || 100000;
     const finalTotal = Number(totalAmount) || basePrice; // Gross tagihan customer murni (gateway fee tidak otomatis ditambah ke tagihan)
     const platformFee = Math.round(basePrice * 0.08);
@@ -2806,6 +3205,7 @@ export function AppProvider({ children }) {
 
     const newRoom = {
       id: roomId,
+      orderRoomId: roomId,
       categoryType: "jasa",
       orderType: "service",
       stage: "active",
@@ -2814,11 +3214,15 @@ export function AppProvider({ children }) {
       xenditInvoiceId: `XND-JASA-${Math.floor(100000 + Math.random() * 900000)}`,
       requestId: serviceId || `service-${Date.now()}`,
       requestTitle: serviceTitle || `Layanan Jasa: ${packageName || "Pilihan Paket"}`,
+      title: serviceTitle || `Layanan Jasa: ${packageName || "Pilihan Paket"}`,
       category: category || "Layanan Jasa",
       mode: isDigital ? "online" : "offline",
       lockedAmount: finalTotal,
       platformFee: platformFee,
       helperPayoutAmount: helperPayoutAmount,
+      helperId: providerId,
+      requesterId: currentUser?.id,
+      providerId: providerId,
       serviceDetails: {
         serviceId: serviceId,
         serviceTitle: serviceTitle,
@@ -2848,7 +3252,7 @@ export function AppProvider({ children }) {
       helper: {
         id: providerId || "mitra-jasa",
         name: providerName || "Mitra Spesialis Resmi",
-        avatar: providerAvatar || serviceImage || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80",
+        avatar: providerAvatar || serviceImage || "/logotab.png",
         phone: providerPhone || "081234567890",
         rating: providerRating || 4.9,
         address: providerAddress || "Purwokerto",
@@ -2868,14 +3272,6 @@ export function AppProvider({ children }) {
           message: `Pembayaran sebesar ${formatIDR(finalTotal)} telah berhasil diverifikasi via Payment Gateway Bantuin. Jadwal pengerjaan: ${targetDate || "Sesuai Jadwal"} pukul ${targetTime || "09:00"} WIB. Status pesanan: PEMBAYARAN TERKONFIRMASI.`,
           timestamp: "Sekarang",
           isSystem: true,
-        },
-        {
-          id: `msg-jasa-prv-${Date.now()}`,
-          senderId: providerId || "mitra-jasa",
-          senderName: providerName || "Mitra Jasa",
-          senderAvatar: providerAvatar || serviceImage,
-          message: `Halo Kak Rian! Pesanan jasa "${serviceTitle || "Layanan"}" (${packageName || "Paket Standar"}) telah kami terima. Kami siap melaksanakan tugas sesuai rincian yang telah disepakati. Silakan kirimkan referensi atau catatan tambahan di sini ya!`,
-          timestamp: "Sekarang",
         }
       ]
     };
@@ -3128,13 +3524,18 @@ export function AppProvider({ children }) {
   };
 
   // 9. KYC Submit & Admin KYC Verify
-  const submitKYC = (ktmPhotoUrl, selfieUrl) => {
-    setCurrentUser((prev) => ({
-      ...prev,
+  const submitKYC = (ktmPhotoUrl, selfieUrl, additionalData = {}) => {
+    const updatedPayload = {
       verificationStatus: "pending_review",
       idCardUrl: ktmPhotoUrl,
       selfieUrl,
+      ...additionalData,
+    };
+    setCurrentUser((prev) => ({
+      ...prev,
+      ...updatedPayload,
     }));
+    authService.updateProfile(updatedPayload, false).catch(() => {});
     addToast("Dokumen KYC Terkirim", "Tim verifikasi Bantuin akan meninjau dokumenmu dalam 1x24 jam.");
   };
 
@@ -3324,122 +3725,161 @@ export function AppProvider({ children }) {
     return newReport;
   };
 
+  const contextValue = useMemo(() => ({
+    currentUser,
+    setCurrentUser,
+    isAuthReady,
+    isAuthenticated,
+    selectedLocation,
+    setSelectedLocation: updateSelectedLocation,
+    userCoordinates,
+    setUserCoordinates,
+    userRealLocation,
+    isDetectingLocation,
+    detectUserLocation,
+    getDistanceToUser,
+    activeKabupaten,
+    filterByKabupaten,
+    setFilterByKabupaten,
+    isItemInCurrentKabupaten,
+    isGpsModalOpen,
+    setIsGpsModalOpen,
+    setManualLocationPreset,
+    requests,
+    setRequests,
+    rentals,
+    setRentals,
+    refreshRentals,
+    services,
+    setServices,
+    refreshServices,
+    helpers,
+    partners,
+    setPartners,
+    orderRooms,
+    activeOrderRoomId,
+    setActiveOrderRoomId,
+    bantuinPoints,
+    rentalBookings,
+    auditLogs,
+    reports,
+    setReports,
+    deleteReport,
+    toasts,
+    notifications,
+    markNotificationAsRead,
+    markAllNotificationsAsRead,
+    deleteNotification,
+    clearAllNotifications,
+    refreshNotifications,
+    addNotification,
+    markChatRoomAsRead,
+    markAllChatRoomsAsRead,
+    walletBalance,
+    setWalletBalance,
+    pendingEscrowBalance,
+    mitraAvailableBalance,
+    setMitraAvailableBalance,
+    mitraPendingBalance,
+    setMitraPendingBalance,
+    mitraTotalEarned,
+    setMitraTotalEarned,
+    customerDeposits,
+    setCustomerDeposits,
+    ledgerEntries,
+    setLedgerEntries,
+    withdrawals,
+    withdrawFunds,
+    adminMarkWithdrawalSuccess,
+    adminRejectWithdrawal,
+    adminMarkItemReturned,
+    adminMarkDepositRefunded,
+    topUpFunds,
+    providerSettings,
+    updateProviderSettings,
+    addService,
+    updateService,
+    deleteService,
+    addToast,
+    removeToast,
+    createRequest,
+    submitOffer,
+    selectHelper,
+    updateOrderStatus,
+    submitProof,
+    confirmOrderCompletion,
+    sendChatMessage,
+    deleteChatMessage,
+    editChatMessage,
+    deleteChatRoom,
+    bookRental,
+    createRentalOrder,
+    startRentalInquiry,
+    startJasaInquiry,
+    startTaskInquiry,
+    createJasaOrder,
+    payRentalEscrow,
+    confirmRentalHandover,
+    confirmRentalReturn,
+    submitRentalReview,
+    submitKYC,
+    adminVerifyUser,
+    adminCancelOrderEscrow,
+    resolveDispute,
+    submitReport,
+    vouchers,
+    redeemVoucher,
+    adminAddVoucher,
+    adminToggleVoucher,
+    adminDeleteVoucher,
+    refreshVouchers,
+    refreshRequests,
+    userActivities,
+    activeActivitiesCount,
+    completedActivitiesCount,
+    refreshUserActivities,
+    refreshChatRooms,
+  }), [
+    currentUser,
+    isAuthReady,
+    isAuthenticated,
+    selectedLocation,
+    userCoordinates,
+    userRealLocation,
+    isDetectingLocation,
+    activeKabupaten,
+    filterByKabupaten,
+    isGpsModalOpen,
+    requests,
+    rentals,
+    services,
+    helpers,
+    partners,
+    orderRooms,
+    activeOrderRoomId,
+    bantuinPoints,
+    rentalBookings,
+    auditLogs,
+    reports,
+    toasts,
+    notifications,
+    walletBalance,
+    pendingEscrowBalance,
+    mitraAvailableBalance,
+    mitraPendingBalance,
+    mitraTotalEarned,
+    customerDeposits,
+    ledgerEntries,
+    withdrawals,
+    providerSettings,
+    vouchers,
+    userActivities,
+    activeActivitiesCount,
+    completedActivitiesCount,
+  ]);
+
   return (
-    <AppContext.Provider
-      value={{
-        currentUser,
-        setCurrentUser,
-        isAuthReady,
-        isAuthenticated,
-        selectedLocation,
-        setSelectedLocation: updateSelectedLocation,
-        userCoordinates,
-        setUserCoordinates,
-        userRealLocation,
-        isDetectingLocation,
-        detectUserLocation,
-        getDistanceToUser,
-        activeKabupaten,
-        filterByKabupaten,
-        setFilterByKabupaten,
-        isItemInCurrentKabupaten,
-        isGpsModalOpen,
-        setIsGpsModalOpen,
-        setManualLocationPreset,
-        requests,
-        setRequests,
-        rentals,
-        setRentals,
-        services,
-        setServices,
-        refreshServices,
-        helpers,
-        partners,
-        setPartners,
-        orderRooms,
-        activeOrderRoomId,
-        setActiveOrderRoomId,
-        bantuinPoints,
-        rentalBookings,
-        auditLogs,
-        reports,
-        setReports,
-        deleteReport,
-        toasts,
-        notifications,
-        markNotificationAsRead,
-        markAllNotificationsAsRead,
-        deleteNotification,
-        clearAllNotifications,
-        refreshNotifications,
-        addNotification,
-        markChatRoomAsRead,
-        markAllChatRoomsAsRead,
-        walletBalance,
-        setWalletBalance,
-        pendingEscrowBalance,
-        mitraAvailableBalance,
-        setMitraAvailableBalance,
-        mitraPendingBalance,
-        setMitraPendingBalance,
-        mitraTotalEarned,
-        setMitraTotalEarned,
-        customerDeposits,
-        setCustomerDeposits,
-        ledgerEntries,
-        setLedgerEntries,
-        withdrawals,
-        withdrawFunds,
-        adminMarkWithdrawalSuccess,
-        adminRejectWithdrawal,
-        adminMarkItemReturned,
-        adminMarkDepositRefunded,
-        topUpFunds,
-        providerSettings,
-        updateProviderSettings,
-        addService,
-        updateService,
-        deleteService,
-        addToast,
-        removeToast,
-        createRequest,
-        submitOffer,
-        selectHelper,
-        updateOrderStatus,
-        submitProof,
-        confirmOrderCompletion,
-        sendChatMessage,
-        deleteChatMessage,
-        editChatMessage,
-        deleteChatRoom,
-        bookRental,
-        createRentalOrder,
-        startRentalInquiry,
-        startJasaInquiry,
-        startTaskInquiry,
-        createJasaOrder,
-        payRentalEscrow,
-        confirmRentalHandover,
-        confirmRentalReturn,
-        submitRentalReview,
-        submitKYC,
-        adminVerifyUser,
-        adminCancelOrderEscrow,
-        resolveDispute,
-        submitReport,
-        // Voucher
-        vouchers,
-        redeemVoucher,
-        adminAddVoucher,
-        adminToggleVoucher,
-        adminDeleteVoucher,
-        // Real User Activities & Badges
-        userActivities,
-        activeActivitiesCount,
-        completedActivitiesCount,
-        refreshUserActivities,
-      }}
-    >
+    <AppContext.Provider value={contextValue}>
       {children}
 
       {/* Location Permission / GPS Guide Modal */}

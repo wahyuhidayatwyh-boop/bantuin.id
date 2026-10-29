@@ -1,18 +1,22 @@
 "use client";
 
-import React, { useState, Suspense } from "react";
+import React, { useState, useEffect, useRef, Suspense } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import logoImg from "@/components/image/logo.png";
 import { useApp } from "@/lib/context/AppContext";
 import { INDONESIA_REGION_DATA, PROVINCE_LIST } from "@/lib/data/indonesiaRegions";
 import { detectRealtimeLocation } from "@/lib/services/gpsService";
 import CustomSelect from "@/components/ui/CustomSelect";
 import GoogleIcon from "@/components/common/GoogleIcon";
+import GoogleSignInButton from "@/components/auth/GoogleSignInButton";
+import AuthLoadingScreen from "@/components/auth/AuthLoadingScreen";
 import { authService, CANONICAL_ROLES } from "@/lib/services/authService";
 import { validateFile, getAcceptAttribute } from "@/lib/utils/fileValidation";
 import AuthSkeleton from "@/components/skeletons/AuthSkeleton";
+import { RENTAL_STORE_CATEGORIES } from "@/lib/categories";
+import CategoryIcon from "@/components/common/CategoryIcon";
 import {
   ShieldCheck,
   ArrowRight,
@@ -44,15 +48,17 @@ import {
 
 function RegisterPageContent() {
   const router = useRouter();
-  const { setCurrentUser, addToast } = useApp();
+  const searchParams = useSearchParams();
+  const { setCurrentUser, setIsAuthenticated, addToast } = useApp();
+  const hasNotifiedGoogleRef = useRef(false);
 
   const [step, setStep] = useState(1);
   const [isDetectingGps, setIsDetectingGps] = useState(false);
-  const [isGoogleRegistering, setIsGoogleRegistering] = useState(false);
   const [gpsSuccessMsg, setGpsSuccessMsg] = useState("");
   const [gpsErrorMsg, setGpsErrorMsg] = useState("");
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
 
   // Progressive KYC Mode for Provider: 'later' (default: Daftar Cepat) or 'now' (Lengkapi Sekarang)
   const [providerKycChoice, setProviderKycChoice] = useState("later");
@@ -64,12 +70,15 @@ function RegisterPageContent() {
     email: "",
     phone: "",
     password: "",
+    avatarUrl: null,
     authProvider: "local", // 'local' | 'google'
     accountType: "user", // 'user', 'provider', 'mitra'
 
     // Khusus Mitra jika dipilih di Step 1
     storeName: "",
-    storeCategory: "Rental Kamera & Multimedia",
+    storeCategory: RENTAL_STORE_CATEGORIES[0],
+    customStoreCategory: "",
+    operatingHours: "08.00 - 21.00 WIB",
 
     // Step 2: Domisili & Wilayah
     address: "",
@@ -79,6 +88,7 @@ function RegisterPageContent() {
 
     // Step 3: Keahlian & KYC Bertahap (Progressive KYC)
     idNumber: "",
+    idCardFile: null,
     idCardPreview: null,
     idCardFileName: "",
     userWantsOptionalKyc: false,
@@ -92,6 +102,62 @@ function RegisterPageContent() {
 
     agreeToS: true,
   });
+
+  // Handle auto-fill & notification from Google register or login redirect
+  useEffect(() => {
+    let emailParam = searchParams.get("email");
+    let nameParam = searchParams.get("name");
+    let avatarParam = searchParams.get("avatar");
+    let noticeParam = searchParams.get("notice");
+    let connectedParam = searchParams.get("connected");
+    let fromParam = searchParams.get("from");
+    let roleParam = searchParams.get("role");
+
+    // Fallback dari storage jika query params hilang
+    if (typeof window !== "undefined") {
+      try {
+        const storedGoogle = JSON.parse(
+          sessionStorage.getItem("bantuin_google_profile") || 
+          localStorage.getItem("bantuin_google_profile") || 
+          "{}"
+        );
+        if (storedGoogle.email && !emailParam) emailParam = storedGoogle.email;
+        if (storedGoogle.fullName && !nameParam) nameParam = storedGoogle.fullName;
+        if (storedGoogle.avatarUrl && !avatarParam) avatarParam = storedGoogle.avatarUrl;
+        if (storedGoogle.role && !roleParam) roleParam = storedGoogle.role;
+        if (storedGoogle.email) connectedParam = "google";
+        if (storedGoogle.googleAuthToken || storedGoogle.supabaseToken) {
+          setFormData((prev) => ({
+            ...prev,
+            googleAuthToken: storedGoogle.googleAuthToken || prev.googleAuthToken || null,
+            supabaseToken: storedGoogle.supabaseToken || prev.supabaseToken || null,
+          }));
+        }
+      } catch {}
+    }
+
+    const isFromGoogle = connectedParam === "google" || fromParam === "google";
+
+    if (emailParam || nameParam || avatarParam || isFromGoogle) {
+      setFormData((prev) => ({
+        ...prev,
+        email: emailParam || prev.email,
+        fullName: nameParam || prev.fullName,
+        avatarUrl: avatarParam || prev.avatarUrl,
+        authProvider: isFromGoogle ? "google" : prev.authProvider,
+        accountType: (roleParam && roleParam !== "undefined") ? roleParam : prev.accountType,
+      }));
+    }
+
+    if ((connectedParam === "google" || fromParam === "google" || noticeParam === "unregistered") && !hasNotifiedGoogleRef.current) {
+      hasNotifiedGoogleRef.current = true;
+      addToast?.(
+        "Akun Google Terhubung",
+        "Data profil Google Anda berhasil disinkronkan. Silakan tentukan peran dan lengkapi data Anda.",
+        "success"
+      );
+    }
+  }, [searchParams, addToast]);
 
   const skillOptions = [
     "Desain Grafis & Logo",
@@ -113,22 +179,10 @@ function RegisterPageContent() {
   // Dynamic Districts (Kecamatan) from selected City
   const districtOptions = currentProvinceData[formData.city] || currentProvinceData[cityOptions[0]] || [];
 
-  // Google Register Flow
-  const handleGoogleRegister = async () => {
-    if (isGoogleRegistering) return;
-    setIsGoogleRegistering(true);
-    addToast?.("Menghubungkan Google", "Mengarahkan ke halaman autentikasi Google aman...", "info");
 
-    try {
-      await authService.loginWithGoogle(formData.role || "user");
-    } catch (err) {
-      addToast?.("Google Register Gagal", err.message || "Gagal menghubungkan Google.", "error");
-      setIsGoogleRegistering(false);
-    }
-  };
-
-  // Handle Realtime GPS Activation
+  // Handle Realtime GPS Activation with concurrency guard
   const handleActivateGPS = async () => {
+    if (isDetectingGps) return;
     setIsDetectingGps(true);
     setGpsSuccessMsg("");
     setGpsErrorMsg("");
@@ -162,6 +216,7 @@ function RegisterPageContent() {
     const previewUrl = URL.createObjectURL(file);
     setFormData((prev) => ({
       ...prev,
+      idCardFile: file,
       idCardPreview: previewUrl,
       idCardFileName: file.name,
       idCardType: file.type,
@@ -229,103 +284,125 @@ function RegisterPageContent() {
 
       const isProvider = formData.accountType === "provider";
       const isMitra = formData.accountType === "mitra";
-      const hasUploadedKyc = formData.idCardPreview && (isProvider ? providerKycChoice === "now" : formData.userWantsOptionalKyc);
+      const hasKtpToUpload = formData.idCardFile && (isProvider ? providerKycChoice === "now" : formData.userWantsOptionalKyc);
 
       setIsSubmitting(true);
       try {
-        let authResult;
-        if (formData.authProvider === "google") {
-          authResult = await authService.registerWithGoogle({
-            fullName: formData.fullName || (isProvider ? "Penyedia Jasa Baru" : isMitra ? "Mitra Toko Sewa" : "Pengguna Baru"),
-            email: formData.email,
-            phone: formData.phone,
-            role: formData.accountType,
-            address: formData.address,
-            province: formData.province,
-            city: formData.city,
-            district: formData.district,
-            storeName: formData.storeName,
-            storeCategory: formData.storeCategory,
-            skills: allSkills,
-            idNumber: formData.idNumber || "",
-            idCardUrl: formData.idCardPreview || "",
-            bankInfo: {
-              bankName: formData.bankName,
-              accountNumber: formData.accountNumber,
-              accountHolder: formData.accountHolder || formData.fullName,
-            },
-            verificationStatus: hasUploadedKyc ? "pending_review" : "verified",
-          });
-        } else {
-          authResult = await authService.register({
-            fullName: formData.fullName || (isProvider ? "Penyedia Jasa Baru" : isMitra ? "Mitra Toko Sewa" : "Pengguna Baru"),
-            email: formData.email,
-            phone: formData.phone,
-            role: formData.accountType,
-            password: formData.password,
-            address: formData.address,
-            province: formData.province,
-            city: formData.city,
-            district: formData.district,
-            storeName: formData.storeName,
-            storeCategory: formData.storeCategory,
-            skills: allSkills,
-            idNumber: formData.idNumber || "",
-            idCardUrl: formData.idCardPreview || "",
-            bankInfo: {
-              bankName: formData.bankName,
-              accountNumber: formData.accountNumber,
-              accountHolder: formData.accountHolder || formData.fullName,
-            },
-            verificationStatus: hasUploadedKyc ? "pending_review" : "verified",
-          });
-        }
+        const selectedStoreCategory = formData.storeCategory?.startsWith("Lainnya")
+          ? (formData.customStoreCategory?.trim() || "Rental Umum")
+          : formData.storeCategory;
 
-        const registeredUser = authResult?.user || {
-          id: `user-${Date.now()}`,
+        const authResult = await authService.register({
           fullName: formData.fullName || (isProvider ? "Penyedia Jasa Baru" : isMitra ? "Mitra Toko Sewa" : "Pengguna Baru"),
           email: formData.email,
-          phoneNumber: formData.phone,
-          campusName: formData.address || `${formData.district}, ${formData.city}`,
-          faculty: isProvider ? "Penyedia Jasa Lepas" : isMitra ? "Mitra Rental Resmi" : "Pengguna Komunitas",
-          accountType: formData.accountType,
-          avatarUrl: null,
-          verificationStatus: hasUploadedKyc ? "pending_review" : "verified",
+          phone: formData.phone,
+          role: formData.accountType,
+          password: formData.password || undefined,
+          authProvider: formData.authProvider || "local",
+          googleAuthToken: formData.googleAuthToken || undefined,
+          supabaseToken: formData.supabaseToken || undefined,
+          avatarUrl: formData.avatarUrl || null,
+          address: formData.address,
+          province: formData.province,
+          city: formData.city,
+          district: formData.district,
+          storeName: formData.storeName,
+          storeCategory: selectedStoreCategory,
+          operatingHours: formData.operatingHours || "08.00 - 21.00 WIB",
+          skills: allSkills,
           idNumber: formData.idNumber || "",
-          idCardUrl: formData.idCardPreview || "",
           bankInfo: {
             bankName: formData.bankName,
             accountNumber: formData.accountNumber,
             accountHolder: formData.accountHolder || formData.fullName,
           },
-          skills: allSkills,
-          ratingAvg: 5.0,
-          ratingCount: 0,
-          completedHelpsCount: 0,
-          reliabilityScore: 100,
-        };
+          verificationStatus: "unverified",
+        });
 
-        setCurrentUser(registeredUser);
+        let uploadedIdCardUrl = "";
+        if (hasKtpToUpload && authResult?.accessToken) {
+          addToast?.("Mengunggah Dokumen", "Mengenkripsi dan mengunggah foto KTP ke brankas KYC aman...", "info");
+          const uploadBody = new FormData();
+          uploadBody.append("file", formData.idCardFile);
+          uploadBody.append("bucket", "bantuin-kyc");
+
+          const upRes = await fetch("/api/upload", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${authResult.accessToken}`,
+            },
+            body: uploadBody,
+          });
+          const upJson = await upRes.json();
+          if (!upRes.ok || !upJson.success) {
+            throw new Error(upJson.error || "Gagal mengunggah foto KTP ke server.");
+          }
+          uploadedIdCardUrl = upJson.storageRef || upJson.url || upJson.data?.storageRef || upJson.data?.url || "";
+          if (uploadedIdCardUrl) {
+            await fetch("/api/profile/kyc", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${authResult.accessToken}`,
+              },
+              body: JSON.stringify({
+                idNumber: formData.idNumber || "",
+                idCardUrl: uploadedIdCardUrl,
+                skills: allSkills,
+                payoutBank: formData.bankName,
+                payoutAccountNumber: formData.accountNumber,
+                payoutAccountHolder: formData.accountHolder || formData.fullName,
+              }),
+            });
+          }
+        }
+
+        const registeredUser = authResult?.user;
+        if (registeredUser) {
+          setCurrentUser(registeredUser);
+        }
+        setIsAuthenticated?.(true);
+
+        try {
+          sessionStorage.removeItem("bantuin_google_profile");
+          localStorage.removeItem("bantuin_google_profile");
+          sessionStorage.removeItem("bantuin_oauth_role");
+          localStorage.removeItem("bantuin_oauth_role");
+          sessionStorage.removeItem("bantuin_oauth_mode");
+          localStorage.removeItem("bantuin_oauth_mode");
+        } catch {}
 
         if (isProvider) {
           addToast?.(
             "Pendaftaran Berhasil",
-            hasUploadedKyc
-              ? "Profil jasa aktif. Dokumen KTP Anda sedang diproses verifikasi prioritas."
-              : "Profil jasa aktif. Anda dapat mulai menawarkan keahlian dan melengkapi KTP saat penarikan saldo."
+            uploadedIdCardUrl
+              ? "Profil jasa aktif. Dokumen KTP Anda sedang diproses verifikasi prioritas oleh Admin."
+              : "Profil jasa aktif! Anda dapat mulai menawarkan keahlian dan melengkapi KTP saat penarikan saldo."
           );
-          router.push("/jasa/dashboard");
+          setSubmitSuccess(true);
+          window.location.href = "/jasa/dashboard";
         } else if (isMitra) {
-          addToast?.("Selamat Datang Mitra Toko", "Outlet sewa Anda berhasil didaftarkan. Anda dapat mulai menambahkan unit rental.");
-          router.push("/mitra/dashboard");
+          addToast?.(
+            "Selamat Datang Mitra Toko",
+            uploadedIdCardUrl
+              ? "Outlet sewa berhasil didaftarkan. Dokumen identitas sedang ditinjau admin."
+              : "Outlet sewa Anda berhasil didaftarkan. Anda dapat mulai menambahkan unit rental."
+          );
+          setSubmitSuccess(true);
+          window.location.href = "/mitra/dashboard";
         } else {
-          addToast?.("Selamat Datang di Bantuin", "Akun aktif tanpa KTP. Anda langsung dapat mencari bantuan dan memesan jasa.");
-          router.push("/bantuan");
+          addToast?.(
+            "Selamat Datang di Bantuin",
+            uploadedIdCardUrl
+              ? "Pendaftaran berhasil. Dokumen identitas Anda sedang diverifikasi admin."
+              : "Akun aktif tanpa KTP. Anda langsung dapat mencari bantuan dan memesan jasa."
+          );
+          setSubmitSuccess(true);
+          window.location.href = "/";
         }
       } catch (err) {
-        addToast?.("Pendaftaran Gagal", err.message || "Terjadi kesalahan saat mendaftarkan akun.", "error");
-      } finally {
         setIsSubmitting(false);
+        addToast?.("Pendaftaran Gagal", err.message || "Terjadi kesalahan saat mendaftarkan akun.", "error");
       }
     }
   };
@@ -345,7 +422,7 @@ function RegisterPageContent() {
   };
 
   return (
-    <div className="min-h-[100dvh] relative flex flex-col items-center justify-between p-3 sm:p-6 lg:p-8 overflow-x-hidden font-sans bg-gradient-to-br from-[#EBF3FE] via-[#F0F6FF] to-[#DEEEFC]">
+    <div className="min-h-[100dvh] relative flex flex-col items-center justify-start sm:justify-center p-3 sm:p-6 lg:p-8 pb-10 sm:pb-8 overflow-x-hidden font-sans bg-gradient-to-br from-[#EBF3FE] via-[#F0F6FF] to-[#DEEEFC]">
       {/* 1. Subtle Dot Grid Matrix Motif Overlay */}
       <div
         className="absolute inset-0 pointer-events-none opacity-30"
@@ -365,21 +442,37 @@ function RegisterPageContent() {
         <Link href="/" className="inline-block">
           <Image
             src={logoImg}
-            alt="Bantuin.id"
+            alt="BantuinAja.id"
             height={44}
-            className="h-9 sm:h-11 w-auto object-contain mix-blend-multiply"
+            className="h-8 sm:h-11 w-auto object-contain mix-blend-multiply"
           />
         </Link>
       </div>
 
       {/* Centered Main Card */}
-      <div className="w-full max-w-2xl mx-auto my-auto">
+      <div className="w-full max-w-2xl mx-auto my-auto py-1 sm:py-3">
         <div className="bg-white/95 backdrop-blur-md rounded-2xl sm:rounded-3xl border border-white/80 p-4 sm:p-8 shadow-[0_20px_50px_rgba(16,42,67,0.12)]">
 
+          {/* Top Segmented Tab Switcher: Masuk vs Daftar */}
+          <div className="flex items-center bg-slate-100/90 p-1 rounded-xl sm:rounded-2xl mb-4 sm:mb-5 border border-slate-200/60 shadow-2xs">
+            <Link
+              href="/auth/login"
+              className="flex-1 py-2 sm:py-2.5 text-center rounded-lg sm:rounded-xl text-xs sm:text-sm font-bold text-slate-600 hover:text-slate-900 transition flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              Masuk
+            </Link>
+            <Link
+              href="/auth/register"
+              className="flex-1 py-2 sm:py-2.5 text-center rounded-lg sm:rounded-xl text-xs sm:text-sm font-extrabold bg-white text-[#1683FF] shadow-xs border border-slate-200/50 transition flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              Daftar
+            </Link>
+          </div>
+
           {/* Header: Step Indicator & Login Link Inside Card */}
-          <div className="flex items-start sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+          <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-100">
             <div className="min-w-0 flex items-center gap-2">
-              <span className="px-2.5 py-1 rounded-full bg-[#1683FF]/10 text-[#1683FF] text-[11px] font-extrabold uppercase tracking-wider">
+              <span className="px-2.5 py-1 rounded-full bg-[#1683FF]/10 text-[#1683FF] text-[10px] sm:text-[11px] font-extrabold uppercase tracking-wider shrink-0">
                 Langkah {step} dari 4
               </span>
               <span className="text-xs font-semibold text-slate-500 hidden sm:inline">
@@ -399,14 +492,15 @@ function RegisterPageContent() {
             </div>
             <Link
               href="/auth/login"
-              className="shrink-0 text-[11px] sm:text-xs font-bold text-slate-600 hover:text-[#1683FF] transition text-right"
+              className="shrink-0 text-[11px] sm:text-xs font-semibold text-slate-600 hover:text-[#1683FF] transition text-right"
             >
-              Sudah punya akun? <span className="text-[#1683FF] font-extrabold underline">Masuk</span>
+              <span className="hidden sm:inline">Sudah punya akun? </span>
+              <span className="text-[#1683FF] font-extrabold underline">Masuk</span>
             </Link>
           </div>
 
           {/* Slim, Integrated Progress Bar */}
-          <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mt-3 mb-6">
+          <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mt-3 mb-5 sm:mb-6">
             <div
               className="h-full bg-[#1683FF] transition-all duration-300 rounded-full"
               style={{ width: `${step * 25}%` }}
@@ -425,7 +519,7 @@ function RegisterPageContent() {
                     Pilih Peran Akun Anda
                   </h2>
                   <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                    Tentukan bagaimana Anda ingin berpartisipasi di ekosistem Bantuin.id
+                    Tentukan bagaimana Anda ingin berpartisipasi di ekosistem BantuinAja.id
                   </p>
                 </div>
 
@@ -520,38 +614,84 @@ function RegisterPageContent() {
 
                 </div>
 
-                {/* Divider & Google Register */}
-                <div className="relative my-2 pt-2">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-slate-200" />
+                {/* Status Terhubung Google vs Tombol Google Register */}
+                {formData.authProvider === "google" && formData.email ? (
+                  <div className="mt-3 p-3.5 bg-emerald-50/90 border border-emerald-200 rounded-2xl flex items-center justify-between gap-3 animate-in fade-in">
+                    <div className="flex items-center gap-3 min-w-0">
+                      {formData.avatarUrl ? (
+                        <img
+                          src={formData.avatarUrl}
+                          alt={formData.fullName || "Akun Google"}
+                          className="w-10 h-10 rounded-full object-cover border border-emerald-300 shadow-xs shrink-0"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-xl bg-white border border-emerald-200 flex items-center justify-center shadow-xs shrink-0">
+                          <GoogleIcon className="w-5 h-5" />
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                          <span>Akun Google Terhubung</span>
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        </div>
+                        <div className="text-[11px] text-emerald-800 font-medium truncate">
+                          {formData.fullName} ({formData.email})
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormData((prev) => ({
+                          ...prev,
+                          authProvider: "local",
+                          email: "",
+                          fullName: "",
+                          avatarUrl: null,
+                        }));
+                        try {
+                          sessionStorage.removeItem("bantuin_google_profile");
+                          localStorage.removeItem("bantuin_google_profile");
+                        } catch {}
+                      }}
+                      className="text-[11px] font-bold text-slate-500 hover:text-slate-800 hover:underline shrink-0 px-2 py-1"
+                    >
+                      Batal
+                    </button>
                   </div>
-                  <div className="relative flex justify-center text-xs">
-                    <span className="bg-white px-3 text-slate-500 font-medium">atau daftar dengan</span>
-                  </div>
-                </div>
+                ) : (
+                  <>
+                    <div className="relative my-2 pt-2">
+                      <div className="absolute inset-0 flex items-center">
+                        <div className="w-full border-t border-slate-200" />
+                      </div>
+                      <div className="relative flex justify-center text-xs">
+                        <span className="bg-white px-3 text-slate-500 font-medium">atau daftar dengan</span>
+                      </div>
+                    </div>
 
-                <button
-                  type="button"
-                  disabled={isGoogleRegistering}
-                  onClick={handleGoogleRegister}
-                  className={`w-full py-3 px-4 rounded-2xl border text-xs sm:text-sm font-bold shadow-2xs transition flex items-center justify-center gap-2.5 cursor-pointer active:scale-95 disabled:cursor-not-allowed ${
-                    isGoogleRegistering
-                      ? "bg-blue-50 border-blue-300 text-[#1683FF]"
-                      : "border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-900"
-                  }`}
-                >
-                  {isGoogleRegistering ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin text-[#1683FF]" />
-                      <span>Membuka Google OAuth...</span>
-                    </>
-                  ) : (
-                    <>
-                      <GoogleIcon className="w-4 h-4 shrink-0" />
-                      <span>Daftar dengan Google</span>
-                    </>
-                  )}
-                </button>
+                    <GoogleSignInButton
+                      role={formData.accountType || formData.role || "user"}
+                      mode="register"
+                      label="Daftar dengan Google"
+                      className="rounded-2xl py-3"
+                      onSuccess={(result) => {
+                        setFormData((prev) => ({
+                          ...prev,
+                          authProvider: "google",
+                          email: result.email,
+                          fullName: result.fullName,
+                          avatarUrl: result.avatarUrl,
+                        }));
+                        addToast?.(
+                          "Akun Google Terhubung",
+                          `Halo ${result.fullName}! Data akun Anda berhasil dimuat. Silakan lanjutkan pendaftaran.`,
+                          "success"
+                        );
+                      }}
+                    />
+                  </>
+                )}
               </div>
             )}
 
@@ -571,9 +711,16 @@ function RegisterPageContent() {
 
                 {/* Form Input Dasar */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Nama Lengkap Anda <span className="text-rose-500 font-bold">*</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-bold text-slate-700">
+                      Nama Lengkap Anda <span className="text-rose-500 font-bold">*</span>
+                    </label>
+                    {formData.authProvider === "google" && (
+                      <span className="text-[10px] font-bold text-slate-500">
+                        Dari Google (Bisa disesuaikan)
+                      </span>
+                    )}
+                  </div>
                   <div className="relative">
                     <User className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
                     <input
@@ -589,9 +736,16 @@ function RegisterPageContent() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      Alamat Email Aktif <span className="text-rose-500 font-bold">*</span>
-                    </label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        Alamat Email Aktif <span className="text-rose-500 font-bold">*</span>
+                      </label>
+                      {formData.authProvider === "google" && (
+                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                          Google Terhubung
+                        </span>
+                      )}
+                    </div>
                     <div className="relative">
                       <Mail className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
                       <input
@@ -599,8 +753,13 @@ function RegisterPageContent() {
                         required
                         placeholder="nama@email.com"
                         value={formData.email}
+                        readOnly={formData.authProvider === "google"}
                         onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                        className="w-full text-xs sm:text-sm pl-11 pr-4 py-3 rounded-2xl border border-slate-200 focus:outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/20"
+                        className={`w-full text-xs sm:text-sm pl-11 pr-4 py-3 rounded-2xl border ${
+                          formData.authProvider === "google"
+                            ? "bg-slate-50/80 border-slate-200 text-slate-700 cursor-not-allowed"
+                            : "border-slate-200 focus:outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/20"
+                        }`}
                       />
                     </div>
                   </div>
@@ -676,34 +835,18 @@ function RegisterPageContent() {
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      disabled={isGoogleRegistering}
-                      onClick={handleGoogleRegister}
-                      className={`w-full py-2.5 px-4 rounded-2xl border text-xs sm:text-sm font-bold shadow-2xs transition flex items-center justify-center gap-2.5 cursor-pointer active:scale-95 disabled:cursor-not-allowed ${
-                        isGoogleRegistering
-                          ? "bg-blue-50 border-blue-300 text-[#1683FF]"
-                          : "border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-900"
-                      }`}
-                    >
-                      {isGoogleRegistering ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin text-[#1683FF]" />
-                          <span>Membuka Google OAuth...</span>
-                        </>
-                      ) : (
-                        <>
-                          <GoogleIcon className="w-4 h-4 shrink-0" />
-                          <span>Daftar dengan Google</span>
-                        </>
-                      )}
-                    </button>
+                    <GoogleSignInButton
+                      role={formData.accountType || formData.role || "user"}
+                      mode="register"
+                      label="Daftar dengan Google"
+                      className="rounded-2xl py-2.5"
+                    />
                   </>
                 )}
 
                 {/* Khusus jika Mitra Toko Sewa dipilih */}
                 {formData.accountType === "mitra" && (
-                  <div className="pt-3 border-t border-slate-100 space-y-3 animate-in fade-in">
+                  <div className="pt-3 border-t border-slate-100 space-y-3.5 animate-in fade-in">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1.5">
                         Nama Toko / Usaha Rental Anda <span className="text-rose-500 font-bold">*</span>
@@ -727,13 +870,50 @@ function RegisterPageContent() {
                         onChange={(e) => setFormData({ ...formData, storeCategory: e.target.value })}
                         className="w-full text-xs sm:text-sm px-4 py-3 rounded-2xl border border-slate-200 bg-white focus:outline-none focus:border-[#1683FF]"
                       >
-                        <option value="Rental Kamera & Multimedia">Rental Kamera &amp; Multimedia</option>
-                        <option value="Rental Audio, Mic & Podcast">Rental Audio, Mic &amp; Podcast</option>
-                        <option value="Rental Proyektor & Layar Screen">Rental Proyektor &amp; Layar Screen</option>
-                        <option value="Alat Camping & Outdoor">Alat Camping &amp; Outdoor</option>
-                        <option value="Perkakas & Pertukangan">Perkakas &amp; Pertukangan</option>
-                        <option value="Vendor Event & Bazar">Vendor Event &amp; Bazar</option>
+                        {RENTAL_STORE_CATEGORIES.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
                       </select>
+                    </div>
+
+                    {formData.storeCategory?.startsWith("Lainnya") && (
+                      <div className="p-3.5 bg-blue-50/60 rounded-2xl border border-blue-200 animate-in fade-in space-y-2">
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          Tuliskan Kategori Usaha Anda: <span className="text-rose-500 font-bold">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="Contoh: Rental Jas & Kostum, Rental Sepeda Listrik, dll."
+                          value={formData.customStoreCategory}
+                          onChange={(e) => setFormData({ ...formData, customStoreCategory: e.target.value })}
+                          className="w-full bg-white border border-slate-200 text-slate-900 placeholder-slate-400 rounded-xl px-4 py-2.5 text-xs sm:text-sm focus:outline-none focus:border-[#1683FF] focus:ring-2 focus:ring-[#1683FF]/20"
+                        />
+                        {formData.customStoreCategory?.trim() && (
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white rounded-xl text-xs font-semibold text-[#1683FF] border border-blue-100 shadow-2xs">
+                            <CategoryIcon category={formData.customStoreCategory} className="w-4 h-4 text-[#1683FF] shrink-0" />
+                            <span>Icon otomatis: {formData.customStoreCategory}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        Jam Operasional Toko
+                      </label>
+                      <div className="relative">
+                        <Clock className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          placeholder="08.00 - 21.00 WIB"
+                          value={formData.operatingHours}
+                          onChange={(e) => setFormData({ ...formData, operatingHours: e.target.value })}
+                          className="w-full text-xs sm:text-sm pl-11 pr-4 py-3 rounded-2xl border border-slate-200 bg-white focus:outline-none focus:border-[#1683FF]"
+                        />
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1151,89 +1331,180 @@ function RegisterPageContent() {
                   </p>
                 </div>
 
-                {/* Ringkasan Data */}
-                <div className="bg-[#F8FBFF] p-4 rounded-2xl border border-slate-200 space-y-2 text-xs text-slate-700">
-                  <div className="flex justify-between py-1 border-b border-slate-100">
-                    <span className="text-slate-500">Nama Akun:</span>
-                    <span className="font-bold text-slate-900">{formData.fullName || "Pengguna Baru"}</span>
-                  </div>
-                  <div className="flex justify-between py-1 border-b border-slate-100">
-                    <span className="text-slate-500">Email &amp; WhatsApp:</span>
-                    <span className="font-bold text-slate-900">{formData.email} &middot; {formData.phone}</span>
-                  </div>
-                  <div className="flex justify-between py-1 border-b border-slate-100">
-                    <span className="text-slate-500">Peran Akun:</span>
-                    <span className="font-bold text-[#1683FF]">
-                      {formData.accountType === "provider"
-                        ? "Penyedia Jasa"
-                        : formData.accountType === "mitra"
-                          ? `Mitra Toko Sewa (${formData.storeName || "Toko Rental"})`
-                          : "Pengguna Umum"}
-                    </span>
-                  </div>
-                  <div className="flex justify-between py-1">
-                    <span className="text-slate-500">Domisili:</span>
-                    <span className="font-bold text-slate-900">{formData.district}, {formData.city}, {formData.province}</span>
-                  </div>
-                </div>
-
-                {/* KOTAK DOKUMEN ATURAN SK (SCROLLABLE DOCUMENT BOX) */}
-                <div className="space-y-2 pt-1">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs font-bold text-slate-800">
-                    <span className="flex items-start sm:items-center gap-1.5 leading-snug">
-                      <FileBadge className="w-4 h-4 text-[#1683FF]" />
-                      <span>Dokumen Syarat, Ketentuan &amp; Tata Tertib Transaksi</span>
-                    </span>
-                    <span className="text-[11px] text-slate-400 font-normal">Gulir untuk membaca seluruhnya</span>
-                  </div>
-
-                  <div className="max-h-52 sm:max-h-48 overflow-y-auto rounded-xl sm:rounded-2xl border border-slate-200 bg-slate-50/90 p-3 sm:p-4 text-xs text-slate-600 leading-relaxed space-y-3 shadow-inner font-sans">
-                    <div className="text-center pb-2 border-b border-slate-200">
-                      <div className="font-extrabold text-slate-900 text-xs uppercase tracking-wide">
-                        SURAT KESEPAKATAN &amp; ATURAN TRANSAKSI TERLINDUNGI
+                {/* Ringkasan Data Akun Terpilih - Responsive Mobile-First Card */}
+                <div className="bg-gradient-to-br from-blue-50/70 via-slate-50/60 to-blue-50/40 p-3.5 sm:p-5 rounded-2xl border border-blue-100/90 shadow-2xs space-y-3">
+                  {/* Header Ringkasan: Badge Peran & Status */}
+                  <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-slate-200/70">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-8 h-8 rounded-xl bg-[#1683FF] text-white flex items-center justify-center shrink-0 shadow-2xs">
+                        {formData.accountType === "provider" ? (
+                          <Briefcase className="w-4 h-4" />
+                        ) : formData.accountType === "mitra" ? (
+                          <Store className="w-4 h-4" />
+                        ) : (
+                          <Users className="w-4 h-4" />
+                        )}
                       </div>
-                      <div className="text-[10px] text-slate-500 mt-0.5">
-                        Platform Bantuin.id &middot; Tata Tertib Transaksi Aman &amp; Terlindungi
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                          Peran Terpilih
+                        </span>
+                        <span className="text-xs sm:text-sm font-extrabold text-[#1683FF] truncate block">
+                          {formData.accountType === "provider"
+                            ? "Penyedia Jasa Keahlian"
+                            : formData.accountType === "mitra"
+                              ? `Mitra Toko Sewa (${formData.storeName || "Toko Rental"})`
+                              : "Pengguna Umum"}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold shrink-0">
+                      Siap Didaftarkan
+                    </span>
+                  </div>
+
+                  {/* Data Rows: Grid responsif, rapi di HP sempit tanpa text tabrakan */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                    {/* Nama Akun */}
+                    <div className="bg-white/90 p-2.5 sm:p-3 rounded-xl border border-slate-200/70">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">
+                        Nama Lengkap
+                      </div>
+                      <div className="font-bold text-slate-900 truncate text-xs sm:text-sm">
+                        {formData.fullName || "Pengguna Baru"}
                       </div>
                     </div>
 
-                    <div>
-                      <h5 className="font-bold text-slate-900 mb-1">PASAL 1: KETENTUAN UMUM &amp; KATEGORI PERAN</h5>
-                      <p className="text-[11px] text-slate-600">
+                    {/* Kontak (Email & WhatsApp) */}
+                    <div className="bg-white/90 p-2.5 sm:p-3 rounded-xl border border-slate-200/70">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">
+                        Email &amp; WhatsApp
+                      </div>
+                      <div className="font-bold text-slate-900 break-all text-[11px] sm:text-xs leading-snug">
+                        <span>{formData.email}</span>
+                        <span className="text-slate-400 mx-1.5">&bull;</span>
+                        <span className="text-slate-700 font-semibold">{formData.phone}</span>
+                      </div>
+                    </div>
+
+                    {/* Domisili (Full Width) */}
+                    <div className="sm:col-span-2 bg-white/90 p-2.5 sm:p-3 rounded-xl border border-slate-200/70 flex items-start gap-2">
+                      <MapPin className="w-4 h-4 text-[#1683FF] shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">
+                          Domisili Operasional
+                        </div>
+                        <div className="font-semibold text-slate-800 text-[11px] sm:text-xs leading-relaxed">
+                          {formData.district}, {formData.city}, {formData.province}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Khusus Provider dengan KTP */}
+                    {formData.accountType === "provider" && providerKycChoice === "now" && (
+                      <div className="sm:col-span-2 bg-white/90 p-2.5 sm:p-3 rounded-xl border border-slate-200/70 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span className="text-[11px] sm:text-xs font-semibold text-slate-700 truncate">
+                            KTP Dilampirkan ({formData.bankName} - {formData.accountNumber})
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 shrink-0">
+                          KTP Siap
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Khusus Mitra Toko Sewa */}
+                    {formData.accountType === "mitra" && (
+                      <div className="sm:col-span-2 bg-white/90 p-2.5 sm:p-3 rounded-xl border border-slate-200/70 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Store className="w-4 h-4 text-[#1683FF] shrink-0" />
+                          <span className="text-[11px] sm:text-xs font-semibold text-slate-700 truncate">
+                            Kategori: {formData.storeCategory}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* KOTAK DOKUMEN ATURAN SK (SCROLLABLE DOCUMENT BOX DENGAN CUE VISUAL) */}
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between gap-2 text-xs font-bold text-slate-800">
+                    <span className="flex items-center gap-1.5 leading-snug">
+                      <FileBadge className="w-4 h-4 text-[#1683FF] shrink-0" />
+                      <span className="text-xs sm:text-sm font-extrabold text-slate-900">
+                        Tata Tertib Transaksi
+                      </span>
+                    </span>
+                    <span className="text-[10px] text-[#1683FF] bg-blue-50 border border-blue-100 px-2 py-0.5 rounded-full font-semibold shrink-0">
+                      Gulir ke bawah &darr;
+                    </span>
+                  </div>
+
+                  <div className="max-h-36 sm:max-h-48 overflow-y-auto rounded-xl sm:rounded-2xl border border-slate-200 bg-slate-50/90 p-3 sm:p-4 text-xs text-slate-600 leading-relaxed space-y-3 shadow-inner font-sans">
+                    <div className="text-center pb-2 border-b border-slate-200">
+                      <div className="font-extrabold text-slate-900 text-[11px] sm:text-xs uppercase tracking-wide">
+                        SURAT KESEPAKATAN &amp; ATURAN TRANSAKSI TERLINDUNGI
+                      </div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">
+                        Platform BantuinAja.id &middot; Tata Tertib Transaksi Aman &amp; Terlindungi
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-900">
+                        <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[9px] font-black uppercase">Pasal 1</span>
+                        <span>Ketentuan Umum &amp; Kategori Peran</span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 pl-1 leading-relaxed">
                         1.1. Pengguna Umum adalah pihak pencari jasa, peminta bantuan, atau penyewa alat yang berhak mendapatkan jaminan pengerjaan sesuai deskripsi.<br />
                         1.2. Penyedia Jasa adalah pengguna mandiri yang bersedia menyelesaikan tugas bantuan atau proyek keahlian secara bertanggung jawab.<br />
                         1.3. Mitra Toko Sewa adalah pemilik outlet rental terdaftar yang menyediakan unit alat fisik berkualitas.
                       </p>
                     </div>
 
-                    <div>
-                      <h5 className="font-bold text-slate-900 mb-1">PASAL 2: SISTEM PEMBAYARAN TERVERIFIKASI &amp; PENAHANAN SEMENTARA</h5>
-                      <p className="text-[11px] text-slate-600">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-900">
+                        <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[9px] font-black uppercase">Pasal 2</span>
+                        <span>Sistem Pembayaran Terverifikasi &amp; Penahanan Sementara</span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 pl-1 leading-relaxed">
                         2.1. Seluruh dana pembayaran pemesanan jasa, imbalan tugas, dan deposit sewa wajib disetorkan melalui gateway pembayaran resmi Bantuin.<br />
                         2.2. Dana dijamin 100% aman dan baru diteruskan kepada penyedia jasa atau mitra rental setelah pemohon/penyewa mengonfirmasi penyelesaian tugas atau pengembalian unit.<br />
                         2.3. Deposit jaminan rental otomatis dikembalikan seketika setelah unit diverifikasi utuh oleh pihak mitra.
                       </p>
                     </div>
 
-                    <div>
-                      <h5 className="font-bold text-slate-900 mb-1">PASAL 3: LARANGAN TRANSAKSI DI LUAR PLATFORM (BYPASS)</h5>
-                      <p className="text-[11px] text-slate-600">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-900">
+                        <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[9px] font-black uppercase">Pasal 3</span>
+                        <span>Larangan Transaksi di Luar Platform (Bypass)</span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 pl-1 leading-relaxed">
                         3.1. Pengguna dilarang keras melakukan pembayaran tunai langsung atau transfer pribadi di luar platform demi menghindari risiko penipuan dan wanprestasi.<br />
-                        3.2. Kerugian transaksi yang terjadi di luar sistem pembayaran resmi platform berada di luar cakupan garansi Bantuin.id.
+                        3.2. Kerugian transaksi yang terjadi di luar sistem pembayaran resmi platform berada di luar cakupan garansi BantuinAja.id.
                       </p>
                     </div>
 
-                    <div>
-                      <h5 className="font-bold text-slate-900 mb-1">PASAL 4: STANDAR PRIVASI &amp; PERLINDUNGAN DATA (UU PDP)</h5>
-                      <p className="text-[11px] text-slate-600">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-900">
+                        <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[9px] font-black uppercase">Pasal 4</span>
+                        <span>Standar Privasi &amp; Perlindungan Data (UU PDP)</span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 pl-1 leading-relaxed">
                         4.1. Dokumen identitas (KTP) dan data kontak disimpan dengan standar enkripsi tinggi dan hanya digunakan untuk validasi kepatuhan hukum transaksi.<br />
                         4.2. Bantuin berkomitmen menjaga kerahasiaan data pribadi pengguna tanpa diperjualbelikan kepada pihak ketiga.
                       </p>
                     </div>
 
-                    <div>
-                      <h5 className="font-bold text-slate-900 mb-1">PASAL 5: RESOLUSI SENGKETA &amp; REFUND</h5>
-                      <p className="text-[11px] text-slate-600">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-900">
+                        <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 text-[9px] font-black uppercase">Pasal 5</span>
+                        <span>Resolusi Sengketa &amp; Refund</span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 pl-1 leading-relaxed">
                         5.1. Apabila tugas tidak diselesaikan sesuai kesepakatan, kedua pihak berhak mengajukan eskalasi arbitrase kepada tim penengah Bantuin.<br />
                         5.2. Keputusan tim penengah bersifat final berdasarkan riwayat kesepakatan chat dan bukti serah terima digital di platform.
                       </p>
@@ -1241,26 +1512,26 @@ function RegisterPageContent() {
                   </div>
                 </div>
 
-                {/* Checkbox Persetujuan Dokumen */}
-                <div className="pt-2">
-                  <label className="flex items-start gap-2.5 sm:gap-3 rounded-xl bg-blue-50/60 border border-blue-100 p-3 text-xs text-slate-700 cursor-pointer leading-relaxed">
+                {/* Checkbox Persetujuan Dokumen - Touch-Friendly Card */}
+                <div className="pt-1">
+                  <label className="flex items-start gap-2.5 sm:gap-3 rounded-xl sm:rounded-2xl bg-blue-50/70 hover:bg-blue-50/90 border border-blue-200/80 p-3 sm:p-3.5 text-xs text-slate-700 cursor-pointer leading-snug sm:leading-relaxed transition active:scale-[0.99]">
                     <input
                       type="checkbox"
                       checked={formData.agreeToS}
                       onChange={(e) => setFormData({ ...formData, agreeToS: e.target.checked })}
-                      className="mt-0.5 rounded border-slate-300 text-[#1683FF] focus:ring-[#1683FF] shrink-0 cursor-pointer"
+                      className="mt-0.5 w-4 h-4 rounded border-slate-300 text-[#1683FF] focus:ring-[#1683FF] shrink-0 cursor-pointer"
                       required
                     />
-                    <span>
-                      Saya telah membaca, memahami, dan menyetujui seluruh <strong className="text-slate-900">Dokumen Kesepakatan &amp; Tata Tertib Transaksi Bantuin.id</strong> di atas.
+                    <span className="text-[11px] sm:text-xs">
+                      Saya telah membaca, memahami, dan menyetujui seluruh <strong className="text-slate-900">Dokumen Kesepakatan &amp; Tata Tertib Transaksi BantuinAja.id</strong> di atas.
                     </span>
                   </label>
                 </div>
               </div>
             )}
 
-            {/* Stepper Navigation Buttons */}
-            <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 pt-3">
+            {/* Stepper Navigation Buttons - Mobile-Optimized Layout */}
+            <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 pt-3">
               {step > 1 && (
                 <button
                   type="button"
@@ -1276,8 +1547,9 @@ function RegisterPageContent() {
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className={`ml-auto px-8 py-3.5 rounded-2xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm shadow-sm transition active:scale-95 flex items-center gap-2 cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed ${step === 1 ? "w-full justify-center" : "w-full sm:w-auto justify-center"
-                  }`}
+                className={`px-6 sm:px-8 py-3.5 rounded-xl sm:rounded-2xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-extrabold text-xs sm:text-sm shadow-md shadow-blue-500/15 transition active:scale-[0.98] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed ${
+                  step === 1 ? "w-full justify-center" : "w-full sm:w-auto sm:ml-auto justify-center"
+                }`}
               >
                 {isSubmitting ? (
                   <>
@@ -1305,9 +1577,26 @@ function RegisterPageContent() {
         </div>
       </div>
 
+      {/* Immersive Brand Loading Screen saat Pendaftaran Akun */}
+      {isSubmitting && (
+        <AuthLoadingScreen
+          status={submitSuccess ? "success" : "loading"}
+          title={
+            submitSuccess
+              ? "Pendaftaran Berhasil!"
+              : "Mendaftarkan Akun Anda..."
+          }
+          subtitle={
+            submitSuccess
+              ? "Menyiapkan akun Anda dan mengarahkan ke beranda..."
+              : "Sedang memproses verifikasi dan menyimpan data profil Anda..."
+          }
+        />
+      )}
+
       {/* Subtle Bottom Footer */}
       <div className="w-full max-w-2xl mx-auto text-center text-[11px] text-slate-600 font-medium py-3 drop-shadow-2xs">
-        &copy; {new Date().getFullYear()} Bantuin.id &middot; Platform Bantuan, Jasa &amp; Sewa Komunitas
+        &copy; {new Date().getFullYear()} BantuinAja.id &middot; Platform Bantuan, Jasa &amp; Sewa Komunitas
       </div>
     </div>
   );

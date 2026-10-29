@@ -136,12 +136,14 @@ export default function PrivacyPage() {
             <p>
               Untuk mengajukan pertanyaan, permintaan akses data, atau keluhan terkait privasi, hubungi petugas kepatuhan kami melalui:
             </p>
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between">
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <div className="font-bold text-slate-800 text-xs">Unit Pelindungan Data Pribadi Bantuin.id</div>
-                <div className="text-[11px] text-slate-500">Email: privasi@bantuin.id • Subjek: [Pengaduan PDP]</div>
+                <div className="text-[11px] text-slate-500">
+                  Email: <a href="mailto:hellobantuinaja@gmail.com" className="text-[#1683FF] hover:underline font-semibold">hellobantuinaja@gmail.com</a> • WhatsApp: <a href="https://wa.me/6283843653251" className="text-emerald-700 hover:underline font-semibold">+62 838-4365-3251</a> • Alamat: Purwokerto, Jawa Tengah
+                </div>
               </div>
-              <span className="text-xs font-bold text-[#1683FF] bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-200">
+              <span className="text-xs font-bold text-[#1683FF] bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-200 shrink-0 self-start sm:self-auto">
                 Respon 3x24 Jam Kerja
               </span>
             </div>

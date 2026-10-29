@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import React, { useState, Suspense } from "react";
+import React, { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Navbar from "@/components/layout/Navbar";
@@ -10,31 +10,33 @@ import Footer from "@/components/layout/Footer";
 import LocationPickerMap from "@/components/map/LocationPickerMap";
 import { reverseGeocodeCoordinates } from "@/lib/services/gpsService";
 import { useApp } from "@/lib/context/AppContext";
-import { formatIDR, formatDeadlineWithHour, formatNumberWithDots, parseNumberFromDots } from "@/lib/utils";
+import { formatIDR, formatDeadlineWithHour, formatNumberWithDots } from "@/lib/utils";
+import { saveFormDraft, getFormDraft, clearFormDraft, useBeforeUnload } from "@/lib/hooks/useFormDraft";
 import { 
   ShieldCheck, 
   MapPin, 
   Clock, 
   Calendar,
-  FileText, 
   AlertCircle, 
   ArrowRight,
   ArrowLeft,
   Eye,
   CheckCircle2,
+  Check,
   Send,
-  Info,
   Navigation,
   Loader2,
   Camera,
   ImagePlus,
   X,
   Trash2,
-  Maximize2,
   FileImage,
   UserCheck,
   Scale,
-  Ban
+  Ban,
+  DollarSign,
+  Globe,
+  ClipboardList
 } from "lucide-react";
 import { detectProhibitedContent } from "@/lib/security";
 import CategoryIcon from "@/components/common/CategoryIcon";
@@ -47,26 +49,145 @@ function CreateRequestForm() {
   const targetHelper = searchParams.get("helper");
 
   const { 
-    createRequest, 
-    bantuinPoints, 
     currentUser, 
     userCoordinates, 
     userRealLocation, 
     selectedLocation,
-    activeKabupaten,
     detectUserLocation 
   } = useApp();
 
+  // Wizard Step State (1: Rincian, 2: Lokasi & Waktu, 3: Imbalan & Review)
+  const [currentStep, setCurrentStep] = useState(1);
+
+  // Form Fields - Step 1
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [category, setCategory] = useState("Ambil Dokumen");
+  const [category, setCategory] = useState("Kebutuhan Harian & Belanja");
   const [mode, setMode] = useState("offline");
   const [photoFiles, setPhotoFiles] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [photoError, setPhotoError] = useState(null);
   const [previewModalPhoto, setPreviewModalPhoto] = useState(null);
-  
-  // Format file size helper
+
+  // Form Fields - Step 2 (Location & Deadline)
+  const [locationName, setLocationName] = useState(
+    userRealLocation?.fullAddress || selectedLocation || ""
+  );
+  const [coords, setCoords] = useState(
+    userCoordinates || 
+    (userRealLocation ? { latitude: userRealLocation.latitude, longitude: userRealLocation.longitude } : { latitude: -7.9044, longitude: 110.0543 })
+  );
+  const [pickupPoint, setPickupPoint] = useState("");
+  const [isDetectingGPS, setIsDetectingGPS] = useState(false);
+  const [isReverseGeocoding, setIsReverseGeocoding] = useState(false);
+
+  const [deadlineMode, setDeadlineMode] = useState("preset"); // 'preset' | 'custom'
+  const [presetDeadline, setPresetDeadline] = useState("today_sore");
+
+  // Helper date generators for YYYY-MM-DD
+  const getTodayStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const getTomorrowStr = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const getDayAfterTomorrowStr = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 2);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+
+  const [customDate, setCustomDate] = useState(getTodayStr());
+  const [customTime, setCustomTime] = useState("17:00");
+
+  // Form Fields - Step 3 (Reward & Declaration)
+  const [rewardAmount, setRewardAmount] = useState("");
+  const [isVoluntary, setIsVoluntary] = useState(false);
+  const [itemType, setItemType] = useState("Dokumen / Berkas");
+  const [legalDeclarationChecked, setLegalDeclarationChecked] = useState(false);
+  const [prohibitedWarning, setProhibitedWarning] = useState(null);
+
+  // Submission & Validation States
+  const [errors, setErrors] = useState({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const DRAFT_KEY = "bantuin_draft_create_bantuan";
+  const hasLoadedDraftRef = useRef(false);
+
+  // Restore draft from storage on mount
+  useEffect(() => {
+    if (hasLoadedDraftRef.current) return;
+    hasLoadedDraftRef.current = true;
+    const draft = getFormDraft(DRAFT_KEY, null);
+    if (draft) {
+      if (draft.title) setTitle(draft.title);
+      if (draft.description) setDescription(draft.description);
+      if (draft.category) setCategory(draft.category);
+      if (draft.mode) setMode(draft.mode);
+      if (draft.locationName) setLocationName(draft.locationName);
+      if (draft.pickupPoint) setPickupPoint(draft.pickupPoint);
+      if (draft.coords) setCoords(draft.coords);
+      if (draft.deadlineMode) setDeadlineMode(draft.deadlineMode);
+      if (draft.presetDeadline) setPresetDeadline(draft.presetDeadline);
+      if (draft.customDate) setCustomDate(draft.customDate);
+      if (draft.customTime) setCustomTime(draft.customTime);
+      if (draft.rewardAmount) setRewardAmount(draft.rewardAmount);
+      if (draft.isVoluntary !== undefined) setIsVoluntary(draft.isVoluntary);
+      if (draft.itemType) setItemType(draft.itemType);
+      if (draft.currentStep && Number(draft.currentStep) >= 1) {
+        setCurrentStep(Number(draft.currentStep));
+      }
+    }
+  }, []);
+
+  // Auto-save draft on every change
+  useEffect(() => {
+    if (!hasLoadedDraftRef.current) return;
+    if (title || description || rewardAmount || pickupPoint || currentStep > 1) {
+      saveFormDraft(DRAFT_KEY, {
+        title,
+        description,
+        category,
+        mode,
+        locationName,
+        pickupPoint,
+        coords,
+        deadlineMode,
+        presetDeadline,
+        customDate,
+        customTime,
+        rewardAmount,
+        isVoluntary,
+        itemType,
+        currentStep,
+      });
+    }
+  }, [
+    title,
+    description,
+    category,
+    mode,
+    locationName,
+    pickupPoint,
+    coords,
+    deadlineMode,
+    presetDeadline,
+    customDate,
+    customTime,
+    rewardAmount,
+    isVoluntary,
+    itemType,
+    currentStep,
+  ]);
+
+  const isFormDirty = Boolean(title.trim() || description.trim() || rewardAmount.trim());
+  useBeforeUnload(isFormDirty, "Ada isian permohonan bantuan yang belum dipublikasikan. Yakin ingin meninggalkan halaman?");
+
+  const categories = BANTUAN_CATEGORIES.filter((c) => c.id !== "Semua").map((c) => c.label);
+
   const formatFileSize = (bytes) => {
     if (!bytes || bytes === 0) return "0 B";
     const k = 1024;
@@ -74,11 +195,6 @@ function CreateRequestForm() {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
   };
-
-  // Legal & Item Safety Declaration (Pola Grab/Gojek Self-Declaration)
-  const [itemType, setItemType] = useState("Dokumen / Berkas");
-  const [legalDeclarationChecked, setLegalDeclarationChecked] = useState(false);
-  const [prohibitedWarning, setProhibitedWarning] = useState(null);
 
   const processImageFiles = (files) => {
     setPhotoError(null);
@@ -152,18 +268,6 @@ function CreateRequestForm() {
       setPhotoError(null);
     }
   };
-  
-  // Custom Location & Map Pin Picker States
-  const [locationName, setLocationName] = useState(
-    userRealLocation?.fullAddress || selectedLocation || ""
-  );
-  const [coords, setCoords] = useState(
-    userCoordinates || 
-    (userRealLocation ? { latitude: userRealLocation.latitude, longitude: userRealLocation.longitude } : { latitude: -7.9044, longitude: 110.0543 })
-  );
-  const [pickupPoint, setPickupPoint] = useState("");
-  const [isDetectingGPS, setIsDetectingGPS] = useState(false);
-  const [isReverseGeocoding, setIsReverseGeocoding] = useState(false);
 
   const handleUseMyGPS = async () => {
     setIsDetectingGPS(true);
@@ -202,34 +306,6 @@ function CreateRequestForm() {
       setIsReverseGeocoding(false);
     }
   };
-
-  const [deadlineMode, setDeadlineMode] = useState("preset"); // 'preset' | 'custom'
-  const [presetDeadline, setPresetDeadline] = useState("today_sore");
-
-  // Helper date generators for YYYY-MM-DD
-  const getTodayStr = () => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  };
-  const getTomorrowStr = () => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  };
-  const getDayAfterTomorrowStr = () => {
-    const d = new Date();
-    d.setDate(d.getDate() + 2);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  };
-
-  const [customDate, setCustomDate] = useState(getTodayStr());
-  const [customTime, setCustomTime] = useState("17:00");
-  const [rewardAmount, setRewardAmount] = useState("");
-  const [isVoluntary, setIsVoluntary] = useState(false);
-  const [errors, setErrors] = useState({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const categories = BANTUAN_CATEGORIES.filter((c) => c.id !== "Semua").map((c) => c.label);
 
   const calculateDeadlineTimestamp = () => {
     const now = new Date();
@@ -299,16 +375,16 @@ function CreateRequestForm() {
     return formatDeadlineWithHour(iso);
   };
 
-  const validate = () => {
+  // Step-Specific Validations
+  const validateStep1 = () => {
     const errs = {};
-    if (!title.trim() || title.length < 5) {
-      errs.title = "Judul minimal 5 karakter";
+    if (!title.trim() || title.trim().length < 5) {
+      errs.title = "Judul kebutuhan minimal 5 karakter";
     }
-    if (!description.trim() || description.length < 15) {
-      errs.description = "Deskripsi minimal 15 karakter agar helper memahami kebutuhan tugas Anda.";
+    if (!description.trim() || description.trim().length < 15) {
+      errs.description = "Deskripsi minimal 15 karakter agar helper memahami rincian tugas Anda.";
     }
 
-    // Safety & Prohibited Content Detection (Risk Classification: BLOCK vs REVIEW)
     const checkText = `${title} ${description}`;
     const safetyCheck = detectProhibitedContent(checkText);
     if (safetyCheck.flagged) {
@@ -320,14 +396,14 @@ function CreateRequestForm() {
       setProhibitedWarning(null);
     }
 
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const validateStep2 = () => {
+    const errs = {};
     if (mode === "offline" && !locationName.trim()) {
-      errs.locationName = "Tentukan alamat atau titik lokasi penjemputan/tugas";
-    }
-    if (mode === "offline" && !legalDeclarationChecked) {
-      errs.legalDeclaration = "Wajib menyetujui pernyataan kepatuhan muatan barang sebelum mempublikasikan permintaan.";
-    }
-    if (!isVoluntary && (!rewardAmount || Number(rewardAmount) < 1000)) {
-      errs.rewardAmount = "Nominal imbalan minimal Rp1.000 (atau aktifkan mode sukarela)";
+      errs.locationName = "Tentukan alamat atau nama lokasi penjemputan/tugas";
     }
     if (deadlineMode === "custom") {
       if (!customDate) {
@@ -340,9 +416,53 @@ function CreateRequestForm() {
     return Object.keys(errs).length === 0;
   };
 
+  const validateStep3 = () => {
+    const errs = {};
+    if (!isVoluntary && (!rewardAmount || Number(rewardAmount) < 1000)) {
+      errs.rewardAmount = "Nominal imbalan minimal Rp1.000 (atau aktifkan opsi sukarela)";
+    }
+    if (mode === "offline" && !legalDeclarationChecked) {
+      errs.legalDeclaration = "Wajib menyetujui pernyataan kepatuhan muatan barang sebelum mempublikasikan permintaan.";
+    }
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const handleNextStep = () => {
+    if (currentStep === 1) {
+      if (validateStep1()) {
+        setCurrentStep(2);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    } else if (currentStep === 2) {
+      if (validateStep2()) {
+        setCurrentStep(3);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    }
+  };
+
+  const handlePrevStep = () => {
+    if (currentStep > 1) {
+      setCurrentStep(currentStep - 1);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  };
+
   const handleFormSubmit = async (e) => {
     e.preventDefault();
-    if (!validate()) return;
+
+    if (currentUser?.verificationStatus === "suspended") {
+      setErrors((prev) => ({
+        ...prev,
+        submit: "Akun Anda sedang ditangguhkan oleh Administrator Bantuin. Anda tidak dapat membuat permintaan bantuan baru.",
+      }));
+      return;
+    }
+
+    if (!validateStep1() || !validateStep2() || !validateStep3()) {
+      return;
+    }
 
     setIsSubmitting(true);
     const deadlineDate = calculateDeadlineTimestamp();
@@ -350,7 +470,6 @@ function CreateRequestForm() {
     try {
       let uploadedAttachments = [];
 
-      // Upload file hanya jika form valid dan disubmit secara resmi
       if (photoFiles.length > 0) {
         const formData = new FormData();
         photoFiles.forEach((item) => {
@@ -404,12 +523,15 @@ function CreateRequestForm() {
       }
 
       if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("bantuin_requests_updated"));
         window.dispatchEvent(new Event("bantuin_activity_updated"));
       }
 
       if (data.data?.id) {
+        clearFormDraft(DRAFT_KEY);
         router.push(`/bantuan/${data.data.id}`);
       } else {
+        clearFormDraft(DRAFT_KEY);
         router.push("/bantuan");
       }
     } catch (err) {
@@ -424,635 +546,655 @@ function CreateRequestForm() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#EEF2F6] text-slate-800">
+    <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-slate-800">
       <Navbar />
 
-      <main className="flex-1 max-w-[1440px] w-full mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 py-8 sm:py-10">
+      <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8">
         
         {/* Navigation Back */}
         <Link
           href="/bantuan"
-          className="inline-flex items-center gap-2 text-xs sm:text-sm font-bold text-slate-600 hover:text-[#1683FF] transition mb-6"
+          className="inline-flex items-center gap-2 text-xs sm:text-sm font-semibold text-slate-500 hover:text-[#1683FF] transition mb-4 sm:mb-6"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>Kembali ke Daftar Bantuan</span>
         </Link>
 
-        {/* Page Title */}
+        {/* Header Title */}
         <div className="mb-6">
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
-            Buat Permintaan Bantuan Baru
+          <h1 className="text-xl sm:text-2xl lg:text-3xl font-extrabold text-slate-900 tracking-tight">
+            Buat Permintaan Bantuan
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-1">
-            Publikasikan kebutuhan tugas Anda. Tenaga bantuan terverifikasi di sekitar Anda akan langsung mengajukan tawaran bantuan.
+            Isi formulir bertahap di bawah ini agar tenaga bantuan di sekitar Anda dapat memberikan penawaran terbaik.
           </p>
         </div>
 
-        {/* Banner Ditujukan ke Tenaga Bantuan Tertentu (Jika Dipilih dari Card / Modal) */}
+        {/* Banner Ditujukan ke Tenaga Bantuan Tertentu (Jika ada) */}
         {targetHelper && (
-          <div className="mb-6 p-4 rounded-2xl bg-blue-50 border border-blue-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="mb-6 p-4 rounded-2xl bg-blue-50/80 border border-blue-200 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-[#1683FF] text-white flex items-center justify-center shrink-0">
-                <UserCheck className="w-5 h-5" />
+              <div className="w-8 h-8 rounded-xl bg-[#1683FF] text-white flex items-center justify-center shrink-0">
+                <UserCheck className="w-4 h-4" />
               </div>
-              <div>
-                <p className="text-xs font-bold text-blue-950">
-                  Permintaan Khusus untuk: <span className="text-[#1683FF] font-black underline">{targetHelper}</span>
-                </p>
-                <p className="text-[11px] text-blue-700 mt-0.5">
-                  Tenaga bantuan ini akan menerima prioritas notifikasi tugas dan penawaran langsung dari Anda.
-                </p>
-              </div>
+              <p className="text-xs text-slate-700">
+                Permintaan khusus untuk <strong className="text-[#1683FF]">{targetHelper}</strong>. Notifikasi prioritas akan dikirimkan langsung.
+              </p>
             </div>
             <Link
               href="/bantuan/create"
-              className="text-xs font-bold text-slate-500 hover:text-slate-800 underline self-start sm:self-auto shrink-0"
+              className="text-xs font-semibold text-slate-400 hover:text-slate-700 underline shrink-0"
             >
-              Hapus Target Khusus
+              Batalkan
             </Link>
           </div>
         )}
 
-        {/* UNIFIED COHESIVE MODERN CONTAINER */}
-        <div className="bg-white border border-slate-200 rounded-[32px] p-6 sm:p-8 lg:p-10 shadow-xs">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-start">
-            
-            {/* Main Form (8 Columns on desktop, Order-1 on mobile) */}
-            <div className="lg:col-span-8 space-y-6 order-1">
-              <form onSubmit={handleFormSubmit} className="space-y-6">
-                
-                {/* Judul Kebutuhan */}
+        {/* MODERN CLEAN STEPPER BAR */}
+        <div className="bg-white rounded-2xl border border-slate-200/80 p-4 mb-6 shadow-xs">
+          {/* Mobile Stepper Header */}
+          <div className="sm:hidden space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-[#1683FF]">
+                Langkah {currentStep} dari 3
+              </span>
+              <span className="text-slate-500 font-medium">
+                {currentStep === 1 && "Rincian Bantuan"}
+                {currentStep === 2 && "Lokasi & Waktu"}
+                {currentStep === 3 && "Imbalan & Review"}
+              </span>
+            </div>
+            <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+              <div 
+                className="bg-[#1683FF] h-full rounded-full transition-all duration-300 ease-out"
+                style={{ width: `${(currentStep / 3) * 100}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Desktop Stepper */}
+          <div className="hidden sm:grid grid-cols-3 gap-3">
+            {/* Step 1 */}
+            <button
+              type="button"
+              onClick={() => setCurrentStep(1)}
+              className={`flex items-center gap-3 p-3 rounded-xl text-left transition ${
+                currentStep === 1 ? "bg-blue-50/80 border border-blue-200/60" : "hover:bg-slate-50"
+              }`}
+            >
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 transition ${
+                currentStep > 1 
+                  ? "bg-emerald-500 text-white" 
+                  : currentStep === 1 
+                  ? "bg-[#1683FF] text-white" 
+                  : "bg-slate-100 text-slate-500"
+              }`}>
+                {currentStep > 1 ? <Check className="w-4 h-4" /> : "1"}
+              </div>
+              <div className="min-w-0">
+                <p className={`text-xs font-bold leading-tight ${currentStep === 1 ? "text-slate-900" : "text-slate-600"}`}>
+                  1. Rincian Bantuan
+                </p>
+                <p className="text-[11px] text-slate-400 truncate">Judul, kategori & deskripsi</p>
+              </div>
+            </button>
+
+            {/* Step 2 */}
+            <button
+              type="button"
+              onClick={() => { if (validateStep1()) setCurrentStep(2); }}
+              className={`flex items-center gap-3 p-3 rounded-xl text-left transition ${
+                currentStep === 2 ? "bg-blue-50/80 border border-blue-200/60" : "hover:bg-slate-50"
+              }`}
+            >
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 transition ${
+                currentStep > 2 
+                  ? "bg-emerald-500 text-white" 
+                  : currentStep === 2 
+                  ? "bg-[#1683FF] text-white" 
+                  : "bg-slate-100 text-slate-500"
+              }`}>
+                {currentStep > 2 ? <Check className="w-4 h-4" /> : "2"}
+              </div>
+              <div className="min-w-0">
+                <p className={`text-xs font-bold leading-tight ${currentStep === 2 ? "text-slate-900" : "text-slate-600"}`}>
+                  2. Lokasi &amp; Waktu
+                </p>
+                <p className="text-[11px] text-slate-400 truncate">Titik peta &amp; batas deadline</p>
+              </div>
+            </button>
+
+            {/* Step 3 */}
+            <button
+              type="button"
+              onClick={() => { if (validateStep1() && validateStep2()) setCurrentStep(3); }}
+              className={`flex items-center gap-3 p-3 rounded-xl text-left transition ${
+                currentStep === 3 ? "bg-blue-50/80 border border-blue-200/60" : "hover:bg-slate-50"
+              }`}
+            >
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 transition ${
+                currentStep === 3 
+                  ? "bg-[#1683FF] text-white" 
+                  : "bg-slate-100 text-slate-500"
+              }`}>
+                3
+              </div>
+              <div className="min-w-0">
+                <p className={`text-xs font-bold leading-tight ${currentStep === 3 ? "text-slate-900" : "text-slate-600"}`}>
+                  3. Imbalan &amp; Review
+                </p>
+                <p className="text-[11px] text-slate-400 truncate">Budget imbalan &amp; publikasi</p>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        {/* STEP CONTENT CONTAINER */}
+        <div className="bg-white rounded-3xl border border-slate-200/90 p-5 sm:p-8 shadow-xs">
+          
+          {/* ==================== STEP 1: RINCIAN BANTUAN ==================== */}
+          {currentStep === 1 && (
+            <div className="space-y-6 animate-in fade-in duration-200">
+              <div className="border-b border-slate-100 pb-4">
+                <h2 className="text-base sm:text-lg font-bold text-slate-900">
+                  Langkah 1: Rincian Bantuan
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Tuliskan judul singkat, pilih kategori, dan jelaskan tugas yang Anda butuhkan.
+                </p>
+              </div>
+
+              {/* Judul Kebutuhan */}
+              <div>
+                <label className="block text-xs sm:text-sm font-bold text-slate-900 mb-1.5">
+                  Judul Kebutuhan Tugas <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Contoh: Ambil Map Dokumen di Menara Kuningan Lantai 8"
+                  className={`w-full text-xs sm:text-sm p-3.5 rounded-xl border transition ${
+                    errors.title ? "border-red-400 bg-red-50/20" : "border-slate-200 focus:border-[#1683FF]"
+                  } focus:outline-none font-medium text-slate-800`}
+                />
+                {errors.title && <p className="text-[11px] text-red-500 mt-1">{errors.title}</p>}
+              </div>
+
+              {/* Kategori & Mode Pelaksanaan */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs sm:text-sm font-bold text-slate-900 mb-2">
-                    Judul Kebutuhan Tugas <span className="text-red-500">*</span>
+                  <label className="block text-xs sm:text-sm font-bold text-slate-900 mb-1.5">
+                    Kategori Tugas <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    type="text"
-                    required
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="Contoh: Ambil Map Dokumen Notaris di Menara Kuningan Lantai 8"
-                    className={`w-full text-xs sm:text-sm p-3.5 rounded-xl border transition ${
-                      errors.title ? "border-red-400 bg-red-50/20" : "border-slate-200 focus:border-[#1683FF]"
-                    } focus:outline-none font-medium`}
-                  />
-                  {errors.title && <p className="text-[11px] text-red-500 mt-1">{errors.title}</p>}
-                </div>
-
-                {/* Kategori & Mode Pelaksanaan */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs sm:text-sm font-bold text-slate-900 mb-2">
-                      Kategori Tugas <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={category}
-                      onChange={(e) => setCategory(e.target.value)}
-                      className="w-full text-xs sm:text-sm p-3.5 rounded-xl border border-slate-200 bg-white font-medium text-slate-800 focus:outline-none focus:border-[#1683FF]"
-                    >
-                      {categories.map((c) => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs sm:text-sm font-bold text-slate-900 mb-2">
-                      Mode Pelaksanaan <span className="text-red-500">*</span>
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setMode("offline")}
-                        className={`py-3 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                          mode === "offline"
-                            ? "bg-blue-50 border-[#1683FF] text-[#1683FF]"
-                            : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-                        }`}
-                      >
-                        <MapPin className="w-3.5 h-3.5" />
-                        <span>Tatap Muka</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setMode("online")}
-                        className={`py-3 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                          mode === "online"
-                            ? "bg-purple-50 border-purple-400 text-purple-700"
-                            : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-                        }`}
-                      >
-                        <span>Online / Remote</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Deskripsi Lengkap */}
-                <div>
-                  <label className="block text-xs sm:text-sm font-bold text-slate-900 mb-2">
-                    Deskripsi & Rincian Tugas <span className="text-red-500">*</span>
-                  </label>
-                  <textarea
-                    rows={4}
-                    required
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Jelaskan secara rinci apa yang perlu dilakukan, barang/dokumen yang dibawa, instruksi keselamatan, dan detail penerima..."
-                    className={`w-full text-xs sm:text-sm p-4 rounded-xl border transition ${
-                      errors.description ? "border-red-400 bg-red-50/20" : "border-slate-200 focus:border-[#1683FF]"
-                    } focus:outline-none leading-relaxed`}
-                  />
-                  {errors.description && <p className="text-[11px] text-red-500 mt-1">{errors.description}</p>}
-                </div>
-
-                {/* Upload Foto Barang / Bukti Tugas (Opsional) */}
-                <div className="p-4 sm:p-5 rounded-2xl bg-slate-50/80 border border-slate-200/90 space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
-                    <div>
-                      <label className="block text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                        <Camera className="w-4 h-4 text-[#1683FF]" />
-                        <span>Foto Barang / Bukti Kebutuhan</span>
-                        <span className="text-[11px] font-normal text-slate-400">(Opsional)</span>
-                      </label>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        Lampirkan foto barang yang ingin dititip beli, bukti dokumen, foto lokasi, atau barang yang perlu dipindahkan agar helper langsung memahami kebutuhan Anda.
-                      </p>
-                    </div>
-                    {photoFiles.length > 0 && (
-                      <span className="text-xs font-bold text-[#1683FF] bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100 self-start sm:self-auto shrink-0">
-                        {photoFiles.length} Foto Terlampir
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Preview Thumbnails */}
-                  {photoFiles.length > 0 && (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
-                      {photoFiles.map((item, idx) => (
-                        <div
-                          key={idx}
-                          onClick={() => setPreviewModalPhoto({ ...item, index: idx })}
-                          className="relative group rounded-xl overflow-hidden border border-slate-200 bg-white aspect-square shadow-2xs cursor-pointer hover:ring-2 hover:ring-[#1683FF] transition duration-200"
-                        >
-                          <img
-                            src={item.previewUrl}
-                            alt={item.name || `Lampiran barang ${idx + 1}`}
-                            className="w-full h-full object-cover group-hover:scale-105 transition duration-200"
-                          />
-                          
-                          {/* Hover Overlay with View Icon */}
-                          <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition duration-200 flex flex-col items-center justify-center gap-1 text-white">
-                            <Eye className="w-5 h-5 drop-shadow-sm" />
-                            <span className="text-[10px] font-bold">Lihat Detail</span>
-                          </div>
-
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRemovePhoto(idx);
-                            }}
-                            className="absolute top-1.5 right-1.5 p-1.5 rounded-full bg-slate-900/80 hover:bg-red-600 text-white shadow-xs transition cursor-pointer z-10"
-                            title="Hapus foto"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                          
-                          <div className="absolute bottom-1.5 left-1.5 right-1.5 flex items-center justify-between pointer-events-none z-10">
-                            <span className="px-1.5 py-0.5 rounded bg-slate-900/70 text-white text-[10px] font-bold">
-                              Foto {idx + 1}
-                            </span>
-                            {item.size > 0 && (
-                              <span className="px-1.5 py-0.5 rounded bg-slate-900/70 text-white text-[9px] font-medium">
-                                {formatFileSize(item.size)}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Upload Drop Zone */}
-                  <label
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                    className={`border-2 border-dashed rounded-2xl p-5 sm:p-6 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-200 group ${
-                      isDragging
-                        ? "border-[#1683FF] bg-blue-50/80 scale-[1.01] ring-4 ring-blue-100"
-                        : "border-slate-300 hover:border-[#1683FF] bg-white hover:bg-blue-50/20"
-                    }`}
+                  <select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    className="w-full text-xs sm:text-sm p-3.5 rounded-xl border border-slate-200 bg-white font-medium text-slate-800 focus:outline-none focus:border-[#1683FF]"
                   >
-                    <input
-                      type="file"
-                      multiple
-                      accept="image/*"
-                      onChange={handlePhotoUpload}
-                      className="hidden"
-                    />
-                    <div
-                      className={`w-12 h-12 rounded-full flex items-center justify-center mb-2.5 transition-all duration-200 ${
-                        isDragging
-                          ? "bg-[#1683FF] text-white scale-110 shadow-md"
-                          : "bg-blue-50 text-[#1683FF] group-hover:scale-110"
+                    {categories.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs sm:text-sm font-bold text-slate-900 mb-1.5">
+                    Mode Pelaksanaan <span className="text-red-500">*</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setMode("offline")}
+                      className={`py-3 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                        mode === "offline"
+                          ? "bg-blue-50 border-[#1683FF] text-[#1683FF]"
+                          : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
                       }`}
                     >
-                      <ImagePlus className="w-6 h-6" />
-                    </div>
-                    <span className="text-xs sm:text-sm font-bold text-slate-800 group-hover:text-[#1683FF] transition">
-                      {isDragging
-                        ? "Lepaskan foto di sini untuk mengunggah"
-                        : "Tarik & lepas foto ke sini, atau klik untuk memilih file"}
-                    </span>
-                    <span className="text-[11px] text-slate-400 mt-1">
-                      Hanya format gambar: JPG, PNG, WEBP, GIF (Bisa pilih lebih dari 1 foto)
-                    </span>
-                  </label>
+                      <MapPin className="w-3.5 h-3.5" />
+                      <span>Tatap Muka</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMode("online")}
+                      className={`py-3 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                        mode === "online"
+                          ? "bg-purple-50 border-purple-400 text-purple-700"
+                          : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      <Globe className="w-3.5 h-3.5" />
+                      <span>Online / Remote</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
 
-                  {/* Foto Error Alert if non-image dropped/selected */}
-                  {photoError && (
-                    <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-2">
-                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-                      <span>{photoError}</span>
+              {/* Deskripsi Lengkap */}
+              <div>
+                <label className="block text-xs sm:text-sm font-bold text-slate-900 mb-1.5">
+                  Deskripsi &amp; Rincian Tugas <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  rows={4}
+                  required
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Jelaskan secara rinci apa yang perlu dilakukan, barang yang dibawa/dibeli, instruksi keselamatan, dan detail penerima..."
+                  className={`w-full text-xs sm:text-sm p-3.5 rounded-xl border transition ${
+                    errors.description ? "border-red-400 bg-red-50/20" : "border-slate-200 focus:border-[#1683FF]"
+                  } focus:outline-none leading-relaxed text-slate-800`}
+                />
+                {errors.description && <p className="text-[11px] text-red-500 mt-1">{errors.description}</p>}
+              </div>
+
+              {/* Prohibited Warning (jika terdeteksi kata terlarang) */}
+              {prohibitedWarning && (
+                <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 space-y-1.5">
+                  <div className="flex items-center gap-2 font-bold text-xs sm:text-sm text-rose-900">
+                    <Ban className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>Peringatan Konten: {prohibitedWarning.category}</span>
+                  </div>
+                  <p className="text-xs text-rose-700 leading-relaxed">
+                    {prohibitedWarning.reason}
+                  </p>
+                </div>
+              )}
+
+              {/* Upload Foto Barang / Bukti (Opsional) */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-slate-50/70 border border-slate-200/80 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <Camera className="w-4 h-4 text-[#1683FF] shrink-0" />
+                      <span className="text-xs sm:text-sm font-bold text-slate-900">
+                        Foto Barang / Lampiran Tugas
+                      </span>
                     </div>
+                    <span className="text-[10px] font-semibold text-slate-500 bg-slate-200/70 px-2 py-0.5 rounded-md border border-slate-300/40 shrink-0">
+                      Opsional
+                    </span>
+                  </div>
+                  {photoFiles.length > 0 && (
+                    <span className="text-xs font-bold text-[#1683FF] bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200 shrink-0">
+                      {photoFiles.length} foto terpilih
+                    </span>
                   )}
                 </div>
 
-                {/* Lokasi Bebas & Tentukan Titik Peta (jika Tatap Muka) */}
-                {mode === "offline" && (
-                  <div className="space-y-4 p-4 sm:p-5 rounded-2xl bg-slate-50/80 border border-slate-200/90">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1 border-b border-slate-200/60">
-                      <div>
-                        <h4 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                          <MapPin className="w-4 h-4 text-[#1683FF]" />
-                          <span>Tentukan Lokasi &amp; Titik Tugas</span>
-                          <span className="text-red-500">*</span>
-                        </h4>
-                        <p className="text-[11px] text-slate-500 mt-0.5">
-                          Anda dapat mengetik alamat bebas dan mengklik titik di peta secara presisi.
-                        </p>
-                      </div>
-                      
-                      <button
-                        type="button"
-                        onClick={handleUseMyGPS}
-                        disabled={isDetectingGPS}
-                        className="inline-flex items-center gap-1.5 text-xs font-bold text-[#1683FF] hover:text-[#0F6FE5] bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-xl border border-blue-200/80 transition shadow-2xs cursor-pointer self-start sm:self-auto"
+                {/* Thumbnails */}
+                {photoFiles.length > 0 && (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2.5 pt-1">
+                    {photoFiles.map((item, idx) => (
+                      <div
+                        key={idx}
+                        onClick={() => setPreviewModalPhoto({ ...item, index: idx })}
+                        className="relative group rounded-xl overflow-hidden border border-slate-200 bg-white aspect-square cursor-pointer hover:ring-2 hover:ring-[#1683FF] transition duration-150"
                       >
-                        {isDetectingGPS ? (
-                          <>
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            <span>Mendeteksi GPS...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Navigation className="w-3.5 h-3.5" />
-                            <span>Gunakan GPS Saya</span>
-                          </>
-                        )}
-                      </button>
+                        <img
+                          src={item.previewUrl}
+                          alt={item.name || `Lampiran ${idx + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemovePhoto(idx);
+                          }}
+                          className="absolute top-1 right-1 p-1 rounded-full bg-slate-900/80 hover:bg-red-600 text-white transition z-10"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Drag & Drop Zone */}
+                <label
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  className={`border-2 border-dashed rounded-xl p-4 sm:p-5 flex flex-col items-center justify-center text-center cursor-pointer transition ${
+                    isDragging
+                      ? "border-[#1683FF] bg-blue-50/70"
+                      : "border-slate-300 hover:border-[#1683FF] bg-white"
+                  }`}
+                >
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*"
+                    onChange={handlePhotoUpload}
+                    className="hidden"
+                  />
+                  <ImagePlus className="w-6 h-6 text-[#1683FF] mb-1.5" />
+                  <span className="text-xs font-semibold text-slate-700">
+                    Klik atau tarik foto ke sini untuk mengunggah
+                  </span>
+                  <span className="text-[11px] text-slate-400 mt-0.5">
+                    Mendukung JPG, PNG, WEBP (Bisa lebih dari 1 foto)
+                  </span>
+                </label>
+
+                {photoError && (
+                  <p className="text-xs text-amber-600 flex items-center gap-1.5">
+                    <AlertCircle className="w-3.5 h-3.5" />
+                    <span>{photoError}</span>
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ==================== STEP 2: LOKASI & WAKTU ==================== */}
+          {currentStep === 2 && (
+            <div className="space-y-6 animate-in fade-in duration-200">
+              <div className="border-b border-slate-100 pb-4">
+                <h2 className="text-base sm:text-lg font-bold text-slate-900">
+                  Langkah 2: Lokasi &amp; Batas Waktu
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Tentukan titik pertemuan tugas (jika tatap muka) dan batas waktu penyelesaian.
+                </p>
+              </div>
+
+              {/* Lokasi (Jika Offline) */}
+              {mode === "offline" ? (
+                <div className="space-y-4 p-4 sm:p-5 rounded-2xl bg-slate-50/70 border border-slate-200/80">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                        <MapPin className="w-4 h-4 text-[#1683FF]" />
+                        <span>Titik Lokasi Tugas / Penjemputan</span>
+                        <span className="text-red-500">*</span>
+                      </h3>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Klik pada peta untuk mengunci titik koordinat yang presisi.
+                      </p>
                     </div>
 
-                    {/* Interactive Map Pin Picker */}
-                    <div>
-                      <LocationPickerMap
-                        latitude={coords?.latitude || -7.9044}
-                        longitude={coords?.longitude || 110.0543}
-                        onChange={handleMapLocationChange}
-                        height="260px"
-                      />
-                      
-                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                        <div className="flex items-center gap-1.5 text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/80 font-medium">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                          <span>
-                            Titik Pin Terkunci: {coords ? `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}` : "Belum ditentukan"}
-                          </span>
-                        </div>
+                    <button
+                      type="button"
+                      onClick={handleUseMyGPS}
+                      disabled={isDetectingGPS}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#1683FF] hover:text-[#0F6FE5] bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-200 transition self-start sm:self-auto cursor-pointer"
+                    >
+                      {isDetectingGPS ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Mendeteksi GPS...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Navigation className="w-3.5 h-3.5" />
+                          <span>Gunakan GPS Saya</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
 
+                  {/* Interactive Map */}
+                  <div>
+                    <LocationPickerMap
+                      latitude={coords?.latitude || -7.9044}
+                      longitude={coords?.longitude || 110.0543}
+                      onChange={handleMapLocationChange}
+                      onAddressResolved={(resolvedAddr) => {
+                        if (resolvedAddr) {
+                          setLocationName(resolvedAddr);
+                          setErrors((prev) => ({ ...prev, locationName: null }));
+                        }
+                      }}
+                      onGeocodingStateChange={setIsReverseGeocoding}
+                      height="240px"
+                    />
+
+                    <div className="mt-2 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-500">
+                        Koordinat: {coords ? `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}` : "-"}
+                      </span>
+                      {isReverseGeocoding ? (
+                        <span className="text-[#1683FF] font-semibold inline-flex items-center gap-1 animate-pulse">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          <span>Alamat terisi otomatis...</span>
+                        </span>
+                      ) : (
                         <button
                           type="button"
                           onClick={handleSyncAddressFromCoords}
-                          disabled={isReverseGeocoding}
-                          className="text-[#1683FF] hover:text-[#0F6FE5] font-bold hover:underline inline-flex items-center gap-1 cursor-pointer"
+                          className="text-[#1683FF] font-semibold hover:underline inline-flex items-center gap-1 cursor-pointer"
                         >
-                          {isReverseGeocoding ? (
-                            <>
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                              <span>Membaca Alamat Pin...</span>
-                            </>
-                          ) : (
-                            <span>Gunakan Alamat dari Titik Pin Peta</span>
-                          )}
+                          Sinkron Alamat dari Pin Peta
                         </button>
-                      </div>
-                    </div>
-
-                    {/* 2 Fields: Alamat Utama Bebas & Patokan Spesifik */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
-                      {/* Field 1: Alamat / Nama Tempat Bebas */}
-                      <div>
-                        <label className="block text-xs font-bold text-slate-800 mb-1.5">
-                          Nama Alamat / Tempat Tugas <span className="text-red-500">*</span>
-                        </label>
-                        <input
-                          type="text"
-                          value={locationName}
-                          onChange={(e) => setLocationName(e.target.value)}
-                          placeholder="Contoh: Jl. Pantai Glagah No. 12, Temon, Kulon Progo"
-                          className={`w-full text-xs sm:text-sm p-3 rounded-xl border transition ${
-                            errors.locationName ? "border-red-400 bg-red-50/20" : "border-slate-200 focus:border-[#1683FF]"
-                          } focus:outline-none bg-white font-medium`}
-                        />
-                        {errors.locationName && <p className="text-[11px] text-red-500 mt-1">{errors.locationName}</p>}
-                      </div>
-
-                      {/* Field 2: Patokan Titik Temu Spesifik */}
-                      <div>
-                        <label className="block text-xs font-bold text-slate-800 mb-1.5">
-                          Patokan Titik Temu Spesifik <span className="text-slate-400 font-normal">(Bebas Ditentukan)</span>
-                        </label>
-                        <input
-                          type="text"
-                          value={pickupPoint}
-                          onChange={(e) => setPickupPoint(e.target.value)}
-                          placeholder="Contoh: Depan pos satpam, lobby terminal, atau kasir toko"
-                          className="w-full text-xs sm:text-sm p-3 rounded-xl border border-slate-200 focus:border-[#1683FF] focus:outline-none bg-white font-medium"
-                        />
-                        {/* Quick tags */}
-                        <div className="flex flex-wrap items-center gap-1 mt-1.5">
-                          <span className="text-[10px] text-slate-400 font-medium">Cepat:</span>
-                          {["Pos Satpam", "Lobby Utama", "Minimarket Terdekat", "Gerbang Masuk", "Parkiran"].map((sug) => (
-                            <button
-                              key={sug}
-                              type="button"
-                              onClick={() => setPickupPoint(sug)}
-                              className="text-[10px] px-2 py-0.5 rounded-md bg-white hover:bg-blue-50 hover:text-[#1683FF] text-slate-600 border border-slate-200 transition font-medium cursor-pointer"
-                            >
-                              {sug}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                      )}
                     </div>
                   </div>
-                )}
 
-                {/* Budget Imbalan & Batas Waktu */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="text-xs sm:text-sm font-bold text-slate-900">
-                        Budget Imbalan (Rp) {!isVoluntary && <span className="text-red-500">*</span>}
+                  {/* Alamat Input & Patokan */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-800 mb-1">
+                        Alamat Lengkap / Nama Tempat <span className="text-red-500">*</span>
                       </label>
-                      <label className="flex items-center gap-1.5 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={isVoluntary}
-                          onChange={(e) => setIsVoluntary(e.target.checked)}
-                          className="rounded border-slate-300 text-[#1683FF] focus:ring-0"
-                        />
-                        <span className="text-xs text-slate-500">Bantuan Sukarela</span>
-                      </label>
-                    </div>
-
-                    <div className="relative">
-                      <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400 pointer-events-none select-none">
-                        Rp
-                      </div>
                       <input
                         type="text"
-                        inputMode="numeric"
-                        disabled={isVoluntary}
-                        value={isVoluntary ? "" : formatNumberWithDots(rewardAmount)}
-                        onChange={(e) => {
-                          const raw = e.target.value.replace(/\D/g, "");
-                          setRewardAmount(raw);
-                        }}
-                        placeholder={isVoluntary ? "Gratis / Sukarela" : "Misal: 35.000"}
-                        className={`w-full text-xs sm:text-sm pl-10 pr-3.5 py-3.5 rounded-xl border transition ${
-                          isVoluntary ? "bg-slate-100 text-slate-400" : "border-slate-200 bg-white focus:border-[#1683FF]"
-                        } focus:outline-none font-bold text-slate-900`}
+                        value={locationName}
+                        onChange={(e) => setLocationName(e.target.value)}
+                        placeholder="Contoh: Jl. Pantai Glagah No. 12, Temon"
+                        className={`w-full text-xs sm:text-sm p-3 rounded-xl border transition ${
+                          errors.locationName ? "border-red-400 bg-red-50/20" : "border-slate-200 focus:border-[#1683FF]"
+                        } focus:outline-none bg-white font-medium`}
+                      />
+                      {errors.locationName && <p className="text-[11px] text-red-500 mt-1">{errors.locationName}</p>}
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-800 mb-1">
+                        Patokan / Detail Titik Temu <span className="text-slate-400 font-normal">(Opsional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={pickupPoint}
+                        onChange={(e) => setPickupPoint(e.target.value)}
+                        placeholder="Contoh: Depan pos satpam, lobby lantai 1"
+                        className="w-full text-xs sm:text-sm p-3 rounded-xl border border-slate-200 focus:border-[#1683FF] focus:outline-none bg-white font-medium"
                       />
                     </div>
-                    {errors.rewardAmount && <p className="text-[11px] text-red-500 mt-1">{errors.rewardAmount}</p>}
                   </div>
+                </div>
+              ) : (
+                <div className="p-5 rounded-2xl bg-purple-50/70 border border-purple-200/80 text-purple-900 space-y-1">
+                  <h3 className="text-xs sm:text-sm font-bold flex items-center gap-1.5">
+                    <Globe className="w-4 h-4 text-purple-600" />
+                    <span>Mode Online / Remote</span>
+                  </h3>
+                  <p className="text-xs text-purple-700 leading-relaxed">
+                    Tugas ini dapat dikerjakan secara digital dari mana saja tanpa perlu tatap muka langsung di lapangan.
+                  </p>
+                </div>
+              )}
 
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="text-xs sm:text-sm font-bold text-slate-900">
-                        Batas Hari & Jam (Deadline) <span className="text-red-500">*</span>
-                      </label>
-                      <div className="flex items-center gap-1 p-0.5 bg-slate-100 rounded-lg text-[11px]">
-                        <button
-                          type="button"
-                          onClick={() => setDeadlineMode("preset")}
-                          className={`px-2.5 py-1 rounded-md font-bold transition ${
-                            deadlineMode === "preset"
-                              ? "bg-white text-[#1683FF] shadow-2xs"
-                              : "text-slate-500 hover:text-slate-800"
-                          }`}
-                        >
-                          Pilihan Cepat
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeadlineMode("custom")}
-                          className={`px-2.5 py-1 rounded-md font-bold transition ${
-                            deadlineMode === "custom"
-                              ? "bg-[#1683FF] text-white shadow-2xs"
-                              : "text-slate-500 hover:text-slate-800"
-                          }`}
-                        >
-                          Tentukan Tanggal & Jam
-                        </button>
-                      </div>
-                    </div>
-
-                    {deadlineMode === "preset" ? (
-                      <div className="space-y-2.5">
-                        <select
-                          value={presetDeadline}
-                          onChange={(e) => setPresetDeadline(e.target.value)}
-                          className="w-full text-xs sm:text-sm p-3.5 rounded-xl border border-slate-200 bg-white font-medium text-slate-800 focus:outline-none focus:border-[#1683FF]"
-                        >
-                          <option value="1h">Hari Ini · 1 Jam dari Sekarang (Kilat)</option>
-                          <option value="2h">Hari Ini · 2 Jam dari Sekarang (Mendesak)</option>
-                          <option value="4h">Hari Ini · 4 Jam dari Sekarang</option>
-                          <option value="today_siang">Hari Ini · Jam 12.00 WIB (Siang)</option>
-                          <option value="today_sore">Hari Ini · Jam 17.00 WIB (Sore)</option>
-                          <option value="today_malam">Hari Ini · Jam 20.00 WIB (Malam)</option>
-                          <option value="tomorrow_pagi">Besok · Jam 10.00 WIB (Pagi)</option>
-                          <option value="tomorrow_siang">Besok · Jam 14.00 WIB (Siang)</option>
-                          <option value="tomorrow_sore">Besok · Jam 17.00 WIB (Sore)</option>
-                          <option value="2days_17">2 Hari ke Depan · Jam 17.00 WIB</option>
-                        </select>
-                        <div className="text-[11px] text-[#1683FF] bg-blue-50/70 p-2.5 rounded-xl border border-blue-100 flex items-center gap-2 font-medium">
-                          <Clock className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
-                          <span>Batas Target Selesai: <strong>{getDeadlineDisplayText()}</strong></span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 space-y-3.5">
-                        {/* 1. Pilih Hari / Tanggal */}
-                        <div>
-                          <div className="flex items-center justify-between mb-1.5">
-                            <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                              <Calendar className="w-3.5 h-3.5 text-slate-500" />
-                              Pilih Hari / Tanggal:
-                            </span>
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => setCustomDate(getTodayStr())}
-                                className={`text-[10px] px-2 py-0.5 rounded-md font-bold transition border ${
-                                  customDate === getTodayStr()
-                                    ? "bg-[#1683FF] text-white border-[#1683FF]"
-                                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
-                                }`}
-                              >
-                                Hari Ini
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setCustomDate(getTomorrowStr())}
-                                className={`text-[10px] px-2 py-0.5 rounded-md font-bold transition border ${
-                                  customDate === getTomorrowStr()
-                                    ? "bg-[#1683FF] text-white border-[#1683FF]"
-                                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
-                                }`}
-                              >
-                                Besok
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setCustomDate(getDayAfterTomorrowStr())}
-                                className={`text-[10px] px-2 py-0.5 rounded-md font-bold transition border ${
-                                  customDate === getDayAfterTomorrowStr()
-                                    ? "bg-[#1683FF] text-white border-[#1683FF]"
-                                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
-                                }`}
-                              >
-                                Lusa
-                              </button>
-                            </div>
-                          </div>
-                          <input
-                            type="date"
-                            min={getTodayStr()}
-                            value={customDate}
-                            onChange={(e) => setCustomDate(e.target.value)}
-                            className="w-full text-xs sm:text-sm p-3 rounded-xl border border-slate-200 bg-white font-bold text-slate-800 focus:outline-none focus:border-[#1683FF]"
-                          />
-                        </div>
-
-                        {/* 2. Pilih Jam Target */}
-                        <div>
-                          <div className="flex items-center justify-between mb-1.5">
-                            <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                              <Clock className="w-3.5 h-3.5 text-slate-500" />
-                              Tentukan Jam Selesai (WIB):
-                            </span>
-                            <div className="flex items-center gap-1">
-                              {["12:00", "15:00", "17:00", "20:00"].map((t) => (
-                                <button
-                                  key={t}
-                                  type="button"
-                                  onClick={() => setCustomTime(t)}
-                                  className={`text-[10px] px-2 py-0.5 rounded-md font-bold transition border ${
-                                    customTime === t
-                                      ? "bg-[#1683FF] text-white border-[#1683FF]"
-                                      : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
-                                  }`}
-                                >
-                                  {t}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                          <input
-                            type="time"
-                            value={customTime}
-                            onChange={(e) => setCustomTime(e.target.value)}
-                            className="w-full text-xs sm:text-sm p-3 rounded-xl border border-slate-200 bg-white font-bold text-slate-800 focus:outline-none focus:border-[#1683FF]"
-                          />
-                        </div>
-
-                        {/* Live Confirmation */}
-                        <div className="text-[11px] text-[#1683FF] bg-blue-50/70 p-2.5 rounded-xl border border-blue-100 flex items-center gap-2 font-medium">
-                          <Clock className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
-                          <span>Batas Target Selesai: <strong>{getDeadlineDisplayText()}</strong></span>
-                        </div>
-                      </div>
-                    )}
-                    {errors.customDeadline && <p className="text-[11px] text-red-500 mt-1">{errors.customDeadline}</p>}
+              {/* Batas Waktu / Deadline */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                    <Clock className="w-4 h-4 text-[#1683FF]" />
+                    <span>Batas Waktu Pengerjaan (Deadline)</span>
+                    <span className="text-red-500">*</span>
+                  </label>
+                  <div className="flex items-center gap-1 p-0.5 bg-slate-100 rounded-lg text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => setDeadlineMode("preset")}
+                      className={`px-2.5 py-1 rounded-md font-semibold transition ${
+                        deadlineMode === "preset"
+                          ? "bg-white text-[#1683FF] shadow-2xs"
+                          : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      Pilihan Cepat
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeadlineMode("custom")}
+                      className={`px-2.5 py-1 rounded-md font-semibold transition ${
+                        deadlineMode === "custom"
+                          ? "bg-[#1683FF] text-white shadow-2xs"
+                          : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      Tanggal &amp; Jam
+                    </button>
                   </div>
                 </div>
 
-                {/* Prohibited Content Detected Alert */}
-                {prohibitedWarning && (
-                  <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 space-y-2 animate-in fade-in duration-200">
-                    <div className="flex items-center gap-2 font-bold text-xs sm:text-sm text-rose-900">
-                      <Ban className="w-4 h-4 text-rose-600 shrink-0" />
-                      <span>Pelanggaran Konten &amp; Kepatuhan: {prohibitedWarning.category}</span>
+                {deadlineMode === "preset" ? (
+                  <div className="space-y-2">
+                    <select
+                      value={presetDeadline}
+                      onChange={(e) => setPresetDeadline(e.target.value)}
+                      className="w-full text-xs sm:text-sm p-3.5 rounded-xl border border-slate-200 bg-white font-medium text-slate-800 focus:outline-none focus:border-[#1683FF]"
+                    >
+                      <option value="1h">Hari Ini · 1 Jam dari Sekarang (Mendesak)</option>
+                      <option value="2h">Hari Ini · 2 Jam dari Sekarang</option>
+                      <option value="4h">Hari Ini · 4 Jam dari Sekarang</option>
+                      <option value="today_siang">Hari Ini · Jam 12.00 WIB (Siang)</option>
+                      <option value="today_sore">Hari Ini · Jam 17.00 WIB (Sore)</option>
+                      <option value="today_malam">Hari Ini · Jam 20.00 WIB (Malam)</option>
+                      <option value="tomorrow_pagi">Besok · Jam 10.00 WIB (Pagi)</option>
+                      <option value="tomorrow_siang">Besok · Jam 14.00 WIB (Siang)</option>
+                      <option value="tomorrow_sore">Besok · Jam 17.00 WIB (Sore)</option>
+                      <option value="2days_17">2 Hari ke Depan · Jam 17.00 WIB</option>
+                    </select>
+                    <div className="text-xs text-[#1683FF] bg-blue-50/70 p-2.5 rounded-xl border border-blue-100 flex items-center gap-2">
+                      <Clock className="w-3.5 h-3.5 shrink-0" />
+                      <span>Target Selesai: <strong>{getDeadlineDisplayText()}</strong></span>
                     </div>
-                    <p className="text-xs text-rose-700 leading-relaxed">
-                      {prohibitedWarning.reason}
-                    </p>
-                    <div className="text-[11px] text-rose-600 font-medium">
-                      Silakan ubah rincian tugas Anda agar mematuhi Syarat &amp; Ketentuan dan kode etik kampus sebelum melanjutkan.
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Pilih Tanggal Selesai
+                        </label>
+                        <input
+                          type="date"
+                          min={getTodayStr()}
+                          value={customDate}
+                          onChange={(e) => setCustomDate(e.target.value)}
+                          className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-200 bg-white font-medium text-slate-800 focus:outline-none focus:border-[#1683FF]"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Pilih Jam Selesai (WIB)
+                        </label>
+                        <input
+                          type="time"
+                          value={customTime}
+                          onChange={(e) => setCustomTime(e.target.value)}
+                          className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-200 bg-white font-medium text-slate-800 focus:outline-none focus:border-[#1683FF]"
+                        />
+                      </div>
+                    </div>
+                    {errors.customDeadline && <p className="text-[11px] text-red-500">{errors.customDeadline}</p>}
+                    <div className="text-xs text-[#1683FF] bg-blue-50/70 p-2 rounded-lg border border-blue-100 flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 shrink-0" />
+                      <span>Target Selesai: <strong>{getDeadlineDisplayText()}</strong></span>
                     </div>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
 
-                {/* DEKLARASI MUATAN BARANG & KEPATUHAN HUKUM (POLA GRAB/GOJEK) */}
-                <div className="p-4 sm:p-5 rounded-2xl bg-blue-50/70 border border-blue-200/90 space-y-3.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-lg bg-blue-100 flex items-center justify-center text-[#1683FF]">
-                        <Scale className="w-3.5 h-3.5" />
-                      </div>
-                      <span className="font-bold text-xs sm:text-sm text-slate-900">
-                        Deklarasi Muatan &amp; Kepatuhan Hukum {mode === "offline" && <span className="text-red-500">*</span>}
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-bold text-[#1683FF] bg-white px-2 py-0.5 rounded-md border border-blue-100">
-                      Standar Kepatuhan PSE
+          {/* ==================== STEP 3: IMBALAN & REVIEW ==================== */}
+          {currentStep === 3 && (
+            <div className="space-y-6 animate-in fade-in duration-200">
+              <div className="border-b border-slate-100 pb-4">
+                <h2 className="text-base sm:text-lg font-bold text-slate-900">
+                  Langkah 3: Budget Imbalan &amp; Ringkasan
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Tentukan nominal imbalan, setujui kepatuhan keamanan, dan tinjau sebelum mempublikasikan.
+                </p>
+              </div>
+
+              {/* Budget Imbalan */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-slate-50/70 border border-slate-200/80 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs sm:text-sm font-bold text-slate-900">
+                    Nominal Imbalan (Rp) {!isVoluntary && <span className="text-red-500">*</span>}
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isVoluntary}
+                      onChange={(e) => setIsVoluntary(e.target.checked)}
+                      className="rounded border-slate-300 text-[#1683FF] focus:ring-0"
+                    />
+                    <span className="text-xs text-slate-600 font-medium">Bantuan Sukarela (Gratis)</span>
+                  </label>
+                </div>
+
+                <div className="relative">
+                  <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400 pointer-events-none select-none">
+                    Rp
+                  </div>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    disabled={isVoluntary}
+                    value={isVoluntary ? "" : formatNumberWithDots(rewardAmount)}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/\D/g, "");
+                      setRewardAmount(raw);
+                    }}
+                    placeholder={isVoluntary ? "Bantuan Sukarela" : "Contoh: 35.000"}
+                    className={`w-full text-xs sm:text-sm pl-10 pr-3.5 py-3 rounded-xl border transition ${
+                      isVoluntary ? "bg-slate-100 text-slate-400" : "border-slate-200 bg-white focus:border-[#1683FF]"
+                    } focus:outline-none font-bold text-slate-900`}
+                  />
+                </div>
+                {errors.rewardAmount && <p className="text-[11px] text-red-500">{errors.rewardAmount}</p>}
+                
+                <p className="text-[11px] text-slate-500">
+                  Imbalan akan ditahan aman oleh sistem escrow Bantuin dan hanya dicairkan kepada helper setelah Anda mengonfirmasi tugas selesai.
+                </p>
+              </div>
+
+              {/* Deklarasi Kepatuhan Hukum */}
+              {mode === "offline" && (
+                <div className="p-4 sm:p-5 rounded-2xl bg-blue-50/60 border border-blue-200/80 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Scale className="w-4 h-4 text-[#1683FF] shrink-0" />
+                    <span className="font-bold text-xs sm:text-sm text-slate-900">
+                      Deklarasi Muatan &amp; Keamanan Tugas
                     </span>
                   </div>
 
-                  {mode === "offline" && (
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-700 mb-1.5">
-                        Jenis Muatan / Barang yang Ditangani: <span className="text-red-500">*</span>
-                      </label>
-                      <div className="flex flex-wrap gap-1.5">
-                        {[
-                          "Dokumen / Berkas",
-                          "Makanan / Minuman",
-                          "Pakaian / Laundry",
-                          "Gadget / Elektronik",
-                          "Belanja Kebutuhan",
-                          "Lainnya (Legal)"
-                        ].map((item) => (
-                          <button
-                            key={item}
-                            type="button"
-                            onClick={() => setItemType(item)}
-                            className={`text-xs px-2.5 py-1.5 rounded-lg font-bold transition border ${
-                              itemType === item
-                                ? "bg-[#1683FF] text-white border-[#1683FF] shadow-2xs"
-                                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
-                            }`}
-                          >
-                            {item}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Jenis Muatan / Barang yang Ditangani:
+                    </label>
+                    <select
+                      value={itemType}
+                      onChange={(e) => setItemType(e.target.value)}
+                      className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-white font-medium text-slate-800 focus:outline-none focus:border-[#1683FF]"
+                    >
+                      <option value="Dokumen / Berkas">Dokumen / Berkas</option>
+                      <option value="Makanan / Minuman">Makanan / Minuman</option>
+                      <option value="Pakaian / Laundry">Pakaian / Laundry</option>
+                      <option value="Gadget / Elektronik">Gadget / Elektronik</option>
+                      <option value="Belanja Kebutuhan">Belanja Kebutuhan</option>
+                      <option value="Lainnya (Legal)">Lainnya (Legal)</option>
+                    </select>
+                  </div>
 
                   <label className="flex items-start gap-2.5 pt-1 cursor-pointer">
                     <input
@@ -1062,209 +1204,243 @@ function CreateRequestForm() {
                       className="mt-0.5 rounded border-slate-300 text-[#1683FF] focus:ring-[#1683FF]"
                     />
                     <span className="text-[11px] text-slate-700 leading-relaxed select-none">
-                      Saya menyatakan dan menjamin bahwa muatan/tugas ini <strong>aman, legal menurut hukum RI</strong>, dan <strong>bebas dari narkotika, miras oplosan, senjata, atau barang curian</strong>. Segala ketidaksesuaian atau kebohongan isi muatan menjadi tanggung jawab penuh pihak pengirim sesuai peraturan perundang-undangan yang berlaku dan Syarat &amp; Ketentuan Layanan. {mode === "offline" && <span className="text-red-500 font-bold">*</span>}
+                      Saya menjamin bahwa muatan/tugas ini <strong>aman, legal menurut hukum RI</strong>, dan bebas dari narkotika, miras oplosan, senjata, atau barang terlarang. <span className="text-red-500 font-bold">*</span>
                     </span>
                   </label>
                   {errors.legalDeclaration && (
                     <p className="text-[11px] text-red-500 font-semibold">{errors.legalDeclaration}</p>
                   )}
                 </div>
+              )}
 
-                {/* Error Banner */}
-                {errors.submit && (
-                  <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-xs font-semibold text-red-600 flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
-                    <span>{errors.submit}</span>
+              {/* RINGKASAN TINJAUAN SEBELUM SUBMIT - MODERN & EXECUTIVE CARD */}
+              <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-sm overflow-hidden">
+                {/* Header Ringkasan */}
+                <div className="p-4 sm:p-5 bg-gradient-to-r from-slate-50 via-blue-50/20 to-slate-50 border-b border-slate-100 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-[#1683FF]/10 text-[#1683FF] flex items-center justify-center shrink-0">
+                      <ClipboardList className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm sm:text-base font-bold text-slate-900 leading-snug">
+                        Ringkasan Permintaan Bantuan
+                      </h3>
+                      <p className="text-[11px] text-slate-500">
+                        Periksa kembali data Anda sebelum diterbitkan ke para pencari tugas
+                      </p>
+                    </div>
                   </div>
-                )}
+                  <span className="text-[11px] font-bold text-[#1683FF] bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100 shrink-0">
+                    Siap Terbit
+                  </span>
+                </div>
 
-                {/* Submit Action */}
-                <div className="flex items-center gap-4 pt-4 border-t border-slate-100">
-                  <Link
-                    href="/bantuan"
-                    className="px-6 py-3 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold transition text-center"
-                  >
-                    Batal
-                  </Link>
-
-                  <button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className="flex-1 py-3.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] disabled:opacity-70 disabled:cursor-not-allowed text-white font-bold text-xs sm:text-sm shadow-xs transition active:scale-95 flex items-center justify-center gap-2"
-                  >
-                    {isSubmitting ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Mempublikasikan Permintaan...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>Publikasikan Permintaan Bantuan</span>
-                        <Send className="w-4 h-4" />
-                      </>
+                {/* Konten Rincian */}
+                <div className="p-4 sm:p-6 space-y-4">
+                  {/* Judul & Kategori */}
+                  <div className="space-y-1.5 pb-4 border-b border-slate-100">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[11px] font-bold">
+                        {category}
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded-full bg-blue-50 text-[#1683FF] text-[11px] font-bold">
+                        {mode === "online" ? "Online / Remote" : "Tatap Muka"}
+                      </span>
+                    </div>
+                    <h4 className="text-base sm:text-lg font-extrabold text-slate-900 pt-1">
+                      {title || "Belum ada judul tugas"}
+                    </h4>
+                    {description && (
+                      <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
+                        {description}
+                      </p>
                     )}
-                  </button>
-                </div>
-
-              </form>
-            </div>
-
-            {/* Sidebar Preview & Escrow Guarantee (4 Columns, Order-2) */}
-            <div className="lg:col-span-4 lg:border-l lg:border-slate-100 lg:pl-8 space-y-6 order-2">
-              
-              {/* Live Preview Section */}
-              <div className="space-y-3">
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  Pratinjau Kartu Tugas
-                </div>
-
-                <div className="p-4 rounded-2xl border border-slate-100 bg-slate-50/60 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700">
-                      <CategoryIcon category={category} className="w-3 h-3 text-[#1683FF] shrink-0" />
-                      <span>{category}</span>
-                    </span>
-                    <span className="text-[10px] text-slate-400">
-                      {mode === "online" ? "Online" : "Tatap Muka"}
-                    </span>
                   </div>
 
-                  <h4 className="font-bold text-xs sm:text-sm text-slate-900 line-clamp-2">
-                    {title || "Judul Kebutuhan Anda..."}
-                  </h4>
-
-                  <p className="text-xs text-slate-500 line-clamp-2">
-                    {description || "Rincian tugas akan ditampilkan di sini agar helper mudah memahami..."}
-                  </p>
-
-                  <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-medium pt-1">
-                    <Clock className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Batas: {getDeadlineDisplayText()}</span>
-                  </div>
-
-                  {mode === "offline" && (
-                    <div className="flex items-start gap-1.5 text-[11px] text-slate-600 font-medium pt-1">
-                      <MapPin className="w-3.5 h-3.5 text-[#1683FF] shrink-0 mt-0.5" />
+                  {/* Grid Detail Lokasi & Waktu */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div className="p-3 rounded-xl bg-slate-50/80 border border-slate-100 flex items-start gap-2.5">
+                      <MapPin className="w-4 h-4 text-[#1683FF] shrink-0 mt-0.5" />
                       <div className="min-w-0">
-                        <div className="truncate font-semibold text-slate-800">
-                          {locationName || "Lokasi belum ditentukan"}
-                        </div>
-                        {pickupPoint && (
-                          <div className="text-[10px] text-slate-500 truncate">
-                            Patokan: {pickupPoint}
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
+                          Lokasi Pelaksanaan
+                        </span>
+                        <span className="font-semibold text-slate-800 line-clamp-1 block mt-0.5">
+                          {mode === "offline" ? (locationName || "Belum diisi") : "Bisa Dikerjakan Fleksibel (Online)"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-slate-50/80 border border-slate-100 flex items-start gap-2.5">
+                      <Clock className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
+                          Target Selesai
+                        </span>
+                        <span className="font-semibold text-slate-800 block mt-0.5">
+                          {getDeadlineDisplayText()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Foto Lampiran Preview Strip (Jika Ada) */}
+                  {photoFiles && photoFiles.length > 0 && (
+                    <div className="p-3 rounded-xl bg-slate-50/80 border border-slate-100 space-y-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                          <Camera className="w-3.5 h-3.5 text-[#1683FF]" />
+                          Foto Barang / Lampiran
+                        </span>
+                        <span className="text-[11px] font-bold text-slate-500">
+                          {photoFiles.length} Foto
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 overflow-x-auto py-1">
+                        {photoFiles.map((p, idx) => (
+                          <div
+                            key={idx}
+                            className="w-14 h-14 rounded-lg overflow-hidden border border-slate-200 bg-white shrink-0 shadow-2xs"
+                          >
+                            <img
+                              src={p.previewUrl}
+                              alt={`Foto ${idx + 1}`}
+                              className="w-full h-full object-cover"
+                            />
                           </div>
-                        )}
+                        ))}
                       </div>
                     </div>
                   )}
 
-                  <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between">
-                    <div className="text-[10px] text-slate-400 font-medium">Imbalan</div>
-                    <div className="font-extrabold text-sm text-[#1683FF]">
-                      {isVoluntary ? "Sukarela" : formatIDR(Number(rewardAmount) || 0)}
+                  {/* Highlight Imbalan & Garansi Escrow */}
+                  <div className="p-4 rounded-2xl bg-gradient-to-br from-blue-50/80 to-indigo-50/40 border border-blue-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                        Imbalan yang Ditawarkan
+                      </span>
+                      <div className="text-xl sm:text-2xl font-black text-[#1683FF] mt-0.5">
+                        {isVoluntary ? "Sukarela (Bantuan Sosial)" : formatIDR(Number(rewardAmount) || 0)}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-200/60 self-start sm:self-auto">
+                      <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>Garansi Rekening Escrow Terlindungi</span>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Guarantee Pill (Integrated) */}
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-start gap-3">
-                <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-                <div>
-                  <div className="text-xs font-bold text-slate-900">Garansi Pembayaran Terverifikasi</div>
-                  <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
-                    Dana imbalan Anda diproses aman via Payment Gateway resmi dan hak bayar baru dapat dicairkan setelah Anda menyetujui hasil kerja tenaga bantuan.
-                  </p>
+              {/* Submission Error Banner */}
+              {errors.submit && (
+                <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-xs font-semibold text-red-600 flex items-start gap-2.5 break-words">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-red-500 mt-0.5" />
+                  <span className="flex-1 leading-relaxed">{errors.submit}</span>
                 </div>
-              </div>
-
+              )}
             </div>
+          )}
 
+          {/* BOTTOM STEP NAVIGATION BUTTONS - RESPONSIVE & CONTAINED */}
+          <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-3 pt-6 mt-6 border-t border-slate-100">
+            {currentStep > 1 ? (
+              <button
+                type="button"
+                onClick={handlePrevStep}
+                disabled={isSubmitting}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-50 text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                <ArrowLeft className="w-4 h-4 shrink-0" />
+                <span>Sebelumnya</span>
+              </button>
+            ) : (
+              <Link
+                href="/bantuan"
+                className="w-full sm:w-auto text-center px-5 py-2.5 rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 text-xs sm:text-sm font-semibold transition"
+              >
+                Batal
+              </Link>
+            )}
+
+            {currentStep < 3 ? (
+              <button
+                type="button"
+                onClick={handleNextStep}
+                className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-xs active:scale-95"
+              >
+                <span>Lanjutkan</span>
+                <ArrowRight className="w-4 h-4 shrink-0" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleFormSubmit}
+                disabled={isSubmitting}
+                className="w-full sm:w-auto px-6 py-3 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] disabled:opacity-60 disabled:cursor-not-allowed text-white text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-xs active:scale-95 overflow-hidden"
+              >
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                    <span>Mempublikasikan...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Publikasikan Permintaan Bantuan</span>
+                    <Send className="w-4 h-4 shrink-0" />
+                  </>
+                )}
+              </button>
+            )}
           </div>
+
         </div>
 
-        {/* Image Detail & Preview Lightbox Modal */}
+        {/* Image Detail & Preview Modal */}
         {previewModalPhoto && (
           <div 
-            className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200"
+            className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200"
             onClick={() => setPreviewModalPhoto(null)}
           >
             <div 
-              className="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-200"
+              className="bg-white rounded-3xl max-w-lg w-full flex flex-col overflow-hidden shadow-2xl border border-slate-200"
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Modal Header */}
-              <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/80">
-                <div className="flex items-center gap-2.5 min-w-0 pr-3">
-                  <div className="w-8 h-8 rounded-lg bg-blue-100 text-[#1683FF] flex items-center justify-center shrink-0">
-                    <FileImage className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="text-sm font-bold text-slate-900 truncate">
-                      Detail Foto #{previewModalPhoto.index + 1}: {previewModalPhoto.name}
-                    </h3>
-                  </div>
-                </div>
+              <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-800 truncate">
+                  Pralihat Foto #{previewModalPhoto.index + 1}
+                </span>
                 <button
                   type="button"
                   onClick={() => setPreviewModalPhoto(null)}
-                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition cursor-pointer shrink-0"
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-700"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-4 h-4" />
                 </button>
               </div>
 
-              {/* Modal Body: Image View & File Meta */}
-              <div className="p-6 overflow-y-auto space-y-4">
-                {/* Full-view Image Canvas */}
-                <div className="bg-slate-950 rounded-2xl flex items-center justify-center p-3 max-h-[50vh] min-h-[220px] overflow-hidden">
-                  <img
-                    src={previewModalPhoto.previewUrl}
-                    alt={previewModalPhoto.name}
-                    className="max-h-[46vh] w-auto max-w-full object-contain rounded-lg shadow-lg"
-                  />
-                </div>
-
-                {/* File Metadata Info */}
-                <div className="grid grid-cols-3 gap-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-200 text-xs">
-                  <div>
-                    <span className="text-[10px] text-slate-400 font-bold uppercase block">Nama File</span>
-                    <span className="font-semibold text-slate-800 truncate block mt-0.5" title={previewModalPhoto.name}>
-                      {previewModalPhoto.name}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-400 font-bold uppercase block">Ukuran File</span>
-                    <span className="font-semibold text-slate-800 block mt-0.5">
-                      {formatFileSize(previewModalPhoto.size)}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-400 font-bold uppercase block">Tipe Format</span>
-                    <span className="font-semibold text-slate-800 block mt-0.5 uppercase">
-                      {previewModalPhoto.type?.replace("image/", "") || "IMG"}
-                    </span>
-                  </div>
-                </div>
+              <div className="p-4 flex items-center justify-center bg-slate-950 max-h-[60vh] overflow-hidden">
+                <img
+                  src={previewModalPhoto.previewUrl}
+                  alt="Detail foto"
+                  className="max-h-[50vh] w-auto max-w-full object-contain rounded-lg"
+                />
               </div>
 
-              {/* Modal Footer Actions */}
-              <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
+              <div className="px-5 py-3 border-t border-slate-200 flex items-center justify-between">
                 <button
                   type="button"
                   onClick={() => handleRemovePhoto(previewModalPhoto.index)}
-                  className="px-4 py-2.5 rounded-xl border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 font-bold text-xs inline-flex items-center gap-1.5 transition cursor-pointer"
+                  className="text-xs text-red-600 font-bold hover:underline inline-flex items-center gap-1"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>Hapus Foto Ini</span>
+                  <span>Hapus Foto</span>
                 </button>
-
                 <button
                   type="button"
                   onClick={() => setPreviewModalPhoto(null)}
-                  className="px-5 py-2.5 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs transition cursor-pointer shadow-xs"
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700"
                 >
-                  Tutup Pralihat
+                  Tutup
                 </button>
               </div>
             </div>
@@ -1281,7 +1457,7 @@ function CreateRequestForm() {
 export default function CreateRequestPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen flex flex-col bg-[#EEF2F6]">
+      <div className="min-h-screen flex flex-col bg-[#F8FAFC]">
         <Navbar />
         <main className="flex-1">
           <FormSkeleton />

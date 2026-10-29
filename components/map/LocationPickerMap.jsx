@@ -1,25 +1,68 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
-import { MapPin, Navigation, Crosshair, ZoomIn, ZoomOut } from "lucide-react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
+import { MapPin, Navigation, Crosshair, ZoomIn, ZoomOut, Loader2 } from "lucide-react";
+import { reverseGeocodeCoordinates } from "@/lib/services/gpsService";
 
 export default function LocationPickerMap({
   latitude,
   longitude,
   onChange,
   onUseGps,
+  onAddressResolved,
+  onGeocodingStateChange,
   isDetectingGPS = false,
   height = "280px",
 }) {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markerRef = useRef(null);
+  const isInternalChangeRef = useRef(false);
+  const lastCoordsRef = useRef({ lat: latitude || -6.2241, lng: longitude || 106.8294 });
+  const geocodeTimeoutRef = useRef(null);
+  const geocodeRequestIdRef = useRef(0);
+
   const [currentCoords, setCurrentCoords] = useState({
     latitude: latitude || -6.2241,
     longitude: longitude || 106.8294,
   });
+  const [isResolvingAddress, setIsResolvingAddress] = useState(false);
+  const [resolvedPreview, setResolvedPreview] = useState("");
 
-  // Sync state if prop changes
+  // Debounced reverse geocode with request cancellation token
+  const triggerAutoReverseGeocode = useCallback((lat, lng) => {
+    if (geocodeTimeoutRef.current) {
+      clearTimeout(geocodeTimeoutRef.current);
+    }
+
+    const currentReqId = ++geocodeRequestIdRef.current;
+    setIsResolvingAddress(true);
+    onGeocodingStateChange?.(true);
+
+    geocodeTimeoutRef.current = setTimeout(async () => {
+      try {
+        const res = await reverseGeocodeCoordinates(lat, lng);
+        if (geocodeRequestIdRef.current !== currentReqId) return; // Stale request cancelled
+
+        if (res && (res.fullAddress || res.shortLocation)) {
+          const address = res.fullAddress || res.shortLocation;
+          setResolvedPreview(address);
+          onAddressResolved?.(address, res);
+        }
+      } catch (err) {
+        if (geocodeRequestIdRef.current === currentReqId) {
+          console.warn("Auto reverse geocode failed:", err);
+        }
+      } finally {
+        if (geocodeRequestIdRef.current === currentReqId) {
+          setIsResolvingAddress(false);
+          onGeocodingStateChange?.(false);
+        }
+      }
+    }, 450);
+  }, [onAddressResolved, onGeocodingStateChange]);
+
+  // Sync state if external prop changes (e.g. GPS button clicked or preset loaded)
   useEffect(() => {
     if (
       typeof latitude === "number" &&
@@ -27,20 +70,37 @@ export default function LocationPickerMap({
       !isNaN(latitude) &&
       !isNaN(longitude)
     ) {
+      // If triggered internally by drag/click within the map, do not re-pan or loop
+      if (isInternalChangeRef.current) {
+        isInternalChangeRef.current = false;
+        lastCoordsRef.current = { lat: latitude, lng: longitude };
+        return;
+      }
+
+      const prevLat = lastCoordsRef.current.lat;
+      const prevLng = lastCoordsRef.current.lng;
+      const hasSignificantDiff =
+        Math.abs(prevLat - latitude) > 0.00005 || Math.abs(prevLng - longitude) > 0.00005;
+
+      lastCoordsRef.current = { lat: latitude, lng: longitude };
       setCurrentCoords({ latitude, longitude });
+
       if (mapInstanceRef.current && markerRef.current) {
         markerRef.current.setLatLng([latitude, longitude]);
-        mapInstanceRef.current.setView([latitude, longitude], 16, { animate: true });
+        if (hasSignificantDiff) {
+          mapInstanceRef.current.panTo([latitude, longitude], { animate: true });
+          triggerAutoReverseGeocode(latitude, longitude);
+        }
       }
     }
-  }, [latitude, longitude]);
+  }, [latitude, longitude, triggerAutoReverseGeocode]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !mapRef.current) return;
 
     let isSubscribed = true;
 
-    import("leaflet").then((L) => {
+    Promise.all([import("leaflet"), import("leaflet/dist/leaflet.css")]).then(([L]) => {
       if (!isSubscribed || !mapRef.current) return;
 
       // Fix default marker icon issues in Next.js bundler
@@ -88,19 +148,25 @@ export default function LocationPickerMap({
 
         markerRef.current = marker;
 
-        // Click on map moves pin directly to clicked point
+        // Click on map moves pin directly without jarring viewport auto-pan
         map.on("click", (e) => {
           const { lat, lng } = e.latlng;
+          isInternalChangeRef.current = true;
+          lastCoordsRef.current = { lat, lng };
           marker.setLatLng([lat, lng]);
           setCurrentCoords({ latitude: lat, longitude: lng });
           onChange?.({ latitude: lat, longitude: lng });
+          triggerAutoReverseGeocode(lat, lng);
         });
 
         // Drag marker to exact spot
         marker.on("dragend", (e) => {
           const { lat, lng } = e.target.getLatLng();
+          isInternalChangeRef.current = true;
+          lastCoordsRef.current = { lat, lng };
           setCurrentCoords({ latitude: lat, longitude: lng });
           onChange?.({ latitude: lat, longitude: lng });
+          triggerAutoReverseGeocode(lat, lng);
         });
 
         mapInstanceRef.current = map;
@@ -109,6 +175,9 @@ export default function LocationPickerMap({
 
     return () => {
       isSubscribed = false;
+      if (geocodeTimeoutRef.current) {
+        clearTimeout(geocodeTimeoutRef.current);
+      }
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
@@ -162,9 +231,17 @@ export default function LocationPickerMap({
       </div>
 
       {/* Coordinates Display & Map Zoom Controls (Bottom) */}
-      <div className="absolute bottom-2.5 left-2.5 right-2.5 z-10 flex items-center justify-between pointer-events-none">
-        <div className="bg-slate-900/80 backdrop-blur-md px-2.5 py-1 rounded-lg text-[10px] font-mono font-medium text-white shadow-xs pointer-events-auto">
-          {currentCoords.latitude.toFixed(5)}, {currentCoords.longitude.toFixed(5)}
+      <div className="absolute bottom-2.5 left-2.5 right-2.5 z-10 flex items-center justify-between pointer-events-none gap-2">
+        <div className="flex items-center gap-1.5 pointer-events-auto">
+          <div className="bg-slate-900/80 backdrop-blur-md px-2.5 py-1 rounded-lg text-[10px] font-mono font-medium text-white shadow-xs">
+            {currentCoords.latitude.toFixed(5)}, {currentCoords.longitude.toFixed(5)}
+          </div>
+          {isResolvingAddress && (
+            <div className="bg-[#1683FF]/90 backdrop-blur-md text-white text-[10px] font-semibold px-2 py-1 rounded-lg shadow-xs flex items-center gap-1 animate-pulse">
+              <Loader2 className="w-3 h-3 animate-spin shrink-0" />
+              <span>Membaca alamat...</span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-1 pointer-events-auto bg-white/90 backdrop-blur-md p-1 rounded-xl border border-slate-200 shadow-xs">

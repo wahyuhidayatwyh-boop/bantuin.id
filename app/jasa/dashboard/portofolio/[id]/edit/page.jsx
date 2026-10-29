@@ -7,6 +7,7 @@ import RoleGuard from "@/components/auth/RoleGuard";
 import { useApp } from "@/lib/context/AppContext";
 import { getProviderById, saveProviderData } from "@/lib/mock/providersData";
 import { imageService } from "@/lib/services/imageService";
+import { authService } from "@/lib/services/authService";
 import { 
   ArrowLeft, 
   Image as ImageIcon, 
@@ -15,25 +16,56 @@ import {
   ChevronRight,
   Save
 } from "lucide-react";
+import { saveFormDraft, getFormDraft, clearFormDraft, useBeforeUnload } from "@/lib/hooks/useFormDraft";
 
 export default function EditPortofolioPage() {
   const { id } = useParams();
   const router = useRouter();
-  const { addToast } = useApp() || {};
+  const { currentUser, setCurrentUser, addToast } = useApp() || {};
+
+  const DRAFT_KEY = id ? `bantuin_draft_jasa_portofolio_edit_${id}` : "bantuin_draft_jasa_portofolio_edit";
 
   const [provider, setProvider] = useState(() => {
-    return getProviderById("fajar-ramadhan-desain") || {};
+    return currentUser || {};
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
 
   useEffect(() => {
-    const p = getProviderById("fajar-ramadhan-desain");
-    if (p) setProvider(p);
-  }, []);
+    let isMounted = true;
+    async function loadLiveProfile() {
+      try {
+        const token = await authService.getValidAccessToken();
+        if (token) {
+          const res = await fetch("/api/user/profile", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const json = await res.json();
+          if (isMounted && res.ok && json.success && json.data) {
+            setProvider((prev) => ({
+              ...prev,
+              ...json.data,
+              portfolioPhotos: Array.isArray(json.data.portfolioPhotos) ? json.data.portfolioPhotos : [],
+            }));
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Could not load live portfolio in edit portofolio:", err);
+      }
+      if (isMounted && currentUser) {
+        const p = currentUser.id ? (getProviderById(currentUser.id) || currentUser) : currentUser;
+        setProvider(p);
+      }
+    }
+    loadLiveProfile();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser]);
 
-  const photos = provider.portfolioPhotos || [];
+  const photos = Array.isArray(provider.portfolioPhotos) ? provider.portfolioPhotos : [];
   const photo = photos.find((p, idx) => p.id === id || String(idx) === String(id));
 
   // Form State
@@ -58,15 +90,26 @@ export default function EditPortofolioPage() {
 
   useEffect(() => {
     if (photo) {
-      setFormData({
+      const savedDraft = typeof window !== "undefined" ? getFormDraft(DRAFT_KEY, null) : null;
+      const initial = {
         title: photo.title || "",
         category: photo.category || "Branding",
         url: photo.url || "",
         description: photo.description || "",
         clientName: photo.clientName || "",
-      });
+      };
+      setFormData(savedDraft ? { ...initial, ...savedDraft } : initial);
     }
-  }, [photo]);
+  }, [photo, DRAFT_KEY]);
+
+  useEffect(() => {
+    if (formData.title) {
+      saveFormDraft(DRAFT_KEY, formData);
+    }
+  }, [formData, DRAFT_KEY]);
+
+  const isDirty = Boolean(formData.title && photo && (formData.title !== photo.title || formData.description !== photo.description));
+  useBeforeUnload(isDirty, "Ada perubahan karya portofolio yang belum disimpan. Yakin ingin meninggalkan halaman?");
 
   const handlePhotoUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -85,7 +128,7 @@ export default function EditPortofolioPage() {
     }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.title.trim()) {
       addToast?.("Form Belum Lengkap", "Silakan isi judul karya.", "error");
@@ -111,9 +154,40 @@ export default function EditPortofolioPage() {
 
     const updatedProvider = { ...provider, portfolioPhotos: updatedPhotos };
     saveProviderData(updatedProvider);
+    if (typeof window !== "undefined" && provider.id) {
+      localStorage.setItem(`bantuin_provider_portfolio_${provider.id}`, JSON.stringify(updatedPhotos));
+    }
     setProvider(updatedProvider);
+
+    // Simpan ke PostgreSQL database
+    try {
+      const token = await authService.getValidAccessToken();
+      if (token) {
+        await fetch("/api/user/profile", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ portfolioPhotos: updatedPhotos }),
+        });
+      }
+    } catch (err) {
+      console.error("Gagal simpan portofolio ke database:", err);
+    }
+
+    if (typeof setCurrentUser === "function") {
+      setCurrentUser((prev) => ({ ...(prev || {}), portfolioPhotos: updatedPhotos }));
+    }
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("bantuin_provider_updated"));
+      window.dispatchEvent(new Event("bantuin_service_updated"));
+    }
+
     setIsSubmitting(false);
 
+    clearFormDraft(DRAFT_KEY);
     addToast?.("Karya Diperbarui", `Perubahan pada "${formData.title}" berhasil disimpan.`);
     router.push(`/jasa/dashboard/portofolio/${id}`);
   };

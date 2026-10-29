@@ -44,25 +44,23 @@ export default function RequestCard({ request }) {
 
   const isRequester = Boolean(
     (currentUser?.id && requesterId && currentUser.id === requesterId) ||
-    (currentUser?.email && (request.requester?.email === currentUser.email || request.userEmail === currentUser.email)) ||
-    (currentUser?.fullName && (requesterName === currentUser.fullName || request.userName === currentUser.fullName))
+    (currentUser?.email && (request.requester?.email === currentUser.email || request.userEmail === currentUser.email))
   );
 
   const isSelectedHelper = Boolean(
-    currentUser && (
-      (currentUser.id && (request.selectedHelperId === currentUser.id || request.selectedHelper?.id === currentUser.id)) ||
-      (currentUser.fullName && request.selectedHelper?.fullName === currentUser.fullName) ||
+    currentUser?.id && (
+      request.selectedHelperId === currentUser.id ||
+      request.selectedHelper?.id === currentUser.id ||
       (Array.isArray(request.offers) && request.offers.some((o) => 
-        ((currentUser.id && (o.helperId === currentUser.id || o.helper?.id === currentUser.id)) || (currentUser.fullName && o.helper?.fullName === currentUser.fullName)) &&
+        (o.helperId === currentUser.id || o.helper?.id === currentUser.id) &&
         o.status === "accepted"
       ))
     )
   );
 
   const hasApplied = Boolean(
-    currentUser && Array.isArray(request.offers) && request.offers.some((o) => 
-      (currentUser.id && (o.helperId === currentUser.id || o.helper?.id === currentUser.id)) ||
-      (currentUser.fullName && o.helper?.fullName === currentUser.fullName)
+    currentUser?.id && Array.isArray(request.offers) && request.offers.some((o) => 
+      o.helperId === currentUser.id || o.helper?.id === currentUser.id
     )
   );
 
@@ -96,16 +94,21 @@ export default function RequestCard({ request }) {
       {/* 1. HEADER: Requester Identity + Category Badge on Left, Budget on Right */}
       <div className="flex items-center justify-between gap-3">
         {/* Requester Identity & Category */}
-        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+        <Link
+          href={`/profile/${requesterId || "user"}`}
+          onClick={(e) => e.stopPropagation()}
+          className="flex items-center gap-2.5 sm:gap-3 min-w-0 group/requester hover:opacity-90 transition"
+          title={`Lihat profil ${requesterName}`}
+        >
           <div className="relative shrink-0">
             {requesterAvatar && !requesterAvatar.includes("images.unsplash.com") ? (
               <img
                 src={requesterAvatar}
                 alt={requesterName}
-                className="w-9 h-9 sm:w-10 sm:h-10 rounded-full object-cover border border-slate-100 shadow-2xs bg-white"
+                className="w-9 h-9 sm:w-10 sm:h-10 rounded-full object-cover border border-slate-100 shadow-2xs bg-white group-hover/requester:border-[#1683FF] transition"
               />
             ) : (
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-blue-50 text-[#1683FF] flex items-center justify-center font-black text-xs border border-blue-200 shadow-2xs">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-blue-50 text-[#1683FF] flex items-center justify-center font-black text-xs border border-blue-200 shadow-2xs group-hover/requester:border-[#1683FF] transition">
                 {(requesterName || "U")[0].toUpperCase()}
               </div>
             )}
@@ -118,7 +121,7 @@ export default function RequestCard({ request }) {
 
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs sm:text-sm font-bold text-slate-800 truncate">
+              <span className="text-xs sm:text-sm font-bold text-slate-800 group-hover/requester:text-[#1683FF] transition truncate">
                 {isRequester ? "Saya (Pembuat)" : requesterName}
               </span>
               {requesterRole && (
@@ -149,7 +152,7 @@ export default function RequestCard({ request }) {
               )}
             </div>
           </div>
-        </div>
+        </Link>
 
         {/* Budget with clear hierarchy on Right */}
         <div className="text-right shrink-0">

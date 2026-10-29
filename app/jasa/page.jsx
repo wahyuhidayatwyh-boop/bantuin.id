@@ -10,12 +10,12 @@ import { formatIDR } from "@/lib/utils";
 import { promotionService } from "@/lib/services/promotionService";
 import RecommendedCarousel from "@/components/promotion/RecommendedCarousel";
 import { 
-  getAllProviders, 
-  getStartingPrice, 
-  getAllCatalogServices 
+  getStartingPrice 
 } from "@/lib/mock/providersData";
 import CategoryIcon from "@/components/common/CategoryIcon";
 import { JASA_CATEGORIES } from "@/lib/categories";
+import { JasaCardSkeleton } from "@/components/skeletons/ItemGridSkeleton";
+
 import { 
   Search, 
   Layers, 
@@ -112,9 +112,13 @@ const PRICE_RANGES = [
   { id: "above_500k", label: "Di atas Rp 500 rb" },
 ];
 
+let cachedLiveServices = null;
+let cachedPromotedServices = null;
+
 function JasaPageContent() {
   const searchParams = useSearchParams();
   const { 
+    services = [],
     activeKabupaten = "Kabupaten Banyumas",
     filterByKabupaten = true,
     setFilterByKabupaten,
@@ -148,15 +152,210 @@ function JasaPageContent() {
 
   const ITEMS_PER_PAGE = 16;
 
-  // Data
-  const allCatalog = useMemo(() => getAllCatalogServices(), []);
-  const allProvidersList = useMemo(() => getAllProviders(), []);
-
-  // Promoted Services (Sistem Promosi Terpadu Bantuin)
-  const [promotedServices, setPromotedServices] = useState([]);
+  const [liveServices, setLiveServices] = useState([]);
+  const [isLoadingServices, setIsLoadingServices] = useState(true);
 
   useEffect(() => {
-    const fetchPromoted = (trackImpressions = false) => {
+    let isMounted = true;
+    setIsLoadingServices(true);
+
+    // Bersihkan seluruh legacy bantuin_provider_ dan stale live_services di storage
+    if (typeof window !== "undefined") {
+      try {
+        sessionStorage.removeItem("bantuin_cached_live_services");
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const key = localStorage.key(i);
+          if (key && (key.startsWith("bantuin_provider_") || key === "bantuin_providers")) {
+            localStorage.removeItem(key);
+          }
+        }
+      } catch (_) {}
+    }
+
+    fetch("/api/services?limit=50")
+      .then((res) => res.json())
+      .then((json) => {
+        if (isMounted && json.success && Array.isArray(json.data?.services)) {
+          cachedLiveServices = json.data.services;
+          setLiveServices(json.data.services);
+        }
+      })
+      .catch((e) => console.warn("Live services fetch error in /jasa:", e))
+      .finally(() => {
+        if (isMounted) setIsLoadingServices(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Data (Hanya menggunakan layanan jasa resmi dari database PostgreSQL)
+  const allCatalog = useMemo(() => {
+    const rawList = liveServices.length > 0 ? liveServices : (isLoadingServices ? [] : services);
+    if (!rawList || rawList.length === 0) return [];
+
+    // Deduplikasi ketat berdasarkan ID unik layanan agar tidak ada card ganda
+    const seenIds = new Set();
+    const uniqueRaw = [];
+    for (const item of rawList) {
+      if (item && item.id && !seenIds.has(String(item.id))) {
+        seenIds.add(String(item.id));
+        uniqueRaw.push(item);
+      }
+    }
+
+    return uniqueRaw.map((s) => {
+      const realImg =
+        (Array.isArray(s.portfolioUrls) && s.portfolioUrls.length > 0 && s.portfolioUrls[0]) ||
+        s.coverImageUrl ||
+        s.imageUrl ||
+        s.image ||
+        "/logotab.png";
+
+      // Resolusi rating yang akurat sesuai profil penyedia asli di database (bukan default paksa 5.0)
+      const rawRating = s.provider?.ratingAvg !== undefined && s.provider?.ratingAvg !== null
+        ? Number(s.provider.ratingAvg)
+        : (s.ratingAvg !== undefined && s.ratingAvg !== null ? Number(s.ratingAvg) : 0);
+
+      const isVerified =
+        s.provider?.verificationStatus === "verified" ||
+        s.provider?.isVerified === true;
+
+      const realRatingCount = Math.max(Number(s.ratingCount || 0), Number(s.provider?.ratingCount || 0));
+      const firstPkg = (Array.isArray(s.packages) && s.packages[0]) || {};
+
+      return {
+        id: s.id,
+        title: s.title,
+        desc: s.description || "Layanan profesional dari penyedia terverifikasi.",
+        price: Number(s.startingPrice || s.price || 0),
+        unit: s.unit || firstPkg.unit || "/ proyek",
+        deliveryDuration: s.deliveryDuration || firstPkg.duration || "1-2 Hari Kerja",
+        completedOrders: Number(s.completedOrders || 0),
+        ratingAvg: rawRating,
+        ratingCount: realRatingCount,
+        image: realImg,
+        category: s.category || "Jasa",
+        categoryGroup:
+          s.category?.includes("Desain")
+            ? "Desain"
+            : s.category?.includes("Foto")
+            ? "Fotografi"
+            : s.category?.includes("Laptop") || s.category?.includes("PC")
+            ? "Komputer"
+            : s.category?.includes("AC")
+            ? "Teknisi"
+            : "Jasa",
+        location:
+          s.location ||
+          (s.locationType === "online"
+            ? "Online / Seluruh Indonesia"
+            : s.provider?.campusName || activeKabupaten || "Kab. Banyumas (Purwokerto)"),
+        locationType: s.locationType || "hybrid",
+        mode: s.locationType || s.mode || "hybrid",
+        provider: {
+          id: s.provider?.id,
+          name: s.provider?.fullName || "Mitra Jasa Bantuin",
+          avatar:
+            (s.provider?.avatarUrl && !s.provider.avatarUrl.includes("dicebear.com") && !s.provider.avatarUrl.includes("images.unsplash.com"))
+              ? s.provider.avatarUrl
+              : null,
+          location:
+            s.location ||
+            (s.locationType === "online"
+              ? "Online / Seluruh Indonesia"
+              : s.provider?.campusName || activeKabupaten || "Kab. Banyumas (Purwokerto)"),
+          city: s.provider?.campusName || activeKabupaten || "Kab. Banyumas (Purwokerto)",
+          rating: rawRating > 0 ? rawRating.toFixed(1) : "0.0",
+          completedJobs: Number(s.provider?.completedHelpsCount ?? s.completedOrders ?? 0),
+          reviewsCount: realRatingCount,
+          verified: isVerified,
+          isVerified: isVerified,
+        },
+        portfolioUrls: Array.isArray(s.portfolioUrls) && s.portfolioUrls.length > 0 ? s.portfolioUrls : (realImg ? [realImg] : []),
+      };
+    });
+  }, [liveServices, services, activeKabupaten, isLoadingServices]);
+
+
+  const allProvidersList = useMemo(() => {
+    const dbProviders = [];
+    allCatalog.forEach((item) => {
+      if (item.provider?.id && !dbProviders.some((p) => p.id === item.provider.id)) {
+        dbProviders.push({
+          id: item.provider.id,
+          name: item.provider.name,
+          brandTitle: "Penyedia Jasa Profesional",
+          type: "specialist",
+          category: item.categoryGroup || "Jasa",
+          avatar: item.provider.avatar,
+          coverBanner: null,
+          rating: item.provider.rating || "0.0",
+          reviewsCount: item.ratingCount || 0,
+          completedJobs: item.provider.completedJobs || 0,
+          responseTime: "10 menit",
+          location: item.provider.location,
+          city: item.provider.city,
+          isVerified: item.provider.isVerified || true,
+          bio: item.desc || "Penyedia jasa profesional terverifikasi di platform Bantuin.",
+          skills: [item.category, "Layanan Cepat", "Kualitas Terbaik"]
+        });
+      }
+    });
+    return dbProviders;
+  }, [allCatalog]);
+
+  // Promoted Services (Sistem Promosi Terpadu Bantuin)
+  const [promotedServices, setPromotedServices] = useState(() => {
+    if (cachedPromotedServices && cachedPromotedServices.length > 0) return cachedPromotedServices;
+    if (typeof window === "undefined") return [];
+    try {
+      const activePromos = promotionService.getActivePromotionsSync({
+        type: "jasa",
+        placement: "jasa",
+      });
+      const initial = activePromos.map((promo) => ({
+        promoId: promo.id,
+        id: promo.targetId || promo.id,
+        title: promo.targetTitle,
+        category: promo.category || promo.targetCategory || "Jasa",
+        price: promo.price || promo.targetPrice || 0,
+        image: promo.image || promo.targetImage || "/logotab.png",
+        desc: promo.description || promo.desc || "",
+        locationType: promo.locationType || "hybrid",
+        mode: promo.locationType || "hybrid",
+        rating: Number(promo.ratingAvg || promo.ownerRating || 5.0),
+        ratingAvg: Number(promo.ratingAvg || promo.ownerRating || 5.0),
+        reviewCount: Number(promo.reviewCount || promo.ratingCount || 0),
+        completedOrders: Number(promo.completedCount || promo.completedJobs || 0),
+        completedJobs: Number(promo.completedCount || promo.completedJobs || 0),
+        completedCount: Number(promo.completedCount || promo.completedJobs || 0),
+        provider: {
+          name: promo.ownerName || "Mitra Bantuin",
+          city: promo.targetLocation || "Banyumas",
+          rating: Number(promo.ratingAvg || promo.ownerRating || 5.0),
+          completedJobs: Number(promo.completedCount || promo.completedJobs || 0),
+          verified: true,
+        },
+      }));
+      cachedPromotedServices = initial;
+      return initial;
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchPromoted = async (trackImpressions = false) => {
+      try {
+        await promotionService.fetchLivePromotions();
+      } catch (err) {
+        console.warn("Could not sync live promotions:", err);
+      }
+
+      if (!isMounted) return;
+
       const activePromos = promotionService.getActivePromotionsSync({
         type: "jasa",
         placement: "jasa",
@@ -167,31 +366,62 @@ function JasaPageContent() {
 
       const mapped = activePromos.map((promo) => {
         const catalogItem = allCatalog.find(
-          (c) => String(c.id) === String(promo.targetId) || c.title.toLowerCase() === (promo.targetTitle || "").toLowerCase()
+          (c) => String(c?.id) === String(promo?.targetId) || String(c?.title || "").toLowerCase() === String(promo?.targetTitle || "").toLowerCase()
         );
+        const realRating = Number(catalogItem?.ratingAvg ?? promo.ratingAvg ?? promo.rating ?? 5.0);
+        const realReviews = Math.max(
+          Number(catalogItem?.ratingCount ?? 0),
+          Number(catalogItem?.provider?.reviewsCount ?? 0),
+          Number(promo.reviewCount ?? 0),
+          Number(promo.ratingCount ?? 0)
+        );
+        const realCompleted = Number(catalogItem?.completedOrders ?? promo.completedOrders ?? promo.completedCount ?? 0);
+
         return {
           promoId: promo.id,
           id: catalogItem?.id || promo.targetId || promo.id,
+          targetId: promo.targetId || catalogItem?.id,
           title: promo.targetTitle || catalogItem?.title,
-          category: promo.category || catalogItem?.category || "Jasa",
-          price: promo.price || catalogItem?.price || 0,
-          image: promo.image || catalogItem?.image || "https://images.unsplash.com/photo-1581578731548-c64695cc6952?w=800&auto=format&fit=crop&q=80",
-          desc: promo.description || catalogItem?.desc || "",
+          category: promo.category || promo.targetCategory || catalogItem?.category || "Jasa",
+          price: promo.price || promo.targetPrice || catalogItem?.price || 0,
+          unit: catalogItem?.unit || promo.unit || "/ proyek",
+          deliveryDuration: catalogItem?.deliveryDuration || promo.deliveryDuration || "1-2 Hari Kerja",
+          image: promo.image || promo.targetImage || catalogItem?.image || "/logotab.png",
+          desc: promo.description || promo.desc || catalogItem?.desc || "",
+          priority: Number(promo.priority) || 1,
+          isPromoted: true,
+          rating: realRating,
+          ratingAvg: realRating,
+          reviewCount: realReviews,
+          ratingCount: realReviews,
+          completedOrders: realCompleted,
+          completedJobs: realCompleted,
+          completedCount: realCompleted,
           provider: catalogItem?.provider || {
             name: promo.ownerName || "Mitra Bantuin",
             city: promo.targetLocation || "Banyumas",
-            rating: 5.0,
-            completedJobs: 24,
+            rating: realRating,
+            completedJobs: realCompleted,
             verified: true,
           },
         };
       });
 
-      setPromotedServices(mapped);
+      // Deduplikasi ketat agar tidak ada layanan jasa yang tampil ganda
+      const seenServiceKeys = new Set();
+      const uniqueMapped = [];
+      for (const item of mapped) {
+        const sKey = String(item.id || item.targetId || item.title);
+        if (!seenServiceKeys.has(sKey)) {
+          seenServiceKeys.add(sKey);
+          uniqueMapped.push(item);
+        }
+      }
 
-      // Pencatatan impresi hanya saat halaman pertama dimuat. Perubahan data
-      // promosi memancarkan event sendiri; merekam lagi dari event tersebut
-      // akan membuat render berulang tanpa henti di browser.
+      cachedPromotedServices = uniqueMapped;
+      setPromotedServices(uniqueMapped);
+
+      // Pencatatan impresi hanya saat halaman pertama dimuat
       if (trackImpressions) {
         activePromos.forEach((p) => {
           promotionService.recordImpression(p.id);
@@ -200,12 +430,86 @@ function JasaPageContent() {
     };
 
     fetchPromoted(true);
-    const handleSync = () => fetchPromoted(false);
+    const handleSync = () => {
+      if (!isMounted) return;
+      cachedPromotedServices = null;
+      const activePromos = promotionService.getActivePromotionsSync({
+        type: "jasa",
+        placement: "jasa",
+        userLocation: filterByKabupaten ? activeKabupaten : undefined,
+        category: selectedCategory !== "Semua" && selectedCategory !== "Penyedia" ? selectedCategory : undefined,
+        search: searchQuery.trim() || undefined,
+      });
+
+      const mapped = activePromos.map((promo) => {
+        const catalogItem = allCatalog.find(
+          (c) => String(c?.id) === String(promo?.targetId) || String(c?.title || "").toLowerCase() === String(promo?.targetTitle || "").toLowerCase()
+        );
+        const realRating = Number(catalogItem?.ratingAvg ?? promo.ratingAvg ?? promo.rating ?? 5.0);
+        const realReviews = Math.max(
+          Number(catalogItem?.ratingCount ?? 0),
+          Number(catalogItem?.provider?.reviewsCount ?? 0),
+          Number(promo.reviewCount ?? 0),
+          Number(promo.ratingCount ?? 0)
+        );
+        const realCompleted = Number(catalogItem?.completedOrders ?? promo.completedOrders ?? promo.completedCount ?? 0);
+
+        return {
+          promoId: promo.id,
+          id: catalogItem?.id || promo.targetId || promo.id,
+          targetId: promo.targetId || catalogItem?.id,
+          title: promo.targetTitle || catalogItem?.title,
+          category: promo.category || promo.targetCategory || catalogItem?.category || "Jasa",
+          price: promo.price || promo.targetPrice || catalogItem?.price || 0,
+          unit: catalogItem?.unit || promo.unit || "/ proyek",
+          deliveryDuration: catalogItem?.deliveryDuration || promo.deliveryDuration || "1-2 Hari Kerja",
+          image: promo.image || promo.targetImage || catalogItem?.image || "/logotab.png",
+          desc: promo.description || promo.desc || catalogItem?.desc || "",
+          locationType: catalogItem?.locationType || promo.locationType || "hybrid",
+          mode: catalogItem?.locationType || promo.locationType || "hybrid",
+          priority: Number(promo.priority) || 1,
+          isPromoted: true,
+          rating: realRating,
+          ratingAvg: realRating,
+          reviewCount: realReviews,
+          ratingCount: realReviews,
+          completedOrders: realCompleted,
+          completedJobs: realCompleted,
+          completedCount: realCompleted,
+          provider: catalogItem?.provider || {
+            name: promo.ownerName || "Mitra Bantuin",
+            city: promo.targetLocation || "Banyumas",
+            rating: realRating,
+            completedJobs: realCompleted,
+            verified: true,
+          },
+        };
+      });
+
+      const seenSyncKeys = new Set();
+      const uniqueSyncMapped = [];
+      for (const item of mapped) {
+        const sKey = String(item.id || item.targetId || item.title);
+        if (!seenSyncKeys.has(sKey)) {
+          seenSyncKeys.add(sKey);
+          uniqueSyncMapped.push(item);
+        }
+      }
+
+      cachedPromotedServices = uniqueSyncMapped;
+      setPromotedServices(uniqueSyncMapped);
+    };
+
     window.addEventListener("bantuin_promotions_updated", handleSync);
     window.addEventListener("bantuin_promotion_packages_updated", handleSync);
+    window.addEventListener("bantuin_services_updated", handleSync);
+    window.addEventListener("bantuin_service_updated", handleSync);
     return () => {
+      isMounted = false;
       window.removeEventListener("bantuin_promotions_updated", handleSync);
       window.removeEventListener("bantuin_promotion_packages_updated", handleSync);
+      window.removeEventListener("bantuin_services_updated", handleSync);
+      window.removeEventListener("bantuin_service_updated", handleSync);
     };
   }, [allCatalog, activeKabupaten, filterByKabupaten, selectedCategory, searchQuery]);
 
@@ -241,10 +545,24 @@ function JasaPageContent() {
 
   // Helper untuk mengecek apakah jasa merupakan layanan online/digital (bisa dipesan dari mana saja)
   const isOnlineOrDigitalService = (item) => {
-    const catGroup = (item.categoryGroup || "").toLowerCase();
-    const cat = (item.category || "").toLowerCase();
-    const title = (item.title || "").toLowerCase();
-    const provCity = (item.provider?.city || "").toLowerCase();
+    if (!item) return false;
+
+    // Prioritas 1: Gunakan mode pengerjaan / locationType asli dari database
+    const locType = String(item.locationType || item.location_type || item.mode || "").toLowerCase().trim();
+    if (locType === "online" || locType === "digital") return true;
+    if (locType === "onsite" || locType === "customer_location" || locType === "offline") return false;
+
+    // Prioritas 2: Periksa teks lokasi jika secara eksplisit tertulis online / remote / seluruh indonesia
+    const locStr = String(item.location || item.provider?.location || item.provider?.city || "").toLowerCase();
+    if (locStr.includes("online") || locStr.includes("remote") || locStr.includes("digital") || locStr.includes("seluruh indonesia")) {
+      return true;
+    }
+
+    // Prioritas 3: Heuristik fallback jika locationType default/hybrid atau belum terisi
+    const catGroup = String(item.categoryGroup || "").toLowerCase();
+    const cat = String(item.category || "").toLowerCase();
+    const title = String(item.title || "").toLowerCase();
+    const provCity = String(item.provider?.city || "").toLowerCase();
 
     return (
       catGroup.includes("desain") ||
@@ -256,10 +574,52 @@ function JasaPageContent() {
       cat.includes("landing") ||
       cat.includes("jurnal") ||
       cat.includes("abstrak") ||
+      cat.includes("3d") ||
       title.includes("online") ||
       provCity.includes("online") ||
       provCity.includes("remote")
     );
+  };
+
+  // Helper ringkas untuk badge lokasi kartu agar rapi, padat, dan estetis
+  const formatLocationBadge = (loc) => {
+    if (!loc || typeof loc !== "string") return "Di Lokasi";
+    const clean = loc.trim();
+    if (clean.toLowerCase().includes("online")) return "Digital";
+
+    const parts = clean.split(",").map((p) => p.trim()).filter(Boolean);
+    if (parts.length > 0) {
+      let main = parts[0];
+      // Jika bagian pertama adalah alamat jalan/nomor, cari bagian kota/kabupaten
+      if (
+        parts.length > 1 &&
+        (main.match(/^\d/) ||
+          main.toLowerCase().startsWith("jl") ||
+          main.toLowerCase().startsWith("jalan") ||
+          main.toLowerCase().startsWith("gang") ||
+          main.toLowerCase().startsWith("gg"))
+      ) {
+        const cityPart = parts.find(
+          (p) =>
+            p.toLowerCase().includes("kab") ||
+            p.toLowerCase().includes("kota") ||
+            p.toLowerCase().includes("purwokerto") ||
+            p.toLowerCase().includes("banyumas") ||
+            p.toLowerCase().includes("kec")
+        );
+        if (cityPart) main = cityPart;
+        else main = parts[1];
+      }
+
+      // Bersihkan teks kurung redundan seperti "(Purwokerto)"
+      main = main.replace(/\s*\(.*?\)/g, "").trim();
+      // Bersihkan prefix administratif panjang agar badge tetap padat dan elegan
+      main = main.replace(/^(kab\.?|kabupaten|kota|kec\.?|kecamatan)\s+/i, "").trim();
+
+      return main || "Di Lokasi";
+    }
+
+    return clean.slice(0, 16);
   };
 
   // Sub-categories list for active category
@@ -291,51 +651,62 @@ function JasaPageContent() {
         }
       }
 
-      // 2. Filter Category Group
+      // 2. Filter Category Group (Aman dari undefined)
+      const itemCatGroup = String(item?.categoryGroup || "").toLowerCase();
+      const itemCat = String(item?.category || "").toLowerCase();
+      const selCatLower = String(selectedCategory || "").toLowerCase();
+
       const matchCategory =
+        !selectedCategory ||
         selectedCategory === "Semua" ||
-        item.categoryGroup.toLowerCase() === selectedCategory.toLowerCase() ||
-        (selectedCategory === "Helper" && item.categoryGroup.toLowerCase().includes("helper")) ||
-        (selectedCategory === "Desain" && item.categoryGroup.toLowerCase().includes("desain")) ||
-        (selectedCategory === "Teknisi" && item.categoryGroup.toLowerCase().includes("teknisi")) ||
-        (selectedCategory === "Fotografi" && item.categoryGroup.toLowerCase().includes("foto")) ||
-        (selectedCategory === "Komputer" && (item.categoryGroup.toLowerCase().includes("komputer") || item.categoryGroup.toLowerCase().includes("laptop"))) ||
-        (selectedCategory === "Web" && (item.categoryGroup.toLowerCase().includes("web") || item.categoryGroup.toLowerCase().includes("it"))) ||
-        (selectedCategory === "Bahasa" && item.categoryGroup.toLowerCase().includes("bahasa"));
+        itemCatGroup === selCatLower ||
+        itemCat.includes(selCatLower) ||
+        (selectedCategory === "Helper" && (itemCatGroup.includes("helper") || itemCat.includes("tenaga") || itemCat.includes("bantuan"))) ||
+        (selectedCategory === "Desain" && (itemCatGroup.includes("desain") || itemCat.includes("logo"))) ||
+        (selectedCategory === "Teknisi" && (itemCatGroup.includes("teknisi") || itemCat.includes("ac") || itemCat.includes("listrik"))) ||
+        (selectedCategory === "Fotografi" && (itemCatGroup.includes("foto") || itemCat.includes("wisuda"))) ||
+        (selectedCategory === "Komputer" && (itemCatGroup.includes("komputer") || itemCatGroup.includes("laptop") || itemCat.includes("laptop"))) ||
+        (selectedCategory === "Web" && (itemCatGroup.includes("web") || itemCatGroup.includes("it"))) ||
+        (selectedCategory === "Bahasa" && itemCatGroup.includes("bahasa"));
 
       if (!matchCategory) return false;
 
       // 3. Filter Sub-Category
-      if (selectedSubCategory !== "Semua") {
+      if (selectedSubCategory && selectedSubCategory !== "Semua") {
         const subCatObj = activeSubCategories.find((s) => s.id === selectedSubCategory);
+        const subCatLower = String(selectedSubCategory || "").toLowerCase();
+        const subQuery = String(subCatObj?.query || "").toLowerCase();
+        const itemTitle = String(item?.title || "").toLowerCase();
+        const itemDesc = String(item?.desc || "").toLowerCase();
+
         const subMatch =
-          item.category.toLowerCase().includes(selectedSubCategory.toLowerCase()) ||
-          (subCatObj?.query && item.title.toLowerCase().includes(subCatObj.query.toLowerCase())) ||
-          (subCatObj?.query && item.desc.toLowerCase().includes(subCatObj.query.toLowerCase()));
+          itemCat.includes(subCatLower) ||
+          (subQuery && itemTitle.includes(subQuery)) ||
+          (subQuery && itemDesc.includes(subQuery));
 
         if (!subMatch) return false;
       }
 
       // 4. Filter Search Query
       if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
+        const q = String(searchQuery || "").toLowerCase().trim();
+        const itemTitle = String(item?.title || "").toLowerCase();
+        const itemDesc = String(item?.desc || "").toLowerCase();
+        const itemCat = String(item?.category || "").toLowerCase();
+        const itemProvName = String(item?.provider?.name || "").toLowerCase();
+
         const matchSearch =
-          item.title.toLowerCase().includes(q) ||
-          item.desc.toLowerCase().includes(q) ||
-          item.category.toLowerCase().includes(q) ||
-          item.provider.name.toLowerCase().includes(q);
+          itemTitle.includes(q) ||
+          itemDesc.includes(q) ||
+          itemCat.includes(q) ||
+          itemProvName.includes(q);
 
         if (!matchSearch) return false;
       }
 
-      // 5. Deduplikasi: Jangan tampilkan item yang sudah muncul pada slot Jasa Dipromosikan (Step 33)
-      if (promotedServices.some((p) => String(p.id) === String(item.id) || p.title.toLowerCase() === item.title.toLowerCase())) {
-        return false;
-      }
-
       return true;
     });
-  }, [allCatalog, selectedCategory, selectedSubCategory, searchQuery, activeSubCategories, filterByKabupaten, isItemInCurrentKabupaten, promotedServices]);
+  }, [allCatalog, selectedCategory, selectedSubCategory, searchQuery, activeSubCategories, filterByKabupaten, isItemInCurrentKabupaten]);
 
   // Sort & Advanced Filter Catalog Services
   const sortedAndFilteredCatalog = useMemo(() => {
@@ -368,8 +739,33 @@ function JasaPageContent() {
       list.sort((a, b) => (b.provider?.completedJobs || 0) - (a.provider?.completedJobs || 0));
     }
 
-    return list;
-  }, [filteredCatalog, serviceTypeFilter, priceFilter, sortBy]);
+    // Boost ranking & anotasi status promosi
+    const listWithPromo = list.map((item) => {
+      const promoMatch = promotedServices.find(
+        (p) => String(p?.id) === String(item?.id) ||
+               String(p?.promoId) === String(item?.id) ||
+               String(p?.targetId) === String(item?.id) ||
+               (p?.title && item?.title && String(p.title).trim().toLowerCase() === String(item.title).trim().toLowerCase())
+      );
+      return {
+        ...item,
+        isPromoted: Boolean(promoMatch),
+        promoPriority: promoMatch ? Number(promoMatch.priority || promoMatch.package?.priority || 1) : 0,
+      };
+    });
+
+    // Urutan prioritas teratas (boost ranking) untuk jasa yang dipromosikan (Priority 3 > 2 > 1 > organik)
+    listWithPromo.sort((a, b) => {
+      if (a.isPromoted && !b.isPromoted) return -1;
+      if (!a.isPromoted && b.isPromoted) return 1;
+      if (a.isPromoted && b.isPromoted) {
+        return (b.promoPriority || 0) - (a.promoPriority || 0);
+      }
+      return 0;
+    });
+
+    return listWithPromo;
+  }, [filteredCatalog, serviceTypeFilter, priceFilter, sortBy, promotedServices]);
 
   // Filter Providers (if "Penyedia" category is selected)
   const filteredProviders = useMemo(() => {
@@ -395,10 +791,10 @@ function JasaPageContent() {
       if (!q) return true;
 
       return (
-        p.name.toLowerCase().includes(q) ||
-        p.brandTitle.toLowerCase().includes(q) ||
-        p.category.toLowerCase().includes(q) ||
-        p.skills.some((s) => s.toLowerCase().includes(q))
+        String(p?.name || "").toLowerCase().includes(q) ||
+        String(p?.brandTitle || "").toLowerCase().includes(q) ||
+        String(p?.category || "").toLowerCase().includes(q) ||
+        (Array.isArray(p?.skills) && p.skills.some((s) => String(s || "").toLowerCase().includes(q)))
       );
     });
   }, [allProvidersList, selectedCategory, searchQuery, filterByKabupaten, isItemInCurrentKabupaten]);
@@ -1197,11 +1593,9 @@ function JasaPageContent() {
           )}
 
           {/* ───────────────────────────────────────────────────────────── */}
-          {/* SECTION: JASA DIPROMOSIKAN (STEP 5, 6, 7, 29, 32)            */}
-          {/* Otomatis tersembunyi total jika tidak ada promosi aktif      */}
-          {/* ───────────────────────────────────────────────────────────── */}
-          {promotedServices.length > 0 && selectedCategory !== "Penyedia" && (
+          {!isLoadingServices && promotedServices.length > 0 && selectedCategory !== "Penyedia" && (
             <div className="rounded-2xl sm:rounded-3xl bg-gradient-to-b from-blue-50/70 via-blue-50/20 to-white border border-blue-200/80 p-3.5 sm:p-5 shadow-2xs space-y-3.5">
+
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="w-2.5 h-2.5 rounded-full bg-[#1683FF] shadow-[0_0_8px_rgba(22,131,255,0.6)]" />
@@ -1249,7 +1643,34 @@ function JasaPageContent() {
           <div className="space-y-6">
             
             {/* Grid Produk Jasa Langsung (2 Kolom di Mobile) */}
-            {filteredCatalog.length > 0 ? (
+            {isLoadingServices ? (
+              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-4 md:gap-5">
+                {Array.from({ length: 8 }).map((_, sk) => (
+                  <JasaCardSkeleton key={sk} />
+                ))}
+              </div>
+            ) : allCatalog.length === 0 ? (
+
+              <div className="bg-white rounded-3xl border border-slate-200 p-8 sm:p-12 text-center max-w-md mx-auto space-y-3 shadow-2xs">
+                <div className="w-16 h-16 rounded-2xl bg-blue-50 text-[#1683FF] flex items-center justify-center mx-auto mb-2">
+                  <Layers className="w-8 h-8" />
+                </div>
+                <h3 className="font-bold text-slate-900 text-base sm:text-lg">
+                  Belum Ada Jasa Tersedia
+                </h3>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Katalog layanan jasa saat ini sedang bersih dan siap menampilkan data asli yang ditambahkan oleh penyedia jasa.
+                </p>
+                <div className="pt-2">
+                  <Link
+                    href="/jasa/dashboard"
+                    className="inline-flex items-center gap-1.5 px-5 py-2.5 bg-[#1683FF] text-white rounded-xl text-xs font-bold hover:bg-[#0F6FE5] transition shadow-xs"
+                  >
+                    <span>Buka Panel Penyedia Jasa</span>
+                  </Link>
+                </div>
+              </div>
+            ) : filteredCatalog.length > 0 ? (
               <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-4 md:gap-5">
                 {paginatedCatalog.map((item) => {
                   const isDigital = isOnlineOrDigitalService(item);
@@ -1268,89 +1689,108 @@ function JasaPageContent() {
                             loading="lazy"
                             className="w-full h-full object-cover group-hover:scale-106 transition-transform duration-500 ease-out"
                           />
-                          <div className="absolute top-2 left-2 sm:top-3 sm:left-3 flex items-center gap-1.5">
-                            <span className="text-[9px] sm:text-[11px] font-bold px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-md sm:rounded-lg bg-black/60 text-white backdrop-blur-xs shadow-xs">
+                          {/* Kategori Layanan (Top Left) */}
+                          <div className="absolute top-2.5 left-2.5 z-10 flex items-center gap-1.5">
+                            <span className="inline-flex items-center text-[9px] sm:text-[10px] font-bold px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full bg-slate-900/65 text-white backdrop-blur-md shadow-2xs border border-white/10 whitespace-nowrap max-w-[100px] sm:max-w-[120px] truncate">
                               {item.category}
                             </span>
                           </div>
                           
-                          {/* Badge Digital vs Datang ke Lokasi */}
-                          <div className="absolute top-2 right-2 sm:top-3 sm:right-3">
+                          {/* Badge Digital vs Datang ke Lokasi (Top Right) */}
+                          <div className="absolute top-2.5 right-2.5 z-10">
                             {isDigital ? (
-                              <span className="text-[8px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-md bg-blue-600 text-white shadow-xs flex items-center gap-0.5 sm:gap-1">
-                                <Globe className="w-2.5 h-2.5" />
+                              <span className="inline-flex items-center gap-1 text-[9px] sm:text-[10px] font-bold px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full bg-blue-600/90 text-white backdrop-blur-md shadow-2xs border border-blue-400/30 whitespace-nowrap">
+                                <Globe className="w-2.5 h-2.5 sm:w-3 sm:h-3 shrink-0" />
                                 <span>Digital</span>
                               </span>
                             ) : (
-                              <span className="text-[8px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-md bg-slate-900/80 backdrop-blur-xs text-white shadow-xs flex items-center gap-0.5 sm:gap-1">
-                                <MapPin className="w-2.5 h-2.5 text-amber-300" />
-                                <span className="hidden xs:inline">Lokasi</span>
+                              <span 
+                                title={item.location || item.provider?.city || "Di Lokasi"}
+                                className="hidden sm:inline-flex items-center gap-1 text-[9px] sm:text-[10px] font-bold px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-full bg-white/95 text-slate-800 backdrop-blur-md shadow-2xs border border-white/90 whitespace-nowrap max-w-[125px] sm:max-w-[155px]"
+                              >
+                                <MapPin className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-[#1683FF] shrink-0" />
+                                <span className="truncate">{formatLocationBadge(item.provider?.city || item.location)}</span>
                               </span>
                             )}
                           </div>
                         </div>
 
                         {/* Detail Judul & Deskripsi */}
-                        <div className="p-2.5 sm:p-4 sm:p-5 space-y-1 sm:space-y-2.5 min-w-0 overflow-hidden">
-                          <h3 className="font-bold text-xs sm:text-base text-slate-900 group-hover:text-[#1683FF] transition-colors line-clamp-2 leading-tight sm:leading-snug min-h-[32px] sm:min-h-[44px] break-words">
-                            {item.title}
-                          </h3>
+                        <div className="p-3 sm:p-4 sm:p-5 flex flex-col flex-1 justify-between min-w-0">
+                          <div>
+                            <h3 className="font-bold text-xs sm:text-[15px] text-slate-900 group-hover:text-[#1683FF] transition-colors line-clamp-2 leading-snug break-words">
+                              {item.title}
+                            </h3>
 
-                          <p className="hidden sm:line-clamp-2 text-xs text-slate-500 leading-relaxed">
-                            {item.desc}
-                          </p>
-
-                          {/* Mitra Penyedia Info */}
-                          <div className="pt-1.5 sm:pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] sm:text-xs min-w-0">
-                            <div className="flex items-center gap-1.5 min-w-0 truncate">
-                              <img
-                                src={item.provider.avatar}
-                                alt={item.provider.name}
-                                className="w-4 h-4 sm:w-6 sm:h-6 rounded-full object-cover border border-slate-200 shrink-0"
-                              />
-                              <span className="truncate font-semibold text-slate-700 max-w-[80px] sm:max-w-none">
-                                {item.provider.name}
-                              </span>
-                              {item.provider.isVerified && (
-                                <CheckCircle2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#1683FF] shrink-0" />
-                              )}
-                            </div>
-
-                            <div className="flex items-center gap-0.5 sm:gap-1 font-bold text-amber-500 shrink-0">
-                              <Star className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-amber-400 text-amber-400" />
-                              <span>{item.provider.rating}</span>
-                            </div>
+                            {/* Deskripsi ringkas: hanya di layar lebih lebar agar tidak menumpuk di kartu mobile */}
+                            <p className="hidden md:line-clamp-2 text-xs text-slate-500 leading-relaxed mt-1 break-words">
+                              {item.desc}
+                            </p>
                           </div>
 
-                          {/* Lokasi / Layanan Area */}
-                          <div className="flex items-center text-[10px] sm:text-[11px] text-slate-400 pt-0.5 min-w-0">
-                            <span className="flex items-center gap-1 truncate w-full">
-                              <MapPin className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-[#1683FF] shrink-0" />
-                              <span className="truncate">{item.provider.location}</span>
-                            </span>
+                          {/* Mitra Penyedia Info & Reputasi (Responsif Vertikal di Mobile, Horizontal di Desktop) */}
+                          <div className="pt-2 mt-2 sm:mt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between text-[11px] sm:text-xs min-w-0 gap-1.5">
+                            <Link
+                              href={`/jasa/penyedia/${item.provider?.id || item.provider?.name || "provider"}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="flex items-center gap-1.5 min-w-0 truncate group/prov hover:opacity-90 transition cursor-pointer"
+                              title={`Lihat profil ${item.provider?.name || "Penyedia"}`}
+                            >
+                              {item.provider?.avatar && !item.provider.avatar.includes("dicebear.com") && !item.provider.avatar.includes("images.unsplash.com") ? (
+                                <img
+                                  src={item.provider.avatar}
+                                  alt={item.provider?.name || "Penyedia"}
+                                  className="w-5 h-5 rounded-full object-cover border border-slate-200 group-hover/prov:border-[#1683FF] shrink-0 transition"
+                                />
+                              ) : (
+                                <div className="w-5 h-5 rounded-full bg-linear-to-br from-[#1683FF] to-[#0E5FCC] text-white flex items-center justify-center font-bold text-[9px] shrink-0 shadow-2xs">
+                                  {((item.provider?.name || "P").trim()[0] || "P").toUpperCase()}
+                                </div>
+                              )}
+                              <span className="truncate font-semibold text-slate-700 group-hover/prov:text-[#1683FF] transition max-w-[100px] sm:max-w-[120px]">
+                                {item.provider?.name || "Penyedia Jasa"}
+                              </span>
+                              {(item.provider?.isVerified || item.provider?.verified) && (
+                                <CheckCircle2 className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
+                              )}
+                            </Link>
+
+                            <div className="flex items-center gap-1 font-bold text-amber-500 shrink-0 text-[10px] sm:text-xs flex-wrap">
+                              <div className="flex items-center gap-0.5">
+                                <Star className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-amber-400 text-amber-400" />
+                                <span>{Number(item.provider?.rating !== undefined && item.provider?.rating !== null ? item.provider.rating : (item.ratingAvg || 0)).toFixed(1)}</span>
+                                <span className="text-slate-400 font-normal text-[9px] sm:text-[10px]">
+                                  ({Number(item.ratingCount || item.provider?.reviewsCount || 0)})
+                                </span>
+                              </div>
+                              <span className="text-slate-300">•</span>
+                              <span className="text-slate-500 font-medium text-[9px] sm:text-[10px] whitespace-nowrap">
+                                {Number(item.completedOrders || item.provider?.completedJobs || 0)} selesai
+                              </span>
+                            </div>
                           </div>
                         </div>
                       </div>
 
-                      {/* Footer Harga & Tombol Pesan */}
-                      <div className="px-2.5 sm:px-5 py-2 sm:py-3 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between gap-1 sm:gap-2 min-w-0 overflow-hidden">
-                        <div className="min-w-0 overflow-hidden">
-                          <span className="text-[9px] sm:text-[10px] uppercase font-bold text-slate-400 block leading-tight truncate">
-                            Mulai:
+                      {/* Footer Harga & Tombol Pesan (Bersih & Proporsional) */}
+                      <div className="px-3 sm:px-4 py-2 sm:py-2.5 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between gap-1.5 min-w-0">
+                        <div className="min-w-0">
+                          <span className="text-[9px] uppercase font-bold text-slate-400 block leading-tight">
+                            Mulai
                           </span>
-                          <div className="flex items-baseline gap-0.5 sm:gap-1 min-w-0">
-                            <span className="text-xs sm:text-base font-black text-[#1683FF] truncate">
+                          <div className="flex items-baseline gap-0.5 min-w-0 flex-wrap">
+                            <span className="text-xs sm:text-sm md:text-base font-black text-[#1683FF] truncate">
                               {formatIDR(item.price)}
                             </span>
                             {item.unit && (
-                              <span className="text-[9px] sm:text-[10px] font-semibold text-slate-400 hidden xs:inline shrink-0">
+                              <span className="text-[9px] sm:text-[10px] font-semibold text-slate-400">
                                 {item.unit}
                               </span>
                             )}
                           </div>
                         </div>
 
-                        <span className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg sm:rounded-xl bg-[#1683FF] text-white text-[10px] sm:text-xs font-bold group-hover:bg-[#0F6FE5] transition shrink-0 shadow-2xs">
+                        <span className="px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg bg-[#1683FF] text-white text-[10px] sm:text-xs font-bold group-hover:bg-[#0F6FE5] transition shrink-0 shadow-2xs">
                           Pesan
                         </span>
                       </div>
@@ -1567,9 +2007,9 @@ function JasaPageContent() {
                           <span>{provider.rating}</span>
                           <span className="text-slate-400 font-normal">({provider.reviewsCount})</span>
                         </div>
-                        <div className="flex items-center gap-1 text-[11px] text-slate-500">
+                        <div className="flex items-center gap-1 text-[11px] text-slate-600 font-medium">
                           <MapPin className="w-3 h-3 text-[#1683FF]" />
-                          <span className="truncate max-w-[140px]">{provider.location}</span>
+                          <span className="truncate max-w-[140px]">{provider.location || provider.city || "Indonesia"}</span>
                         </div>
                       </div>
 
@@ -1594,7 +2034,7 @@ function JasaPageContent() {
                     {/* Footer Profil */}
                     <div className="p-4 bg-slate-50/70 border-t border-slate-100 flex items-center justify-between gap-3 min-w-0">
                       <div className="min-w-0 overflow-hidden">
-                        <span className="text-[10px] uppercase font-bold text-slate-400 block leading-tight truncate">
+                        <span className="text-[10px] uppercase font-bold text-slate-500 block leading-tight truncate">
                           Tarif Mulai:
                         </span>
                         <span className="text-sm sm:text-base font-black text-[#1683FF] truncate block">

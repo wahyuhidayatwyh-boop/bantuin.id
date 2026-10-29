@@ -24,22 +24,78 @@ import {
   ShieldAlert,
   HelpCircle,
   FileText,
-  BookOpen
+  BookOpen,
+  HandHeart,
+  Trash2,
+  Lock,
+  Check
 } from "lucide-react";
 import MobileBottomNav from "@/components/layout/MobileBottomNav";
 import UnreadBadge from "@/components/ui/UnreadBadge";
 
 function formatNavChatTime(d) {
   if (!d) return "Baru saja";
-  if (typeof d === "string" && !d.includes("T") && !d.includes("-")) return d;
-  const dateObj = typeof d === "string" ? new Date(d) : d;
-  if (!dateObj || isNaN(dateObj.getTime?.())) return typeof d === "string" ? d : "Baru saja";
+  if (typeof d === "string" && !d.includes("T") && !d.includes("-") && !d.includes(":") && isNaN(Date.parse(d))) {
+    return d;
+  }
+
+  let dateObj = null;
+  if (d instanceof Date) {
+    dateObj = d;
+  } else if (typeof d === "string") {
+    if (/^\d{1,2}[:.]\d{2}$/.test(d.trim())) {
+      return d.trim().replace(".", ":");
+    }
+    dateObj = new Date(d);
+  } else if (typeof d === "number") {
+    dateObj = new Date(d);
+  }
+
+  if (!dateObj || isNaN(dateObj.getTime())) return typeof d === "string" ? d : "Baru saja";
+
   const now = new Date();
-  const diff = now - dateObj;
-  if (diff < 60000) return "Baru saja";
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}j`;
-  return dateObj.toLocaleDateString("id-ID", { day: "numeric", month: "short" });
+  const diff = now.getTime() - dateObj.getTime();
+
+  // Jika pesan baru dibuat dalam 60 detik terakhir
+  if (diff < 60000 && diff >= -10000) return "Baru saja";
+
+  const timeStr = dateObj.toLocaleTimeString("id-ID", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Jakarta",
+  }).replace(".", ":");
+
+  // Periksa apakah pesan dikirim pada hari ini (dalam zona waktu pengguna / WIB)
+  const isSameDay =
+    now.getFullYear() === dateObj.getFullYear() &&
+    now.getMonth() === dateObj.getMonth() &&
+    now.getDate() === dateObj.getDate();
+
+  if (isSameDay) {
+    return timeStr;
+  }
+
+  // Jika dikirim kemarin
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const isYesterday =
+    yesterday.getFullYear() === dateObj.getFullYear() &&
+    yesterday.getMonth() === dateObj.getMonth() &&
+    yesterday.getDate() === dateObj.getDate();
+
+  if (isYesterday) {
+    return `Kemarin ${timeStr}`;
+  }
+
+  // Tanggal bulan (misal: 15 Okt 08:30)
+  const dateStr = dateObj.toLocaleDateString("id-ID", {
+    day: "numeric",
+    month: "short",
+    timeZone: "Asia/Jakarta",
+  });
+
+  return `${dateStr} ${timeStr}`;
 }
 
 export default function Navbar() {
@@ -59,7 +115,12 @@ export default function Navbar() {
     notifications = [],
     markNotificationAsRead,
     markAllNotificationsAsRead,
+    deleteNotification,
+    clearAllNotifications,
     markChatRoomAsRead,
+    markAllChatRoomsAsRead,
+    deleteChatRoom,
+    addToast,
     activeActivitiesCount = 0,
   } = useApp();
   const [isDetectingGPS, setIsDetectingGPS] = useState(false);
@@ -120,10 +181,22 @@ export default function Navbar() {
     { name: "Jasa", href: "/jasa" },
   ];
 
-  // Dynamic Recent Chats derived from real orderRooms
-  const recentChats = (orderRooms || []).slice(0, 5).map((room) => {
-    const isRequesterMe = room.requester?.id === currentUser?.id;
-    const partner = isRequesterMe ? room.helper : room.requester;
+  // Dynamic Recent Chats derived from real orderRooms (strictly filtered to currentUser)
+  const recentChats = (orderRooms || [])
+    .filter((room) => {
+      if (!currentUser?.id) return true;
+      const myId = currentUser.id;
+      if (Array.isArray(room.deletedFor) && room.deletedFor.includes(myId)) {
+        return false;
+      }
+      const rId = room.requester?.id || room.requesterId;
+      const hId = room.helper?.id || room.helperId;
+      return rId === myId || hId === myId;
+    })
+    .slice(0, 5)
+    .map((room) => {
+      const isRequesterMe = (room.requester?.id || room.requesterId) === currentUser?.id;
+      const partner = isRequesterMe ? room.helper : room.requester;
     const partnerName = partner?.name || partner?.fullName || "Mitra / Pengguna";
     const partnerAvatar = partner?.avatar && !partner.avatar.includes("images.unsplash.com") 
       ? partner.avatar 
@@ -133,10 +206,14 @@ export default function Navbar() {
     const msgs = room.messages || [];
     const lastMsgObj = msgs[msgs.length - 1];
     const lastMsgText = lastMsgObj ? lastMsgObj.message : (room.requestTitle || "Pesanan aktif");
-    const lastMsgTime = lastMsgObj?.timestamp || room.lastUpdated || "Baru saja";
+    const lastMsgTime = lastMsgObj?.createdAt || lastMsgObj?.timestamp || room.updatedAt || room.lastUpdated || room.createdAt || "Baru saja";
     const hasUnread = (room.unreadCount && room.unreadCount > 0) || (lastMsgObj && !lastMsgObj.isMe && lastMsgObj.senderId !== "system" && !lastMsgObj.read);
 
     const categoryType = room.orderType === "rental" ? "Sewa" : (room.orderType === "service" || room.categoryType === "jasa" ? "Jasa" : "Bantuan");
+    const isRunning = (room.paymentStatus === "PAID" || 
+      ["on_the_way", "item_picked_up", "task_delivered", "proof_submitted", "in_progress", "paid_escrow"].includes(room.orderStatus)) &&
+      room.orderStatus !== "completed" && 
+      room.orderStatus !== "cancelled";
 
     return {
       id: room.id,
@@ -147,11 +224,12 @@ export default function Navbar() {
       unread: Boolean(hasUnread),
       category: categoryType,
       roomTitle: room.requestTitle || room.rentalDetails?.unitName || "Transaksi",
+      isRunning,
     };
   });
 
   const totalChatUnread = recentChats.filter((c) => c.unread).length;
-  const totalNotifUnread = (notifications || []).filter((n) => n.unread).length;
+  const totalNotifUnread = (notifications || []).filter((n) => (n.unread ?? !n.isRead)).length;
   const activeOrdersCount = isAuthenticated ? (typeof activeActivitiesCount === "number" ? activeActivitiesCount : 0) : 0;
 
   const handleChatClick = (roomId) => {
@@ -186,7 +264,9 @@ export default function Navbar() {
             <Image
               src={logoImg}
               alt="Bantuin"
+              width={114}
               height={38}
+              sizes="150px"
               className="h-8 sm:h-9 w-auto object-contain mix-blend-multiply transition-transform group-hover:scale-105"
               priority
             />
@@ -214,7 +294,7 @@ export default function Navbar() {
               {userCoordinates ? (
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" title="GPS Aktif" />
               ) : (
-                <span className="inline-flex items-center gap-1 text-[10px] text-[#1683FF] font-bold bg-blue-50 hover:bg-blue-100 px-2.5 py-0.5 rounded-full border border-blue-200/70 shrink-0">
+                <span className="inline-flex items-center gap-1 text-[10px] text-[#0F6FE5] font-bold bg-blue-50 hover:bg-blue-100 px-2.5 py-0.5 rounded-full border border-blue-200/70 shrink-0">
                   <Compass className={`w-3 h-3 ${isDetectingGPS || isDetectingLocation ? "animate-spin" : ""}`} />
                   <span>Deteksi GPS</span>
                 </span>
@@ -306,13 +386,28 @@ export default function Navbar() {
                           <MessageSquare className="w-3.5 h-3.5 text-[#1683FF]" />
                           <span className="text-xs font-bold text-slate-900">Pesan &amp; Obrolan</span>
                         </div>
-                        {totalChatUnread > 0 ? (
-                          <span className="text-[10px] font-bold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-full">
-                            {totalChatUnread} Belum Dibaca
-                          </span>
-                        ) : (
-                          <span className="text-[10px] font-medium text-slate-400">Semua Terbaca</span>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {totalChatUnread > 0 ? (
+                            <>
+                              <span className="text-[10px] font-bold text-[#1683FF] bg-blue-50 px-2 py-0.5 rounded-full">
+                                {totalChatUnread} Belum Dibaca
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  markAllChatRoomsAsRead?.();
+                                }}
+                                className="text-[10px] font-semibold text-[#1683FF] hover:underline cursor-pointer"
+                                title="Tandai semua obrolan sudah dibaca"
+                              >
+                                Tandai Dibaca
+                              </button>
+                            </>
+                          ) : (
+                            <span className="text-[10px] font-medium text-slate-400">Semua Terbaca</span>
+                          )}
+                        </div>
                       </div>
 
                       <div className="space-y-1.5 max-h-[320px] overflow-y-auto pr-0.5">
@@ -325,7 +420,7 @@ export default function Navbar() {
                             <div
                               key={chat.id}
                               onClick={() => handleChatClick(chat.id)}
-                              className="p-2.5 rounded-xl hover:bg-blue-50/70 transition cursor-pointer flex items-center gap-3 group border border-transparent hover:border-blue-100"
+                              className="p-2.5 rounded-xl hover:bg-blue-50/70 transition cursor-pointer flex items-center gap-3 group border border-transparent hover:border-blue-100 relative"
                             >
                               <div className="relative shrink-0">
                                 {chat.avatar ? (
@@ -359,7 +454,39 @@ export default function Navbar() {
                                       {chat.category}
                                     </span>
                                   </div>
-                                  <span className="text-[10px] text-slate-400 shrink-0 ml-1">{chat.time}</span>
+                                  <div className="flex items-center gap-1 shrink-0 ml-1">
+                                    <span className="text-[10px] text-slate-400">{chat.time}</span>
+                                    {chat.isRunning ? (
+                                      <span
+                                        className="p-1 rounded-md text-slate-300 opacity-0 group-hover:opacity-100 transition cursor-not-allowed"
+                                        title="Pesanan aktif sedang berjalan (tidak dapat dihapus)"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          addToast?.(
+                                            "Pesanan Sedang Berjalan",
+                                            "Obrolan pesanan aktif tidak dapat dihapus sebelum pesanan selesai atau dibatalkan demi keamanan transaksi Rekening Bersama.",
+                                            "info"
+                                          );
+                                        }}
+                                      >
+                                        <Lock className="w-3 h-3 text-slate-400" />
+                                      </span>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          if (deleteChatRoom) {
+                                            await deleteChatRoom(chat.id);
+                                          }
+                                        }}
+                                        className="p-1 rounded-md text-slate-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition cursor-pointer"
+                                        title="Hapus obrolan dari daftar"
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
                                 <p className="text-[11px] text-slate-500 truncate leading-snug">
                                   {chat.lastMsg}
@@ -404,8 +531,8 @@ export default function Navbar() {
                   {/* Desktop Notif Popover */}
                   {isNotifOpen && (
                     <div className="absolute right-0 mt-2 w-84 sm:w-88 bg-white/95 backdrop-blur-2xl rounded-2xl shadow-xl border border-white/90 p-3 z-50 animate-in fade-in zoom-in-95 duration-150">
-                      <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2">
-                        <div className="flex items-center gap-1.5">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2 gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <Bell className="w-3.5 h-3.5 text-rose-500" />
                           <span className="text-xs font-bold text-slate-900">Notifikasi</span>
                           {totalNotifUnread > 0 && (
@@ -414,15 +541,31 @@ export default function Navbar() {
                             </span>
                           )}
                         </div>
-                        {totalNotifUnread > 0 && (
-                          <button
-                            type="button"
-                            onClick={markAllNotificationsAsRead}
-                            className="text-[10px] font-semibold text-[#1683FF] hover:underline cursor-pointer"
-                          >
-                            Tandai Semua Dibaca
-                          </button>
-                        )}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {totalNotifUnread > 0 && (
+                            <button
+                              type="button"
+                              onClick={markAllNotificationsAsRead}
+                              className="text-[10px] font-semibold text-[#1683FF] hover:underline cursor-pointer"
+                            >
+                              Tandai Dibaca
+                            </button>
+                          )}
+                          {notifications.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                clearAllNotifications?.();
+                              }}
+                              className="text-[10px] font-semibold text-rose-500 hover:text-rose-700 hover:underline cursor-pointer flex items-center gap-0.5"
+                              title="Hapus semua notifikasi"
+                            >
+                              <Trash2 className="w-2.5 h-2.5" />
+                              <span>Hapus Semua</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       <div className="space-y-1.5 max-h-[320px] overflow-y-auto pr-0.5">
@@ -435,32 +578,51 @@ export default function Navbar() {
                             <div
                               key={n.id}
                               onClick={() => handleNotifClick(n)}
-                              className={`p-2.5 rounded-xl transition cursor-pointer flex items-start gap-2.5 border ${
+                              className={`p-2.5 rounded-xl transition cursor-pointer flex items-start gap-2.5 border group relative ${
                                 n.unread 
                                   ? "bg-blue-50/40 border-blue-100/80 hover:bg-blue-50/80" 
                                   : "bg-white hover:bg-slate-50 border-transparent"
                               }`}
                             >
                               <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${
-                                n.category === "sewa"
-                                  ? "bg-blue-50 text-[#1683FF]"
-                                  : n.category === "bantuan"
+                                n.type === "payment"
                                   ? "bg-emerald-50 text-emerald-600"
-                                  : n.category === "jasa"
-                                  ? "bg-indigo-50 text-indigo-600"
-                                  : "bg-purple-50 text-purple-600"
+                                  : n.type === "order"
+                                  ? "bg-blue-50 text-[#1683FF]"
+                                  : n.type === "verification"
+                                  ? "bg-purple-50 text-purple-600"
+                                  : "bg-amber-50 text-amber-600"
                               }`}>
-                                <CheckCircle2 className="w-4 h-4" />
+                                {n.type === "payment" ? (
+                                  <ShieldCheck className="w-4 h-4" />
+                                ) : n.type === "order" ? (
+                                  <HandHeart className="w-4 h-4" />
+                                ) : (
+                                  <Bell className="w-4 h-4" />
+                                )}
                               </div>
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center justify-between">
                                   <span className={`text-xs font-bold truncate ${n.unread ? "text-[#102A43]" : "text-slate-700"}`}>
                                     {n.title}
                                   </span>
-                                  <span className="text-[10px] text-slate-400 shrink-0 ml-1">{n.time}</span>
+                                  <div className="flex items-center gap-1 shrink-0 ml-1">
+                                    <span className="text-[10px] text-slate-400">{formatNavChatTime(n.createdAt || n.time)}</span>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        deleteNotification?.(n.id);
+                                      }}
+                                      className="p-1 rounded-md text-slate-300 hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition"
+                                      title="Hapus notifikasi ini"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                  </div>
                                 </div>
                                 <p className="text-[11px] text-slate-500 leading-snug mt-0.5 line-clamp-2">
-                                  {n.desc}
+                                  {n.desc || n.message}
                                 </p>
                               </div>
                             </div>

@@ -23,7 +23,6 @@ export default function CtaBanner() {
           alt="Aplikasi Bantuin di Smartphone"
           fill
           className="object-contain object-right"
-          priority
           sizes="50vw"
         />
       </div>
@@ -36,8 +35,10 @@ export default function CtaBanner() {
             <Image
               src={logoImg}
               alt="Bantuin Logo"
+              width={160}
+              height={53}
+              sizes="200px"
               className="h-10 sm:h-12 md:h-14 w-auto object-contain select-none"
-              priority
             />
           </div>
 
@@ -80,7 +81,6 @@ export default function CtaBanner() {
             src={ctaPhonesImg}
             alt="Aplikasi Bantuin di Smartphone"
             className="w-full h-auto object-contain block select-none"
-            priority
             sizes="100vw"
           />
         </div>

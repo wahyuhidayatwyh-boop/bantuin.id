@@ -47,6 +47,12 @@
     --rating: #f5a623;
   }
 
+  html {
+    scroll-behavior: smooth;
+    text-rendering: optimizeLegibility;
+    -webkit-text-size-adjust: 100%;
+  }
+
   body {
     color: var(--text-main);
     background-color: #ffffff;
@@ -54,6 +60,8 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     overflow-x: hidden;
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
   }
 
   .font-serif {
@@ -320,11 +328,11 @@
   }
 }
 
-/* Chat bubble — prevent long URLs / strings from breaking layout */
+/* Chat bubble — prevent long URLs / strings from breaking layout while keeping normal words intact */
 .chat-bubble-text {
-  word-break: break-all;
-  overflow-wrap: anywhere;
-  hyphens: auto;
+  word-break: normal;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
 }
 
 /* Hide scrollbar utility */
@@ -356,4 +364,81 @@
   display: none;
 }
 
+@keyframes authLoadingSlide {
+  0% {
+    transform: translateX(-120%);
+  }
+  50% {
+    transform: translateX(100%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
 
+/* Universal Line Clamp Fallback & Protection */
+.line-clamp-1 {
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 1 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.line-clamp-2 {
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 2 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+.line-clamp-3 {
+  display: -webkit-box !important;
+  -webkit-box-orient: vertical !important;
+  -webkit-line-clamp: 3 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+/* ─── Global Performance & Hardware Acceleration Utilities ────────────── */
+
+/* Hardware accelerated transform for butter-smooth 60/120fps motion */
+.gpu-layer {
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  perspective: 1000px;
+}
+
+/* Contain overscroll on modals, drawers, and chat message lists to prevent viewport bounce */
+.overscroll-contain {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Smooth momentum scrolling for touch devices */
+.touch-pan-y-smooth {
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Fallback for low-end mobile devices when glass blur is expensive */
+@media (max-width: 640px) {
+  .glass-panel {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+}
+
+/* Respect user's motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

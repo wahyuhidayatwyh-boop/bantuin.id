@@ -1,13 +1,14 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import { useApp } from "@/lib/context/AppContext";
-import { formatIDR, formatDeadlineWithHour } from "@/lib/utils";
+import { formatIDR, formatDeadlineWithHour, formatExternalUrl } from "@/lib/utils";
 import { getNavigationUrl } from "@/lib/services/gpsService";
+import { authService } from "@/lib/services/authService";
 import MapComponent from "@/components/map/MapComponent";
 import { 
   ShieldCheck, 
@@ -41,7 +42,9 @@ import {
   AlertTriangle,
   XCircle,
   X,
-  Play
+  Play,
+  Search,
+  ChevronDown
 } from "lucide-react";
 import DetailSkeleton from "@/components/skeletons/DetailSkeleton";
 
@@ -66,6 +69,20 @@ export default function RequestDetailPage() {
   const [isCancelling, setIsCancelling] = useState(false);
   const [selectedOfferToAccept, setSelectedOfferToAccept] = useState(null);
   const [isStartingWork, setIsStartingWork] = useState(false);
+  const [activeMobileTab, setActiveMobileTab] = useState("detail"); // "detail" | "lokasi" | "pelamar"
+  const [openingChatId, setOpeningChatId] = useState(null);
+  const [offerSearch, setOfferSearch] = useState("");
+  const [offerSort, setOfferSort] = useState("recommended"); // "recommended" | "rating" | "price_low" | "price_high"
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      if (window.location.hash === "#pelamar") {
+        setActiveMobileTab("pelamar");
+      } else if (window.location.hash === "#lokasi") {
+        setActiveMobileTab("lokasi");
+      }
+    }
+  }, []);
 
   const handleStartWork = async (offer) => {
     if (!id || isStartingWork) return;
@@ -158,7 +175,7 @@ export default function RequestDetailPage() {
     setIsLoading(true);
     setErrorMsg("");
     try {
-      const res = await fetch(`/api/requests/${id}`);
+      const res = await fetch(`/api/requests/${id}`, { cache: "no-store" });
       const json = await res.json();
       if (!res.ok || !json.success) {
         throw new Error(json.error || "Permintaan bantuan tidak ditemukan.");
@@ -174,7 +191,47 @@ export default function RequestDetailPage() {
 
   useEffect(() => {
     fetchDetail();
+
+    const handleActivityUpdate = () => {
+      fetchDetail();
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("bantuin_activity_updated", handleActivityUpdate);
+      return () => window.removeEventListener("bantuin_activity_updated", handleActivityUpdate);
+    }
   }, [id]);
+
+  const currentUserId = currentUser?.id;
+  const isOwner = Boolean(
+    currentUserId &&
+    request &&
+    (currentUserId === request.requesterId || currentUserId === request.requester?.id)
+  );
+  const offersList = useMemo(() => request?.offers || [], [request?.offers]);
+  const myOffer = currentUserId
+    ? (offersList.find((o) => o.helperId === currentUserId || o.helper?.id === currentUserId) || null)
+    : null;
+  const hasUserOffered = Boolean(myOffer);
+  const isCancelled = request?.status === "cancelled";
+  const isClosed = isCancelled || request?.status === "helper_selected" || request?.status === "in_progress" || request?.status === "completed";
+
+  const filteredOffers = useMemo(() => {
+    return (offersList || [])
+      .filter((offer) => {
+        if (!offerSearch.trim()) return true;
+        const q = offerSearch.toLowerCase();
+        return (
+          (offer.helperName && offer.helperName.toLowerCase().includes(q)) ||
+          (offer.pitchMessage && offer.pitchMessage.toLowerCase().includes(q))
+        );
+      })
+      .sort((a, b) => {
+        if (offerSort === "price_low") return (a.proposedPrice || 0) - (b.proposedPrice || 0);
+        if (offerSort === "price_high") return (b.proposedPrice || 0) - (a.proposedPrice || 0);
+        if (offerSort === "rating") return (Number(b.helperRating) || 0) - (Number(a.helperRating) || 0);
+        return (b.reliability || 95) - (a.reliability || 95);
+      });
+  }, [offersList, offerSearch, offerSort]);
 
   if (isLoading) {
     return (
@@ -194,7 +251,11 @@ export default function RequestDetailPage() {
         <Navbar />
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
           <h2 className="text-xl font-bold text-slate-900">Permintaan Bantuan Tidak Ditemukan</h2>
-          <p className="text-sm text-slate-500 mt-1 mb-4">{errorMsg || "Mungkin permintaan sudah selesai atau telah ditutup."}</p>
+          <p className="text-sm text-slate-500 mt-1 mb-4">
+            {errorMsg && !errorMsg.includes("prisma") && !errorMsg.includes("uuid") 
+              ? errorMsg 
+              : "Permintaan bantuan yang Anda cari tidak ditemukan atau telah ditutup."}
+          </p>
           <Link href="/bantuan" className="px-5 py-2.5 bg-[#1683FF] text-white rounded-xl text-xs font-bold shadow-xs">
             Kembali ke Daftar Bantuan
           </Link>
@@ -204,12 +265,6 @@ export default function RequestDetailPage() {
     );
   }
 
-  const isOwner = currentUser?.id === request.requesterId || currentUser?.id === request.requester?.id;
-  const offersList = request.offers || [];
-  const hasUserOffered = offersList.some((o) => o.helperId === currentUser?.id);
-  const isCancelled = request.status === "cancelled";
-  const isClosed = isCancelled || request.status === "helper_selected" || request.status === "in_progress" || request.status === "completed";
-
   const distanceInfo = getDistanceToUser
     ? getDistanceToUser(request.latitude, request.longitude, request.distanceMeters)
     : null;
@@ -217,8 +272,42 @@ export default function RequestDetailPage() {
     ? "Online"
     : (distanceInfo?.text || (request.distanceMeters ? `${request.distanceMeters} m` : "Dekat"));
 
-  // Open Direct Full-Page Workspace Room (No Floating Popups)
-  const handleOpenChat = (offer) => {
+  // Open Direct Full-Page Workspace Room with concurrency lock & debouncing
+  const handleOpenChat = async (offer) => {
+    const targetHelperId = isOwner
+      ? (offer?.helperId || offer?.helper?.id || offer?.id)
+      : currentUserId;
+
+    const opKey = String(targetHelperId || "active");
+    if (openingChatId) return;
+    setOpeningChatId(opKey);
+
+    try {
+      if (targetHelperId) {
+        const token = await authService.getValidAccessToken();
+        const headers = { "Content-Type": "application/json" };
+        if (token) headers.Authorization = `Bearer ${token}`;
+
+        const res = await fetch("/api/chat/rooms", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            requestId: request.id,
+            helperId: targetHelperId,
+          }),
+        });
+        const json = await res.json();
+        if (json.success && json.data?.id) {
+          router.push(`/chat?room=${json.data.id}`);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("Direct chat room resolve failed, falling back to local inquiry:", e);
+    } finally {
+      setTimeout(() => setOpeningChatId(null), 1500);
+    }
+
     if (startTaskInquiry && request) {
       const inqRoom = startTaskInquiry({ request, offer });
       router.push(`/chat?room=${inqRoom?.id || request.id}`);
@@ -227,14 +316,25 @@ export default function RequestDetailPage() {
     }
   };
 
+  const isMyOfferAccepted = Boolean(
+    myOffer &&
+    ((request?.selectedHelperId &&
+      (request.selectedHelperId === myOffer.helperId ||
+        request.selectedHelperId === myOffer.helper?.id)) ||
+      myOffer.status === "accepted")
+  );
+  const isMyOfferRejected = Boolean(
+    myOffer && ((isClosed && !isMyOfferAccepted) || myOffer.status === "rejected")
+  );
+
   return (
     <div className="min-h-screen flex flex-col bg-[#EEF2F6] text-slate-800">
       <Navbar />
 
-      <main className="flex-1 max-w-[1360px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
+      <main className="flex-1 max-w-[1360px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-4 sm:space-y-6 pb-28 lg:pb-8">
         
-        {/* Top Breadcrumb & Category */}
-        <div className="flex items-center justify-between">
+        {/* Top Breadcrumb & Status Badges */}
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
           <Link
             href="/bantuan"
             className="inline-flex items-center gap-2 text-xs sm:text-sm font-semibold text-slate-600 hover:text-[#1683FF] transition"
@@ -243,139 +343,252 @@ export default function RequestDetailPage() {
             <span>Kembali ke Daftar Bantuan</span>
           </Link>
 
-          <span className="text-xs font-semibold px-3 py-1 bg-white text-slate-700 rounded-full border border-slate-200/80 shadow-2xs">
-            {request.category}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold px-3 py-1 bg-white text-slate-700 rounded-full border border-slate-200/80 shadow-2xs">
+              {request.category}
+            </span>
+            {isCancelled ? (
+              <span className="text-xs font-bold px-3 py-1 bg-rose-50 text-rose-700 rounded-full border border-rose-200 shadow-2xs">
+                Dibatalkan
+              </span>
+            ) : request.status === "in_progress" ? (
+              <span className="text-xs font-bold px-3 py-1 bg-blue-50 text-[#1683FF] rounded-full border border-blue-200 shadow-2xs animate-pulse">
+                Sedang Dikerjakan
+              </span>
+            ) : request.status === "completed" ? (
+              <span className="text-xs font-bold px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-200 shadow-2xs">
+                Selesai
+              </span>
+            ) : (
+              <span className="text-xs font-bold px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-200 shadow-2xs flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+                <span>Mencari Penolong</span>
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* UNIFIED CLEAN MODERN CONTAINER */}
-        <div className="bg-white border border-slate-200/90 rounded-[28px] p-6 sm:p-8 lg:p-9 shadow-[0_4px_24px_rgba(0,0,0,0.04)]">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-start">
-            
-            {/* 1. MAIN OVERVIEW & KEY DETAILS (Mobile: Order 1, Desktop: col-span-8) */}
-            <div className="lg:col-span-8 space-y-6 order-1">
-              
-              {/* Clean Minimalist Meta Line */}
-              <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 font-medium">
-                <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg font-semibold">
-                  {request.mode === "online" ? "Online / Remote" : "Tatap Muka"}
-                </span>
-                <span>•</span>
-                <span className="flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Batas: {formatDeadlineWithHour(request.deadline, request.deadlineText)}</span>
-                </span>
-                <span>•</span>
-                <span className="flex items-center gap-1 text-emerald-700 font-semibold">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Sistem Pembayaran Terverifikasi</span>
-                </span>
-              </div>
+        {/* 1. EXECUTIVE HERO OVERVIEW CARD - INSTANT CONTEXT (NO SCROLLING NEEDED) */}
+        <div className="bg-white border border-slate-200/90 rounded-2xl sm:rounded-3xl p-4 sm:p-7 shadow-sm space-y-4">
+          {/* Minimalist Meta Line (Rapi & Ringkas di Layar Mobile) */}
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs">
+            <span className="px-2 sm:px-2.5 py-0.5 sm:py-1 bg-slate-100 text-slate-700 rounded-lg font-semibold">
+              {request.mode === "online" ? "Online / Remote" : "Tatap Muka"}
+            </span>
+            <span className="flex items-center gap-1 text-slate-600 font-medium px-2 sm:px-2.5 py-0.5 sm:py-1 bg-slate-50 rounded-lg">
+              <Clock className="w-3.5 h-3.5 text-slate-400" />
+              <span>Batas: {formatDeadlineWithHour(request.deadline, request.deadlineText)}</span>
+            </span>
+            <span className="flex items-center gap-1 text-emerald-700 font-semibold px-2 sm:px-2.5 py-0.5 sm:py-1 bg-emerald-50 rounded-lg">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Garansi Escrow Resmi</span>
+            </span>
+          </div>
 
-              {/* Title & Description */}
-              <div className="space-y-3">
-                <h1 className="text-xl sm:text-2xl lg:text-3xl font-black text-slate-900 tracking-tight leading-snug">
-                  {request.title}
-                </h1>
-                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed whitespace-pre-line">
-                  {request.description}
-                </p>
-              </div>
+          {/* Main Title */}
+          <h1 className="text-lg sm:text-2xl lg:text-3xl font-black text-slate-900 tracking-tight leading-snug">
+            {request.title}
+          </h1>
 
-              {/* Foto Barang / Bukti Kebutuhan (Jika Ada) */}
-              {Array.isArray(request.photos) && request.photos.length > 0 && (
-                <div className="space-y-3 pt-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Camera className="w-4 h-4 text-[#1683FF]" />
-                      <h4 className="text-xs sm:text-sm font-bold text-slate-900">
-                        Foto Barang &amp; Bukti Tugas ({request.photos.length})
-                      </h4>
-                    </div>
-                    <span className="text-[11px] text-slate-400">
-                      Klik foto untuk memperbesar
-                    </span>
-                  </div>
+          {/* Key Metrics Grid - Immediate clarity on both mobile & desktop */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+            {/* Budget Imbalan */}
+            <div className="p-3 rounded-xl bg-blue-50/70 border border-blue-100/90">
+              <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
+                Budget Imbalan
+              </span>
+              <span className="text-base sm:text-lg font-black text-[#1683FF] block mt-0.5 truncate">
+                {request.isVoluntary ? "Sukarela" : formatIDR(request.rewardAmount)}
+              </span>
+            </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                    {request.photos.map((photo, pIdx) => (
-                      <div
-                        key={pIdx}
-                        onClick={() => setSelectedPhotoModal(photo)}
-                        className="relative group rounded-xl overflow-hidden border border-slate-200 bg-white aspect-square shadow-2xs cursor-pointer hover:border-blue-300 transition"
-                      >
-                        <img
-                          src={photo}
-                          alt={`Foto barang ${pIdx + 1}`}
-                          className="w-full h-full object-cover group-hover:scale-105 transition duration-200"
-                        />
-                        <div className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs font-bold gap-1.5 backdrop-blur-[1px]">
-                          <Eye className="w-4 h-4" />
-                          <span>Perbesar</span>
-                        </div>
-                        <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-slate-900/70 text-white text-[10px] font-bold">
-                          Foto {pIdx + 1}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+            {/* Jarak / Mode */}
+            <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+              <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
+                Jarak / Lokasi
+              </span>
+              <span className="text-xs sm:text-sm font-bold text-slate-800 block mt-0.5 truncate flex items-center gap-1">
+                <MapPin className="w-3.5 h-3.5 text-[#1683FF] shrink-0" />
+                <span className="truncate">{distanceText}</span>
+              </span>
+            </div>
+
+            {/* Pelamar Masuk */}
+            <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+              <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
+                Tawaran Masuk
+              </span>
+              <span className="text-xs sm:text-sm font-bold text-slate-800 block mt-0.5 flex items-center gap-1">
+                <Users className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                <span>{offersList.length} Proposal</span>
+              </span>
+            </div>
+
+            {/* Peminta Bantuan Mini Strip */}
+            <Link
+              href={`/profile/${request.requesterId || request.requester?.id || "user"}`}
+              className="p-3 rounded-xl bg-slate-50 hover:bg-blue-50/50 border border-slate-100 hover:border-blue-200 flex items-center gap-2.5 min-w-0 transition group cursor-pointer"
+              title={`Lihat profil ${request.requester?.name || request.userName || "Peminta"}`}
+            >
+              {request.requester?.avatar && !request.requester.avatar.includes("images.unsplash.com") && !request.requester.avatar.includes("dicebear.com") ? (
+                <img
+                  src={request.requester.avatar}
+                  alt={request.requester?.name || request.userName || "Peminta"}
+                  className="w-8 h-8 rounded-full object-cover border border-slate-200 group-hover:border-[#1683FF] shrink-0 transition"
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-linear-to-br from-[#1683FF] to-[#0E5FCC] text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs group-hover:ring-2 group-hover:ring-[#1683FF]/30 transition">
+                  {((request.requester?.name || request.userName || "P").trim()[0] || "P").toUpperCase()}
                 </div>
               )}
+              <div className="min-w-0 flex-1">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
+                  Peminta
+                </span>
+                <span className="text-xs font-bold text-slate-900 group-hover:text-[#1683FF] block truncate transition">
+                  {request.requester?.name || request.userName || "Pengguna"}
+                </span>
+              </div>
+            </Link>
+          </div>
+        </div>
 
-              {/* Clean Info Strip: Lokasi & Format Pengerjaan */}
-              <div className="pt-2 border-t border-slate-100 space-y-3">
-                <div className="flex items-start gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-blue-50 text-[#1683FF] flex items-center justify-center shrink-0 mt-0.5">
-                    <MapPin className="w-4 h-4" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      {request.mode === "online" ? "Format Pengerjaan" : "Lokasi / Titik Temu"}
-                    </div>
-                    <div className="text-xs sm:text-sm font-bold text-slate-900 mt-0.5">
-                      {request.locationName}
-                    </div>
-                    <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                      {request.mode === "online" ? (
-                        <span>Dapat dikerjakan dari mana saja (Online / Remote)</span>
-                      ) : (
-                        <>
-                          <span className="font-semibold text-slate-700">{distanceText}</span>
-                          <span>dari posisi Anda</span>
-                        </>
-                      )}
-                    </div>
+        {/* 2. MOBILE SEGMENTED TAB SWITCHER (VISIBLE ONLY ON MOBILE) */}
+        <div className="lg:hidden sticky top-[64px] z-20 bg-[#EEF2F6]/95 backdrop-blur-md py-1">
+          <div className="bg-white/95 p-1 rounded-2xl border border-slate-200/90 shadow-2xs flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setActiveMobileTab("detail")}
+              className={`flex-1 py-2 px-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeMobileTab === "detail"
+                  ? "bg-[#1683FF] text-white shadow-xs"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Detail</span>
+            </button>
 
-                    {request.mode !== "online" && request.latitude && request.longitude && (
-                      <div className="mt-2.5">
-                        <a
-                          href={getNavigationUrl(
-                            request.latitude,
-                            request.longitude,
-                            userCoordinates?.latitude,
-                            userCoordinates?.longitude
-                          )}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#1683FF] hover:text-[#0F6FE5] bg-blue-50/90 hover:bg-blue-100 px-3 py-1.5 rounded-xl border border-blue-100 transition shadow-2xs"
-                        >
-                          <Navigation className="w-3 h-3" />
-                          <span>Buka Petunjuk Arah / Rute</span>
-                        </a>
+            <button
+              type="button"
+              onClick={() => setActiveMobileTab("lokasi")}
+              className={`flex-1 py-2 px-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeMobileTab === "lokasi"
+                  ? "bg-[#1683FF] text-white shadow-xs"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+              }`}
+            >
+              <MapPin className="w-3.5 h-3.5" />
+              <span>Lokasi</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveMobileTab("pelamar")}
+              className={`flex-1 py-2 px-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer relative ${
+                activeMobileTab === "pelamar"
+                  ? "bg-[#1683FF] text-white shadow-xs"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Pelamar</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                activeMobileTab === "pelamar" ? "bg-white text-[#1683FF]" : "bg-blue-100 text-[#1683FF]"
+              }`}>
+                {offersList.length}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* 3. MAIN WORKSPACE GRID (2-Col on Desktop, Tabbed on Mobile) */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-start">
+          
+          {/* LEFT COLUMN: SECTIONS (Filtered by activeMobileTab on Mobile; Fully Stacked on Desktop) */}
+          <div className="lg:col-span-8 space-y-6">
+
+            {/* SECTION A: DESKRIPSI & FOTO LAMPIRAN */}
+            <div className={`space-y-6 ${activeMobileTab === "detail" ? "block" : "hidden lg:block"}`}>
+              <div className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-7 border border-slate-200/90 shadow-2xs space-y-4">
+                <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+                  <FileText className="w-4 h-4 text-[#1683FF]" />
+                  <h3 className="text-sm sm:text-base font-extrabold text-slate-900">
+                    Rincian Kebutuhan &amp; Tugas
+                  </h3>
+                </div>
+
+                <div className="text-xs sm:text-sm text-slate-700 leading-relaxed whitespace-pre-line">
+                  {request.description}
+                </div>
+
+                {/* Foto Barang / Bukti Kebutuhan */}
+                {Array.isArray(request.photos) && request.photos.length > 0 && (
+                  <div className="pt-4 border-t border-slate-100 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Camera className="w-4 h-4 text-[#1683FF]" />
+                        <h4 className="text-xs sm:text-sm font-bold text-slate-900">
+                          Foto Barang &amp; Lampiran ({request.photos.length})
+                        </h4>
                       </div>
-                    )}
+                      <span className="text-[11px] text-slate-400">
+                        Klik foto untuk memperbesar
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                      {request.photos.map((photo, pIdx) => (
+                        <div
+                          key={pIdx}
+                          onClick={() => setSelectedPhotoModal(photo)}
+                          className="relative group rounded-xl overflow-hidden border border-slate-200 bg-white aspect-square shadow-2xs cursor-pointer hover:border-blue-300 transition"
+                        >
+                          <img
+                            src={photo}
+                            alt={`Foto barang ${pIdx + 1}`}
+                            className="w-full h-full object-cover group-hover:scale-105 transition duration-200"
+                          />
+                          <div className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs font-bold gap-1.5 backdrop-blur-[1px]">
+                            <Eye className="w-4 h-4" />
+                            <span>Perbesar</span>
+                          </div>
+                          <span className="absolute bottom-1.5 left-1.5 px-1.5 py-0.5 rounded bg-slate-900/70 text-white text-[10px] font-bold">
+                            Foto {pIdx + 1}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Garansi Proteksi Pembayaran */}
+                <div className="pt-2">
+                  <div className="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-200/80 flex items-start gap-2.5">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    <div className="text-xs leading-relaxed">
+                      <span className="font-bold text-emerald-900 block">Garansi Rekening Escrow Terlindungi</span>
+                      <p className="text-emerald-700 text-[11px] mt-0.5">
+                        Imbalan disimpan secara aman di rekening penampung resmi Bantuin. Helper baru menerima pencairan dana setelah tugas selesai dan disetujui pembuat tugas.
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
+            </div>
 
-              {/* Embedded Interactive Map for Offline Request Point */}
-              {request.mode !== "online" && request.latitude && request.longitude && (
-                <div className="rounded-2xl border border-slate-200 overflow-hidden bg-slate-50">
-                  <div className="flex items-center justify-between p-3 border-b border-slate-200/80 bg-white">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
-                      <MapPin className="w-3.5 h-3.5 text-[#1683FF]" />
-                      <span>Titik Lokasi Pertemuan &amp; Navigasi</span>
-                    </div>
+            {/* SECTION B: LOKASI & NAVIGASI PETA */}
+            <div className={`space-y-6 ${activeMobileTab === "lokasi" ? "block" : "hidden lg:block"}`}>
+              <div className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-7 border border-slate-200/90 shadow-2xs space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div className="flex items-center gap-2">
+                    <MapPin className="w-4 h-4 text-[#1683FF]" />
+                    <h3 className="text-sm sm:text-base font-extrabold text-slate-900">
+                      Lokasi
+                    </h3>
+                  </div>
+
+                  {request.mode !== "online" && request.latitude && request.longitude && (
                     <a
                       href={getNavigationUrl(
                         request.latitude,
@@ -385,120 +598,462 @@ export default function RequestDetailPage() {
                       )}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-[11px] font-bold text-[#1683FF] hover:underline"
+                      className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#1683FF] hover:text-[#0F6FE5] bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100 transition shadow-2xs"
                     >
-                      <Navigation className="w-3 h-3" />
-                      <span>Buka di Google Maps</span>
+                      <Navigation className="w-3.5 h-3.5" />
+                      <span>Buka Google Maps</span>
                     </a>
-                  </div>
-                  <MapComponent
-                    points={[
-                      {
-                        id: request.id,
-                        title: request.title,
-                        latitude: request.latitude,
-                        longitude: request.longitude,
-                        type: "request",
-                        rewardAmount: request.rewardAmount,
-                        address: request.locationName,
-                      }
-                    ]}
-                    userLocation={userCoordinates}
-                    height="200px"
-                    showRouteLine={true}
-                  />
+                  )}
                 </div>
-              )}
 
+                <div className="space-y-2 text-xs sm:text-sm">
+                  <div className="font-bold text-slate-900">
+                    {request.locationName || (request.mode === "online" ? "Dikerjakan Online / Remote" : "Lokasi pembuat tugas")}
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    {request.mode === "online" ? (
+                      <span>Tugas ini dapat dikerjakan secara digital dari mana saja tanpa perlu tatap muka.</span>
+                    ) : (
+                      <span>Jarak estimasi: <strong className="text-slate-700">{distanceText}</strong> dari posisi GPS Anda saat ini.</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Interactive Map Component for Offline Tasks */}
+                {request.mode !== "online" && request.latitude && request.longitude ? (
+                  <div className="rounded-2xl border border-slate-200 overflow-hidden bg-slate-50 mt-3">
+                    <MapComponent
+                      points={[
+                        {
+                          id: request.id,
+                          title: request.title,
+                          latitude: request.latitude,
+                          longitude: request.longitude,
+                          type: "request",
+                          rewardAmount: request.rewardAmount,
+                          address: request.locationName,
+                        }
+                      ]}
+                      userLocation={userCoordinates}
+                      height="240px"
+                      showRouteLine={true}
+                    />
+                  </div>
+                ) : request.mode === "online" && (
+                  <div className="p-4 rounded-2xl bg-blue-50/50 border border-blue-100 text-xs text-slate-600 leading-relaxed">
+                    💡 <strong>Format Fleksibel Online:</strong> Berkomunikasi langsung dengan peminta melalui ruang obrolan kerja Bantuin untuk serah-terima berkas, tautan tugas, atau konsultasi.
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* 2. PEMINTA BANTUAN & ACTION CTA (Mobile: Order 2 - Tepat di Atas Pelamar, Desktop: col-span-4) */}
-            <div className="lg:col-span-4 lg:border-l lg:border-slate-100 lg:pl-8 space-y-5 order-2">
-              <div className="space-y-4">
-                
-                {/* Budget Imbalan Card */}
-                <div className="p-4 rounded-2xl bg-blue-50/50 border border-blue-100/80 space-y-1">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                    Budget Imbalan
-                  </div>
-                  <div className="text-xl sm:text-2xl font-black text-[#1683FF]">
-                    {request.isVoluntary ? "Sukarela" : formatIDR(request.rewardAmount)}
-                  </div>
-                  <div className="text-[11px] text-emerald-700 font-medium">
-                    Dana pembayaran terverifikasi aman di sistem
-                  </div>
-                </div>
-
-                {/* Author Profile */}
-                <div className="pt-2">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2.5">
-                    Peminta Bantuan
+            {/* SECTION C: DAFTAR AJUAN PELAMAR MASUK */}
+            <div id="pelamar" className={`space-y-6 ${activeMobileTab === "pelamar" ? "block" : "hidden lg:block"}`}>
+              <div className="bg-white rounded-2xl sm:rounded-3xl p-5 sm:p-7 border border-slate-200/90 shadow-2xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-3">
+                  <div>
+                    <h3 className="text-sm sm:text-base font-extrabold text-slate-900 flex items-center gap-2">
+                      <Users className="w-4 h-4 text-[#1683FF]" />
+                      <span>Pelamar &amp; Tawaran Masuk</span>
+                      <span className="px-2 py-0.5 bg-blue-100 text-[#1683FF] text-xs font-bold rounded-full">
+                        {offersList.length}
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Pilih tawaran terbaik atau diskusikan detail tugas melalui fitur chat resmi
+                    </p>
                   </div>
 
-                  <div className="flex items-center gap-3">
-                    <img
-                      src={request.requester?.avatar || request.userAvatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80"}
-                      alt={request.requester?.name || request.userName || "Peminta"}
-                      className="w-11 h-11 rounded-full object-cover border border-slate-200 shrink-0"
-                    />
-                    <div>
-                      <h4 className="font-bold text-sm text-slate-900">
-                        {request.requester?.name || request.userName || "Pengguna Bantuin"}
-                      </h4>
-                      <p className="text-xs text-slate-500 font-medium">
-                        {request.requester?.role || "Pengguna Terverifikasi"}
-                      </p>
-                      <div className="flex items-center gap-1.5 text-xs text-slate-600 font-medium mt-0.5">
-                        <span className="flex items-center gap-1 text-slate-800 font-bold">
-                          <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                          {Number(request.requester?.rating || request.userRating || 5.0).toFixed(1)}
-                        </span>
-                        {(request.requester?.campus || request.locationName || currentUser?.campusName) && (
-                          <>
-                            <span className="text-slate-300">•</span>
-                            <span className="text-slate-500 truncate max-w-[170px]">
-                              {request.requester?.campus && request.requester.campus !== "Universitas Indonesia"
-                                ? request.requester.campus
-                                : (request.locationName ? request.locationName.split(",").slice(1, 3).join(", ").trim() : (currentUser?.campusName || "Bekasi"))}
-                            </span>
-                          </>
-                        )}
+                  {offersList.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="relative min-w-[130px] sm:min-w-[170px]">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={offerSearch}
+                          onChange={(e) => setOfferSearch(e.target.value)}
+                          placeholder="Cari pelamar..."
+                          className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 hover:bg-slate-100/80 focus:bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#1683FF]/30 transition"
+                        />
+                      </div>
+                      <div className="relative">
+                        <select
+                          value={offerSort}
+                          onChange={(e) => setOfferSort(e.target.value)}
+                          className="appearance-none pl-3 pr-7 py-1.5 text-xs bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-xl font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#1683FF]/30 transition cursor-pointer"
+                        >
+                          <option value="recommended">Rekomendasi</option>
+                          <option value="rating">Rating Tertinggi</option>
+                          <option value="price_low">Harga Terendah</option>
+                          <option value="price_high">Harga Tertinggi</option>
+                        </select>
+                        <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                       </div>
                     </div>
-                  </div>
+                  )}
                 </div>
 
-                {/* Action CTA Button */}
+                {/* Proposals Cards List */}
+                <div className="space-y-3.5">
+                  {filteredOffers.length > 0 ? (
+                    filteredOffers.map((offer, idx) => {
+                      const isMyOffer = Boolean(currentUserId && (offer.helperId === currentUserId || offer.helper?.id === currentUserId));
+                      const isThisOfferAccepted = (request?.selectedHelperId && (request.selectedHelperId === offer.helperId || request.selectedHelperId === offer.helper?.id)) || offer.status === "accepted";
+                      const isThisOfferRejected = (isClosed && !isThisOfferAccepted) || offer.status === "rejected";
+
+                      return (
+                        <div
+                          key={offer.id || idx}
+                          className={`p-4 sm:p-5 rounded-2xl border transition duration-150 shadow-2xs space-y-3 ${
+                            isThisOfferAccepted
+                              ? "bg-emerald-50/40 border-emerald-300 ring-1 ring-emerald-300"
+                              : isMyOffer
+                              ? isThisOfferRejected
+                                ? "bg-slate-50/70 border-slate-200 opacity-85"
+                                : "bg-blue-50/40 border-blue-200"
+                              : "border-slate-200 bg-white hover:border-blue-200"
+                          }`}
+                        >
+                          {/* Helper Header & Price */}
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <Link
+                              href={`/profile/${offer.helperId || offer.helper?.id || "helper"}`}
+                              className="flex items-center gap-3 group/helper hover:opacity-90 transition cursor-pointer"
+                              title={`Lihat profil ${offer.helperName}`}
+                            >
+                              {offer.helperAvatar && !offer.helperAvatar.includes("images.unsplash.com") ? (
+                                <img
+                                  src={offer.helperAvatar}
+                                  alt={offer.helperName}
+                                  className="w-10 h-10 rounded-full object-cover border border-slate-200 group-hover/helper:border-[#1683FF] shrink-0 bg-white transition"
+                                />
+                              ) : (
+                                <div className="w-10 h-10 rounded-full bg-blue-50 text-[#1683FF] flex items-center justify-center font-black text-xs border border-blue-200 group-hover/helper:border-[#1683FF] shrink-0 shadow-2xs transition">
+                                  {(offer.helperName || "U")[0].toUpperCase()}
+                                </div>
+                              )}
+                              <div>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <h4 className="font-bold text-xs sm:text-sm text-slate-900 group-hover/helper:text-[#1683FF] transition">{offer.helperName}</h4>
+                                  {offer.helperRole && (
+                                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
+                                      {offer.helperRole}
+                                    </span>
+                                  )}
+                                  {isMyOffer && (
+                                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                                      Anda
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5 flex-wrap">
+                                  {offer.helperRating !== null && (
+                                    <>
+                                      <span className="flex items-center gap-1 font-semibold text-slate-700">
+                                        <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                                        {Number(offer.helperRating).toFixed(1)}
+                                      </span>
+                                      <span>•</span>
+                                    </>
+                                  )}
+                                  {offer.helperCampus && (
+                                    <>
+                                      <span>{offer.helperCampus}</span>
+                                      <span>•</span>
+                                    </>
+                                  )}
+                                  <span className="text-emerald-600 font-semibold">
+                                    {typeof offer.completedHelps === "number" ? `${offer.completedHelps}x bantu` : "0x bantu"}
+                                  </span>
+                                </div>
+                              </div>
+                            </Link>
+
+                            {/* Proposed Price */}
+                            <div className="text-left sm:text-right shrink-0">
+                              <div className="text-[10px] text-slate-400 uppercase font-bold">Tawaran Imbalan</div>
+                              <div className="text-sm sm:text-base font-black text-[#1683FF]">
+                                {formatIDR(offer.proposedPrice || request.rewardAmount)}
+                              </div>
+                              {offer.estimatedDuration && (
+                                <div className="text-[10px] text-slate-500 flex items-center gap-1 sm:justify-end">
+                                  <Clock className="w-2.5 h-2.5 text-slate-400" />
+                                  <span>Estimasi: {offer.estimatedDuration}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Pitch Message */}
+                          <div className="p-3 bg-slate-50/70 rounded-xl border border-slate-100 text-xs text-slate-700 leading-relaxed whitespace-pre-line">
+                            {offer.pitchMessage}
+                          </div>
+
+                          {/* Optional Attachments Chips */}
+                          {(offer.portfolioName || offer.portfolioUrl || offer.cvName || offer.cvUrl) && (
+                            <div className="flex flex-wrap items-center gap-2 pt-1">
+                              <span className="text-[10px] font-bold text-slate-400">Lampiran:</span>
+                              {(offer.portfolioName || offer.portfolioUrl) && (
+                                offer.portfolioUrl ? (
+                                  <a
+                                    href={formatExternalUrl(offer.portfolioUrl)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-2.5 py-1 bg-blue-50/80 hover:bg-blue-100 border border-blue-200/80 text-[#1683FF] rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition group shadow-2xs"
+                                    title="Buka Portofolio Pelamar"
+                                  >
+                                    <Briefcase className="w-3.5 h-3.5 text-[#1683FF]" />
+                                    <span className="font-semibold truncate max-w-[170px]">{offer.portfolioName || "Portofolio"}</span>
+                                    <ExternalLink className="w-3 h-3 text-blue-400 group-hover:text-[#1683FF] shrink-0" />
+                                  </a>
+                                ) : (
+                                  <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-[11px] font-medium flex items-center gap-1.5 border border-slate-200">
+                                    <Briefcase className="w-3.5 h-3.5 text-slate-500" />
+                                    <span>{offer.portfolioName || "Portofolio"}</span>
+                                  </span>
+                                )
+                              )}
+                              {(offer.cvName || offer.cvUrl) && (
+                                offer.cvUrl ? (
+                                  <a
+                                    href={formatExternalUrl(offer.cvUrl)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-2.5 py-1 bg-emerald-50/80 hover:bg-emerald-100 border border-emerald-200/80 text-emerald-700 rounded-lg text-[11px] font-medium flex items-center gap-1.5 transition group shadow-2xs"
+                                    title="Buka Berkas CV / Resume Pelamar"
+                                  >
+                                    <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span className="font-semibold truncate max-w-[170px]">{offer.cvName || "Berkas CV"}</span>
+                                    <ExternalLink className="w-3 h-3 text-emerald-500 group-hover:text-emerald-700 shrink-0" />
+                                  </a>
+                                ) : (
+                                  <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-[11px] font-medium flex items-center gap-1.5 border border-slate-200">
+                                    <FileText className="w-3.5 h-3.5 text-slate-500" />
+                                    <span>{offer.cvName || "CV Terlampir"}</span>
+                                  </span>
+                                )
+                              )}
+                            </div>
+                          )}
+
+                          {/* Action Bar */}
+                          <div className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-100 text-xs gap-2">
+                            {isMyOffer ? (
+                              <div className="flex flex-wrap items-center justify-between w-full gap-2">
+                                {isThisOfferAccepted ? (
+                                  <div className="flex items-center gap-2">
+                                    <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 text-white font-bold text-xs shadow-xs">
+                                      <CheckCircle2 className="w-4 h-4 text-white" />
+                                      <span>Lamaran Diterima</span>
+                                    </div>
+                                    {request.status === "in_progress" && (
+                                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-blue-50 text-[#1683FF] border border-blue-200 font-bold text-[11px] animate-pulse">
+                                        <span>Sedang Dikerjakan</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : isThisOfferRejected ? (
+                                  <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 font-bold text-xs">
+                                    <XCircle className="w-4 h-4 text-rose-600" />
+                                    <span>Lamaran Tidak Diterima</span>
+                                  </div>
+                                ) : (
+                                  <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 text-[#1683FF] border border-blue-200 font-bold text-xs">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-[#1683FF]" />
+                                    <span>Lamaran Anda (Terkirim)</span>
+                                  </div>
+                                )}
+
+                                {/* Jika lamaran DITERIMA dan BELUM mulai dikerjakan: Tombol "Mulai Kerjakan" */}
+                                {isThisOfferAccepted && request.status !== "in_progress" && request.status !== "completed" ? (
+                                  <button
+                                    type="button"
+                                    disabled={isStartingWork}
+                                    onClick={() => handleStartWork(offer)}
+                                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl font-black text-xs text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 shadow-md hover:shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0 disabled:opacity-50"
+                                  >
+                                    {isStartingWork ? (
+                                      <>
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        <span>Memulai...</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Play className="w-3.5 h-3.5 fill-white" />
+                                        <span>Mulai Kerjakan</span>
+                                      </>
+                                    )}
+                                  </button>
+                                ) : isThisOfferAccepted ? (
+                                  /* Jika lamaran DITERIMA dan SUDAH mulai dikerjakan: Tombol "Chat Peminta Tugas" */
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenChat(offer)}
+                                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-bold text-xs bg-[#1683FF] hover:bg-[#0F6FE5] text-white shadow-xs transition cursor-pointer shrink-0"
+                                  >
+                                    <MessageSquare className="w-3.5 h-3.5" />
+                                    <span>Chat Peminta Tugas</span>
+                                  </button>
+                                ) : !isThisOfferRejected ? (
+                                  /* Jika lamaran masih menunggu seleksi: Chat Peminta */
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenChat(offer)}
+                                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-bold text-xs border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition cursor-pointer shrink-0"
+                                  >
+                                    <MessageSquare className="w-3.5 h-3.5" />
+                                    <span>Chat Peminta</span>
+                                  </button>
+                                ) : null}
+                              </div>
+                            ) : isOwner ? (
+                              <>
+                                {isThisOfferAccepted ? (
+                                  <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-xs">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>Helper Terpilih</span>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenChat(offer)}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-bold text-slate-700 text-xs transition cursor-pointer shrink-0"
+                                  >
+                                    <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
+                                    <span>Chat Dulu</span>
+                                  </button>
+                                )}
+
+                                {!isClosed ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedOfferToAccept(offer)}
+                                    className="px-3.5 sm:px-4 py-1.5 bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold rounded-xl shadow-xs transition active:scale-95 flex items-center justify-center gap-1.5 text-xs w-full sm:w-auto cursor-pointer"
+                                  >
+                                    <CreditCard className="w-3.5 h-3.5" />
+                                    <span>Pilih &amp; Bayar Resmi</span>
+                                  </button>
+                                ) : isThisOfferAccepted ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenChat(offer)}
+                                    className="px-3.5 py-1.5 bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                                  >
+                                    <MessageSquare className="w-3.5 h-3.5" />
+                                    <span>Chat Helper</span>
+                                  </button>
+                                ) : (
+                                  <span className="text-xs text-slate-400 font-medium px-2 py-0.5 rounded-md bg-slate-100">
+                                    Tidak Terpilih
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              <div>
+                                {isThisOfferAccepted ? (
+                                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg">
+                                    Helper Terpilih
+                                  </span>
+                                ) : isClosed ? (
+                                  <span className="text-[11px] text-slate-400 font-medium">
+                                    Tidak Terpilih
+                                  </span>
+                                ) : (
+                                  <span className="text-xs text-slate-400 font-medium">
+                                    Diajukan {offer.submittedAt || "Tadi"}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                        </div>
+                      );
+                    })
+                  ) : offersList.length > 0 && filteredOffers.length === 0 ? (
+                    <div className="text-center py-8 px-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                      <p className="text-xs font-semibold text-slate-600">Tidak ada pelamar yang cocok dengan pencarian &quot;{offerSearch}&quot;.</p>
+                      <button
+                        type="button"
+                        onClick={() => { setOfferSearch(""); setOfferSort("recommended"); }}
+                        className="mt-2 text-xs font-bold text-[#1683FF] hover:underline cursor-pointer"
+                      >
+                        Reset Filter
+                      </button>
+                    </div>
+                  ) : filteredOffers.length === 0 ? (
+                    <div className="text-center py-10 px-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                      <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                      <h4 className="text-xs sm:text-sm font-bold text-slate-800">Belum Ada Ajuan Proposal</h4>
+                      <p className="text-xs text-slate-500 mt-0.5 max-w-sm mx-auto">
+                        Jadilah yang pertama mengajukan bantuan untuk tugas ini.
+                      </p>
+                      {!isOwner && !isClosed && (
+                        <Link
+                          href={`/bantuan/${request.id}/ajukan`}
+                          className="inline-block mt-3 px-4 py-2 bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold rounded-xl transition shadow-xs"
+                        >
+                          Ajukan Bantuan Sekarang
+                        </Link>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          {/* RIGHT COLUMN: STICKY SIDEBAR (VISIBLE ON DESKTOP) */}
+          <div className="hidden lg:block lg:col-span-4 space-y-5 sticky top-24">
+            
+            {/* Desktop Budget & Main CTA Card */}
+            <div className="bg-white rounded-3xl p-6 border border-slate-200/90 shadow-sm space-y-5">
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                  Budget Imbalan
+                </span>
+                <div className="text-2xl sm:text-3xl font-black text-[#1683FF]">
+                  {request.isVoluntary ? "Sukarela" : formatIDR(request.rewardAmount)}
+                </div>
+                <div className="text-xs text-emerald-700 font-medium flex items-center gap-1.5 pt-1">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>Dana tersimpan aman di rekening penampung</span>
+                </div>
+              </div>
+
+              {/* Desktop Action CTA */}
+              <div className="pt-2">
                 {isCancelled ? (
                   <div className="p-3.5 bg-rose-50 rounded-xl border border-rose-200 text-center space-y-1">
                     <div className="text-xs font-bold text-rose-900">Permintaan Telah Dibatalkan</div>
-                    <div className="text-[11px] text-rose-700">Tugas ini sudah non-aktif dan tercatat di Riwayat Selesai akun Anda.</div>
+                    <div className="text-[11px] text-rose-700">Tugas ini sudah non-aktif dan tercatat di Riwayat Selesai.</div>
                   </div>
                 ) : isClosed ? (
-                  <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-center">
+                  <div className="p-3.5 bg-amber-50 rounded-xl border border-amber-200 text-center">
                     <div className="text-xs font-bold text-amber-900">Helper Telah Diterima</div>
                     <div className="text-[11px] text-amber-700 mt-0.5">Tugas ini sedang dalam proses pengerjaan.</div>
                   </div>
                 ) : !isOwner ? (
                   hasUserOffered ? (
-                    <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-center">
+                    <div className="p-3.5 bg-emerald-50 rounded-xl border border-emerald-200 text-center space-y-1">
                       <div className="text-xs font-bold text-emerald-900">Proposal Anda Sudah Diajukan</div>
-                      <div className="text-[11px] text-emerald-700 mt-0.5">Menunggu respon dari peminta bantuan.</div>
+                      <div className="text-[11px] text-emerald-700">Menunggu tanggapan dari peminta tugas.</div>
                     </div>
                   ) : (
                     <Link
                       href={`/bantuan/${request.id}/ajukan`}
-                      className="w-full py-3 rounded-xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs sm:text-sm shadow-xs transition active:scale-95 flex items-center justify-center gap-2"
+                      className="w-full py-3.5 rounded-2xl bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-sm shadow-md hover:shadow-lg transition active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <Send className="w-4 h-4" />
-                      <span>Ajukan Bantuan</span>
+                      <span>Ajukan Bantuan Sekarang</span>
                     </Link>
                   )
                 ) : (
-                  <div className="space-y-2.5">
+                  <div className="space-y-3">
                     <div className="p-3 bg-blue-50 rounded-xl border border-blue-100 text-center">
-                      <div className="text-xs font-bold text-blue-950">Ini Permintaan Milik Anda</div>
-                      <div className="text-[11px] text-blue-700 mt-0.5">Pilih helper dari daftar pelamar di bawah.</div>
+                      <div className="text-xs font-bold text-blue-950">Permintaan Milik Anda</div>
+                      <div className="text-[11px] text-blue-700 mt-0.5">Pilih helper resmi dari daftar pelamar di samping.</div>
                     </div>
 
                     <button
@@ -511,325 +1066,165 @@ export default function RequestDetailPage() {
                     </button>
                   </div>
                 )}
-
-                {/* Trust & Payment Guarantee */}
-                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-start gap-2.5">
-                  <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <div>
-                    <div className="text-xs font-bold text-slate-900">Garansi Pembayaran Terverifikasi</div>
-                    <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
-                      Dana aman diproses resmi sampai tugas selesai disetujui.
-                    </p>
-                  </div>
-                </div>
-
               </div>
             </div>
 
-            {/* 3. DAFTAR AJUAN PELAMAR MASUK (Mobile: Order 3, Desktop: col-span-8) */}
-            <div className="lg:col-span-8 space-y-4 order-3 pt-6 lg:pt-2 border-t lg:border-t-0 border-slate-100">
-              <div className="flex items-center justify-between pb-1">
-                <div>
-                  <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
-                    <Users className="w-4 h-4 text-[#1683FF]" />
-                    <span>Daftar Ajuan Pelamar Masuk</span>
-                    <span className="px-2 py-0.2 bg-blue-100 text-[#1683FF] text-xs font-bold rounded-full">
-                      {offersList.length}
-                    </span>
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Pilih penawaran terbaik dan selesaikan pembayaran via QRIS / VA / E-Wallet (Payment Gateway).
-                  </p>
-                </div>
-              </div>
+            {/* Desktop Requester Profile Card */}
+            <div className="bg-white rounded-3xl p-6 border border-slate-200/90 shadow-sm space-y-4">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                Peminta Bantuan
+              </span>
 
-              {/* Proposals List */}
-              <div className="space-y-3">
-                {offersList.length > 0 ? (
-                  offersList.map((offer, idx) => {
-                    const isMyOffer = (currentUser && (offer.helperId === currentUser.id || offer.helper?.id === currentUser.id)) || (currentUser && offer.helperName === currentUser.fullName);
-                    const isThisOfferAccepted = (request?.selectedHelperId && (request.selectedHelperId === offer.helperId || request.selectedHelperId === offer.helper?.id)) || offer.status === "accepted";
-                    const isThisOfferRejected = (isClosed && !isThisOfferAccepted) || offer.status === "rejected";
-
-                    return (
-                      <div
-                        key={offer.id || idx}
-                        className={`p-4 sm:p-5 rounded-2xl border transition duration-150 shadow-2xs space-y-3 ${
-                          isThisOfferAccepted
-                            ? "bg-emerald-50/40 border-emerald-300 ring-1 ring-emerald-300"
-                            : isMyOffer
-                            ? isThisOfferRejected
-                              ? "bg-slate-50/70 border-slate-200 opacity-85"
-                              : "bg-blue-50/40 border-blue-200"
-                            : "border-slate-200 bg-white hover:border-blue-200"
-                        }`}
-                      >
-                        {/* Helper Header & Price */}
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                          <div className="flex items-center gap-3">
-                            {offer.helperAvatar && !offer.helperAvatar.includes("images.unsplash.com") ? (
-                              <img
-                                src={offer.helperAvatar}
-                                alt={offer.helperName}
-                                className="w-10 h-10 rounded-full object-cover border border-slate-200 shrink-0 bg-white"
-                              />
-                            ) : (
-                              <div className="w-10 h-10 rounded-full bg-blue-50 text-[#1683FF] flex items-center justify-center font-black text-xs border border-blue-200 shrink-0 shadow-2xs">
-                                {(offer.helperName || "U")[0].toUpperCase()}
-                              </div>
-                            )}
-                            <div>
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <h4 className="font-bold text-xs sm:text-sm text-slate-900">{offer.helperName}</h4>
-                                {offer.helperRole && (
-                                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
-                                    {offer.helperRole}
-                                  </span>
-                                )}
-                                {isMyOffer && (
-                                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                                    Anda
-                                  </span>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5 flex-wrap">
-                                {offer.helperRating !== null && (
-                                  <>
-                                    <span className="flex items-center gap-1 font-semibold text-slate-700">
-                                      <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
-                                      {Number(offer.helperRating).toFixed(1)}
-                                    </span>
-                                    <span>•</span>
-                                  </>
-                                )}
-                                {offer.helperCampus && (
-                                  <>
-                                    <span>{offer.helperCampus}</span>
-                                    <span>•</span>
-                                  </>
-                                )}
-                                <span className="text-emerald-600 font-semibold">
-                                  {typeof offer.completedHelps === "number" ? `${offer.completedHelps}x bantu` : "0x bantu"}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Proposed Price */}
-                          <div className="text-left sm:text-right">
-                            <div className="text-[10px] text-slate-400 uppercase font-bold">Tawaran Imbalan</div>
-                            <div className="text-sm sm:text-base font-black text-[#1683FF]">
-                              {formatIDR(offer.proposedPrice || request.rewardAmount)}
-                            </div>
-                            {offer.estimatedDuration && (
-                              <div className="text-[10px] text-slate-500 flex items-center gap-1 sm:justify-end">
-                                <Clock className="w-2.5 h-2.5 text-slate-400" />
-                                <span>Estimasi: {offer.estimatedDuration}</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Pitch Message */}
-                        <div className="p-3 bg-slate-50/70 rounded-xl border border-slate-100 text-xs text-slate-700 leading-relaxed whitespace-pre-line">
-                          {offer.pitchMessage}
-                        </div>
-
-                        {/* Optional Attachments Chips */}
-                        {(offer.portfolioName || offer.portfolioUrl || offer.cvName) && (
-                          <div className="flex flex-wrap items-center gap-2 pt-1">
-                            <span className="text-[10px] font-bold text-slate-400">Lampiran:</span>
-                            {(offer.portfolioName || offer.portfolioUrl) && (
-                              <a
-                                href={offer.portfolioUrl || "#"}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-medium flex items-center gap-1 transition"
-                              >
-                                <Briefcase className="w-3 h-3 text-slate-500" />
-                                <span>{offer.portfolioName || "Portofolio"}</span>
-                              </a>
-                            )}
-                            {offer.cvName && (
-                              <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-[11px] font-medium flex items-center gap-1">
-                                <FileText className="w-3 h-3 text-slate-500" />
-                                <span>{offer.cvName}</span>
-                              </span>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Action Bar */}
-                        <div className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-100 text-xs gap-2">
-                          {isMyOffer ? (
-                            <div className="flex flex-wrap items-center justify-between w-full gap-2">
-                              {isThisOfferAccepted ? (
-                                <div className="flex items-center gap-2">
-                                  <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500 text-white font-bold text-xs shadow-xs">
-                                    <CheckCircle2 className="w-4 h-4 text-white" />
-                                    <span>Lamaran Diterima</span>
-                                  </div>
-                                  {request.status === "in_progress" && (
-                                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-blue-50 text-[#1683FF] border border-blue-200 font-bold text-[11px] animate-pulse">
-                                      <span>Sedang Dikerjakan</span>
-                                    </div>
-                                  )}
-                                </div>
-                              ) : isThisOfferRejected ? (
-                                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 font-bold text-xs">
-                                  <XCircle className="w-4 h-4 text-rose-600" />
-                                  <span>Lamaran Tidak Diterima</span>
-                                </div>
-                              ) : (
-                                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 text-[#1683FF] border border-blue-200 font-bold text-xs">
-                                  <CheckCircle2 className="w-3.5 h-3.5 text-[#1683FF]" />
-                                  <span>Lamaran Anda (Terkirim)</span>
-                                </div>
-                              )}
-
-                              {/* Jika lamaran DITERIMA dan BELUM mulai dikerjakan: Tombol "Mulai Kerjakan" */}
-                              {isThisOfferAccepted && request.status !== "in_progress" && request.status !== "completed" ? (
-                                <button
-                                  type="button"
-                                  disabled={isStartingWork}
-                                  onClick={() => handleStartWork(offer)}
-                                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl font-black text-xs text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 shadow-md hover:shadow-lg transition-all transform active:scale-95 cursor-pointer shrink-0 disabled:opacity-50"
-                                >
-                                  {isStartingWork ? (
-                                    <>
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                      <span>Memulai...</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Play className="w-3.5 h-3.5 fill-white" />
-                                      <span>Mulai Kerjakan</span>
-                                    </>
-                                  )}
-                                </button>
-                              ) : isThisOfferAccepted ? (
-                                /* Jika lamaran DITERIMA dan SUDAH mulai dikerjakan: Tombol "Chat Peminta Tugas" */
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (startTaskInquiry && request) {
-                                      const inqRoom = startTaskInquiry({ request, offer });
-                                      router.push(`/chat?room=${inqRoom?.id || request.id}`);
-                                    } else {
-                                      router.push(`/chat?room=${request?.id || id}`);
-                                    }
-                                  }}
-                                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-bold text-xs bg-[#1683FF] hover:bg-[#0F6FE5] text-white shadow-xs transition cursor-pointer shrink-0"
-                                >
-                                  <MessageSquare className="w-3.5 h-3.5" />
-                                  <span>Chat Peminta Tugas</span>
-                                </button>
-                              ) : !isThisOfferRejected ? (
-                                /* Jika lamaran masih menunggu seleksi: Chat Peminta */
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (startTaskInquiry && request) {
-                                      const inqRoom = startTaskInquiry({ request, offer });
-                                      router.push(`/chat?room=${inqRoom?.id || request.id}`);
-                                    } else {
-                                      router.push(`/chat?room=${request?.id || id}`);
-                                    }
-                                  }}
-                                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-bold text-xs border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition cursor-pointer shrink-0"
-                                >
-                                  <MessageSquare className="w-3.5 h-3.5" />
-                                  <span>Chat Peminta</span>
-                                </button>
-                              ) : null}
-                            </div>
-                          ) : isOwner ? (
-                            <>
-                              {isThisOfferAccepted ? (
-                                <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-xs">
-                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                                  <span>Helper Terpilih</span>
-                                </div>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenChat(offer)}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 font-bold text-slate-700 text-xs transition cursor-pointer shrink-0"
-                                >
-                                  <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
-                                  <span>Chat Dulu</span>
-                                </button>
-                              )}
-
-                              {!isClosed ? (
-                                <button
-                                  type="button"
-                                  onClick={() => setSelectedOfferToAccept(offer)}
-                                  className="px-4 py-1.5 bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold rounded-xl shadow-xs transition active:scale-95 flex items-center gap-1.5 text-xs shrink-0 cursor-pointer"
-                                >
-                                  <CreditCard className="w-3.5 h-3.5" />
-                                  <span>Pilih &amp; Bayar Resmi</span>
-                                </button>
-                              ) : isThisOfferAccepted ? (
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenChat(offer)}
-                                  className="px-3.5 py-1.5 bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-                                >
-                                  <MessageSquare className="w-3.5 h-3.5" />
-                                  <span>Chat Helper</span>
-                                </button>
-                              ) : (
-                                <span className="text-xs text-slate-400 font-medium px-2 py-0.5 rounded-md bg-slate-100">
-                                  Tidak Terpilih
-                                </span>
-                              )}
-                            </>
-                          ) : (
-                            <div>
-                              {isThisOfferAccepted ? (
-                                <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg">
-                                  Helper Terpilih
-                                </span>
-                              ) : isClosed ? (
-                                <span className="text-[11px] text-slate-400 font-medium">
-                                  Tidak Terpilih
-                                </span>
-                              ) : (
-                                <span className="text-xs text-slate-400 font-medium">
-                                  Diajukan {offer.submittedAt || "Tadi"}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                      </div>
-                    );
-                  })
+              <Link
+                href={`/profile/${request.requesterId || request.requester?.id || "user"}`}
+                className="flex items-center gap-3.5 group/requester hover:opacity-95 transition cursor-pointer"
+                title={`Lihat profil lengkap ${request.requester?.name || request.userName || "Peminta"}`}
+              >
+                {request.requester?.avatar && !request.requester.avatar.includes("images.unsplash.com") && !request.requester.avatar.includes("dicebear.com") ? (
+                  <img
+                    src={request.requester.avatar}
+                    alt={request.requester?.name || request.userName || "Peminta"}
+                    className="w-12 h-12 rounded-full object-cover border border-slate-200 group-hover/requester:border-[#1683FF] shrink-0 transition"
+                  />
                 ) : (
-                  <div className="text-center py-10 px-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                    <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                    <h4 className="text-xs sm:text-sm font-bold text-slate-800">Belum Ada Ajuan Proposal</h4>
-                    <p className="text-xs text-slate-500 mt-0.5 max-w-sm mx-auto">
-                      Jadilah yang pertama mengajukan bantuan untuk tugas ini.
-                    </p>
-                    {!isOwner && !isClosed && (
-                      <Link
-                        href={`/bantuan/${request.id}/ajukan`}
-                        className="inline-block mt-3 px-4 py-2 bg-[#1683FF] hover:bg-[#0F6FE5] text-white text-xs font-bold rounded-xl transition shadow-xs"
-                      >
-                        Ajukan Bantuan Sekarang
-                      </Link>
-                    )}
+                  <div className="w-12 h-12 rounded-full bg-linear-to-br from-[#1683FF] to-[#0E5FCC] text-white flex items-center justify-center font-bold text-base shrink-0 shadow-2xs group-hover/requester:ring-2 group-hover/requester:ring-[#1683FF]/30 transition">
+                    {((request.requester?.name || request.userName || "P").trim()[0] || "P").toUpperCase()}
                   </div>
                 )}
+                <div className="min-w-0">
+                  <h4 className="font-bold text-sm text-slate-900 group-hover/requester:text-[#1683FF] transition truncate">
+                    {request.requester?.name || request.userName || "Pengguna Bantuin"}
+                  </h4>
+                  <p className="text-xs text-slate-500 font-medium">
+                    {request.requester?.role || "Pengguna Terverifikasi"}
+                  </p>
+                  <div className="flex items-center gap-1.5 text-xs text-slate-600 font-medium mt-1">
+                    <span className="flex items-center gap-1 text-slate-800 font-bold">
+                      <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                      {Number(request.requester?.rating || request.userRating || 5.0).toFixed(1)}
+                    </span>
+                    {(request.requester?.campus || request.locationName || currentUser?.campusName) && (
+                      <>
+                        <span className="text-slate-300">•</span>
+                        <span className="text-slate-500 truncate max-w-[150px]">
+                          {request.requester?.campus && request.requester.campus !== "Universitas Indonesia"
+                            ? request.requester.campus
+                            : (request.locationName ? request.locationName.split(",").slice(1, 3).join(", ").trim() : (currentUser?.campusName || "Bekasi"))}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </Link>
+            </div>
+
+            {/* Desktop Escrow Safety Notice */}
+            <div className="p-4 rounded-2xl bg-slate-50/80 border border-slate-200/80 flex items-start gap-3">
+              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <div className="text-xs leading-relaxed">
+                <span className="font-bold text-slate-900 block">Jaminan Keamanan 100%</span>
+                <p className="text-slate-500 text-[11px] mt-0.5">
+                  Dana disimpan di sistem escrow Bantuin hingga tugas dinyatakan selesai secara resmi oleh kedua belah pihak.
+                </p>
               </div>
             </div>
 
           </div>
+
         </div>
       </main>
+
+      {/* 4. STICKY FLOATING BOTTOM ACTION BAR ON MOBILE (NEVER GET LOST SCROLLING) */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200/90 px-4 py-3 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
+            Budget Imbalan
+          </span>
+          <span className="text-base font-black text-[#1683FF] leading-none block mt-0.5 truncate">
+            {request.isVoluntary ? "Sukarela" : formatIDR(request.rewardAmount)}
+          </span>
+        </div>
+
+        <div className="shrink-0 flex items-center gap-2">
+          {isCancelled ? (
+            <span className="px-3.5 py-2 bg-rose-50 text-rose-700 rounded-xl text-xs font-bold border border-rose-200">
+              Tugas Dibatalkan
+            </span>
+          ) : isClosed && !hasUserOffered && !isOwner ? (
+            <span className="px-3.5 py-2 bg-amber-50 text-amber-800 rounded-xl text-xs font-bold border border-amber-200">
+              Tugas Ditutup
+            </span>
+          ) : !isOwner ? (
+            hasUserOffered ? (
+              isMyOfferAccepted && request.status !== "in_progress" && request.status !== "completed" ? (
+                <button
+                  type="button"
+                  disabled={isStartingWork}
+                  onClick={() => handleStartWork(myOffer)}
+                  className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isStartingWork ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5 fill-white" />}
+                  <span>Mulai Kerjakan</span>
+                </button>
+              ) : isMyOfferAccepted ? (
+                <button
+                  type="button"
+                  onClick={() => handleOpenChat(myOffer)}
+                  className="px-4 py-2 bg-[#1683FF] text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  <span>Chat Peminta</span>
+                </button>
+              ) : isMyOfferRejected ? (
+                <span className="px-3 py-2 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold">
+                  Tidak Terpilih
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleOpenChat(myOffer)}
+                  className="px-3.5 py-2 bg-blue-50 text-[#1683FF] border border-blue-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Lamaran Terkirim</span>
+                </button>
+              )
+            ) : (
+              <Link
+                href={`/bantuan/${request.id}/ajukan`}
+                className="px-5 py-2.5 bg-[#1683FF] hover:bg-[#0F6FE5] text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 active:scale-95 transition"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Bantu Sekarang</span>
+              </Link>
+            )
+          ) : (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveMobileTab("pelamar");
+                  window.scrollTo({ top: 200, behavior: "smooth" });
+                }}
+                className="px-3.5 py-2 bg-[#1683FF] text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Lihat {offersList.length} Pelamar</span>
+              </button>
+              {!isClosed && (
+                <button
+                  type="button"
+                  onClick={() => setShowCancelModal(true)}
+                  className="p-2 rounded-xl border border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100 transition cursor-pointer"
+                  title="Batalkan Tugas"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Modal Lightbox Perbesar Foto */}
       {selectedPhotoModal && (

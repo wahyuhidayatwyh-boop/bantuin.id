@@ -40,29 +40,17 @@ export async function POST(req) {
       );
     }
 
-    // 3. Susun data user
-    const userPayload = {
-      id: profile.id,
-      email: profile.email,
-      fullName: profile.fullName,
-      phone: profile.phoneNumber,
-      phoneNumber: profile.phoneNumber,
-      role: profile.accountRole || "user",
-      isPartner: profile.isPartner || false,
-      isAdmin: profile.isAdmin || false,
-      storeName: profile.partnerBusinessName || "",
-      campusName: profile.campusName || "Universitas Indonesia",
-      address: profile.partnerAddress || profile.campusName || "",
-      avatarUrl: profile.avatarUrl && !profile.avatarUrl.includes("images.unsplash.com") ? profile.avatarUrl : null,
-      verificationStatus: profile.verificationStatus || "unverified",
-      authProvider: profile.authProvider || "local",
-      ratingAvg: Number(profile.ratingAvg) || 5.0,
-      completedHelpsCount: profile.completedHelpsCount || 0,
-      reliabilityScore: profile.reliabilityScore || 100,
-      createdAt: profile.createdAt,
-    };
+    // 3. Tolak jika akun ditangguhkan (suspended)
+    if (profile.verificationStatus === "suspended") {
+      const { suspendedResponse } = await import("@/lib/auth/session");
+      return suspendedResponse(profile);
+    }
 
-    // 4. Generate sepasang token baru (Access Token + Refresh Token)
+    // 4. Susun data user secara konsisten
+    const { buildUserPayload } = await import("@/lib/auth/session");
+    const userPayload = buildUserPayload(profile);
+
+    // 5. Generate sepasang token baru (Access Token + Refresh Token)
     const tokens = generateTokens(userPayload);
 
     return NextResponse.json({
